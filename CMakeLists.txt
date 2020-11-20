@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.17)
 
 project(ray-tracer)
 
+add_subdirectory(libs/tinyobjloader)
+
 add_executable(ray-tracer)
 
 set_target_properties(ray-tracer
@@ -42,6 +44,9 @@ target_sources(ray-tracer
 
         include/Bounds.h
         src/Bounds.cpp
+
+        include/Ray.h
+        src/Ray.cpp
 )
 
 target_include_directories(ray-tracer
@@ -49,7 +54,7 @@ target_include_directories(ray-tracer
         include/
 )
 
-# target_link_libraries(ray-tracer
-#     PRIVATE
-#         libpng
-# )
+target_link_libraries(ray-tracer
+    PRIVATE
+        tinyobjloader
+)

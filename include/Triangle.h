@@ -9,7 +9,9 @@ struct Triangle
     Point b;
     Point c;
     Point center;
+    Point normal;
 
+    Triangle() = default;
     Triangle(Point ia, Point ib, Point ic);
 
     Limits getLimits(Axis axis) const;

@@ -49,7 +49,7 @@ std::shared_ptr<Node> generateTree(const std::vector<Triangle>& triangles, Axis 
     // everything < median goes in left, > median goes right, if equal
     // create Node for left and right
 
-    std::cout << "generateTree : " << triangles.size() << " tris, axis: " << static_cast<int>(axis) << std::endl;
+    // std::cout << "generateTree : " << triangles.size() << " tris, axis: " << static_cast<int>(axis) << std::endl;
 
     std::shared_ptr<Node> node = std::make_shared<Node>();
     node->axis = axis;
@@ -90,13 +90,13 @@ std::shared_ptr<Node> generateTree(const std::vector<Triangle>& triangles, Axis 
 
         if (leftTriangles.size() > 0)
         {
-            std::cout << "generateTree : left" << std::endl;
+            // std::cout << "generateTree : left" << std::endl;
             node->left = generateTree(leftTriangles, nextAxis(axis));
         }
 
         if (rightTriangles.size() > 0)
         {
-            std::cout << "generateTree : right" << std::endl;
+            // std::cout << "generateTree : right" << std::endl;
             node->right = generateTree(rightTriangles, nextAxis(axis));
         }
 
@@ -125,7 +125,7 @@ void rebalanceNode(std::shared_ptr<Node> node)
 {
     if (node->page->contents.size() >= 2)
     {
-        std::cout << "Overflow, redistribute" << std::endl;
+        // std::cout << "Overflow, redistribute" << std::endl;
 
 		node->left = std::make_shared<Node>();
 		node->left->depth = node->depth + 1;
@@ -138,7 +138,7 @@ void rebalanceNode(std::shared_ptr<Node> node)
         std::vector<Triangle> contents = node->page->contents;
 		node->page = nullptr;
 
-        std::cout << "Re-adding triangles" << std::endl;
+        // std::cout << "Re-adding triangles" << std::endl;
 
         for (const auto& triangle : contents)
         {
@@ -222,7 +222,7 @@ void addTriangleToNode(const Triangle& newTriangle, std::shared_ptr<Node> node)
         return;
     }
 
-    std::cout << "Add triangle to page" << std::endl;
+    // std::cout << "Add triangle to page" << std::endl;
     currentNode->page->contents.push_back(newTriangle);
 
     recalculatePivot(currentNode);
@@ -280,6 +280,7 @@ void fetchTrianglesIntersectingBoundsFromNode(const Bounds& bounds, std::shared_
 {
     if (node->bounds.intersects(bounds))
     {
+
         if (node->page)
         {
             results.insert(results.end(), node->page->contents.begin(), node->page->contents.end());
@@ -302,6 +303,42 @@ std::vector<Triangle> TriangleTree::fetchTrianglesIntersectingBounds(const Bound
     std::vector<Triangle> results;
 
     fetchTrianglesIntersectingBoundsFromNode(bounds, m_root, results);
+
+    return results;
+}
+
+void fetchTrianglesIntersectingRayFromNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Triangle>& results)
+{
+    if (rayIntersectsBounds(ray, node->bounds))
+    {
+        if (node->page)
+        {
+            for (const auto& triangle : node->page->contents)
+            {
+                if (rayIntersectsTriangle(ray, triangle))
+                {
+                    results.push_back(triangle);
+                }
+            }
+        }
+
+        if (node->left)
+        {
+            fetchTrianglesIntersectingRayFromNode(ray, node->left, results);
+        }
+
+        if (node->right)
+        {
+            fetchTrianglesIntersectingRayFromNode(ray, node->right, results);
+        }
+    }
+}
+
+std::vector<Triangle> TriangleTree::fetchTrianglesIntersectingRay(const Ray& ray) const
+{
+    std::vector<Triangle> results;
+
+    fetchTrianglesIntersectingRayFromNode(ray, m_root, results);
 
     return results;
 }

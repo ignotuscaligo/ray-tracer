@@ -84,6 +84,11 @@ Limits Bounds::getLimits(Axis axis) const
     }
 }
 
+Limits Bounds::operator[](Axis axis) const
+{
+    return getLimits(axis);
+}
+
 bool Bounds::contains(const Point& point) const
 {
     return x.contains(point.x)

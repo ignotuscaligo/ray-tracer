@@ -28,6 +28,7 @@ struct Bounds
 
     void extend(Limits limits, Axis axis);
     Limits getLimits(Axis axis) const;
+    Limits operator[](Axis axis) const;
     bool contains(const Point& point) const;
     bool intersects(const Bounds& other) const;
 

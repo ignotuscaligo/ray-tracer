@@ -2,6 +2,7 @@
 
 #include "Point.h"
 #include "Triangle.h"
+#include "Ray.h"
 
 #include <memory>
 #include <vector>
@@ -33,6 +34,7 @@ public:
     void print();
     std::shared_ptr<Node> root();
     std::vector<Triangle> fetchTrianglesIntersectingBounds(const Bounds& bounds) const;
+    std::vector<Triangle> fetchTrianglesIntersectingRay(const Ray& Ray) const;
 
 private:
     std::shared_ptr<Node> m_root;
