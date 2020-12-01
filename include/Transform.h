@@ -8,4 +8,6 @@ struct Transform
     Vector position;
     Quaternion rotation;
     Vector scale;
+
+    Vector forward() const;
 };

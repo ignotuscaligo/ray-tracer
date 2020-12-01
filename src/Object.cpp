@@ -7,6 +7,30 @@ Object::Object(const std::string& iname)
 {
 }
 
+Vector Object::position() const
+{
+    if (parent)
+    {
+        return parent->position() + (parent->rotation() * transform.position);
+    }
+    else
+    {
+        return transform.position;
+    }
+}
+
+Quaternion Object::rotation() const
+{
+    if (parent)
+    {
+        return parent->rotation() * transform.rotation;
+    }
+    else
+    {
+        return transform.rotation;
+    }
+}
+
 void Object::setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent)
 {
     if (child->parent == parent)

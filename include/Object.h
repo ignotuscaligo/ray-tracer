@@ -16,5 +16,8 @@ struct Object
     Object() = default;
     Object(const std::string& iname);
 
+    Vector position() const;
+    Quaternion rotation() const;
+
     static void setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent);
 };
