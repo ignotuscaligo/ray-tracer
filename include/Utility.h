@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Point.h"
+#include "Vector.h"
 #include "Triangle.h"
 
-void printPoint(const Point& point);
+void printVector(const Vector& vector);
 void printTriangle(const Triangle& triangle);
 
 float radians(float degrees);

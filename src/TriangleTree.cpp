@@ -154,7 +154,7 @@ void recalculatePivot(std::shared_ptr<Node> node)
         return;
     }
 
-    Point center;
+    Vector center;
 
     for (const auto& triangle : node->page->contents)
     {
@@ -254,7 +254,7 @@ void printNode(const std::string& name, std::shared_ptr<Node> node)
             for (const auto& triangle : node->page->contents)
             {
 				std::cout << name << "(" << limits.min << ", " << limits.max << "): ";
-				printPoint(triangle.center);
+				printVector(triangle.center);
 				std::cout << std::endl;
             }
         }

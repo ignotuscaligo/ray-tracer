@@ -89,11 +89,11 @@ Limits Bounds::operator[](Axis axis) const
     return getLimits(axis);
 }
 
-bool Bounds::contains(const Point& point) const
+bool Bounds::contains(const Vector& vector) const
 {
-    return x.contains(point.x)
-        && y.contains(point.y)
-        && z.contains(point.z);
+    return x.contains(vector.x)
+        && y.contains(vector.y)
+        && z.contains(vector.z);
 }
 
 bool Bounds::intersects(const Bounds& other) const

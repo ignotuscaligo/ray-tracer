@@ -6,7 +6,7 @@
 #include <limits>
 #include <iostream>
 
-Ray::Ray(Point iorigin, Point idirection)
+Ray::Ray(Vector iorigin, Vector idirection)
     : origin(iorigin)
     , direction(idirection)
 {
@@ -57,11 +57,11 @@ bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds)
 
 bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
 {
-    Point ab = triangle.b - triangle.a;
-    Point ac = triangle.c - triangle.a;
-    Point qp = -ray.direction;
+    Vector ab = triangle.b - triangle.a;
+    Vector ac = triangle.c - triangle.a;
+    Vector qp = -ray.direction;
 
-    Point n = cross(ab, ac);
+    Vector n = cross(ab, ac);
 
     float d = dot(qp, n);
 
@@ -70,7 +70,7 @@ bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
         return false;
     }
 
-    Point ap = ray.origin - triangle.a;
+    Vector ap = ray.origin - triangle.a;
     float t = dot(ap, n);
 
     if (t < 0.0f)
@@ -78,7 +78,7 @@ bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
         return false;
     }
 
-    Point e = cross(qp,ap);
+    Vector e = cross(qp,ap);
     float v = dot(ac, e);
     if (v < 0.0f || v > d)
     {

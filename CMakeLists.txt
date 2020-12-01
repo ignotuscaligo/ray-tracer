@@ -30,8 +30,8 @@ target_sources(ray-tracer
         include/PngWriter.h
         src/PngWriter.cpp
 
-        include/Point.h
-        src/Point.cpp
+        include/Vector.h
+        src/Vector.cpp
 
         include/Triangle.h
         src/Triangle.cpp
@@ -47,6 +47,15 @@ target_sources(ray-tracer
 
         include/Ray.h
         src/Ray.cpp
+
+        include/Object.h
+        src/Object.cpp
+
+        include/Transform.h
+        src/Transform.cpp
+
+        include/Quaternion.h
+        src/Quaternion.cpp
 )
 
 target_include_directories(ray-tracer

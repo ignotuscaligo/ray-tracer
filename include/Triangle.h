@@ -1,24 +1,24 @@
 #pragma once
 
 #include "Bounds.h"
-#include "Point.h"
+#include "Vector.h"
 
 struct Triangle
 {
-    Point a;
-    Point b;
-    Point c;
-    Point center;
-    Point normal;
+    Vector a;
+    Vector b;
+    Vector c;
+    Vector center;
+    Vector normal;
 
     Triangle() = default;
-    Triangle(Point ia, Point ib, Point ic);
+    Triangle(Vector ia, Vector ib, Vector ic);
 
     Limits getLimits(Axis axis) const;
     Bounds getBounds() const;
 };
 
-static Triangle operator+(const Triangle& lhs, const Point& rhs)
+static Triangle operator+(const Triangle& lhs, const Vector& rhs)
 {
 	return Triangle(
 		lhs.a + rhs,

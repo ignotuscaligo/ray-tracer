@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <initializer_list>
 
-Triangle::Triangle(Point ia, Point ib, Point ic)
+Triangle::Triangle(Vector ia, Vector ib, Vector ic)
     : a(ia)
     , b(ib)
     , c(ic)
@@ -12,8 +12,8 @@ Triangle::Triangle(Point ia, Point ib, Point ic)
         (a.y + b.y + c.y) / 3.0f,
         (a.z + b.z + c.z) / 3.0f)
 {
-    Point ab = b - a;
-    Point ac = c - a;
+    Vector ab = b - a;
+    Vector ac = c - a;
     normal = cross(ab, ac);
     normal.normalize();
 }

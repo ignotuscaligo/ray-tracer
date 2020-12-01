@@ -5,7 +5,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-void printPoint(const Point& point)
+void printVector(const Vector& point)
 {
     std::cout << "(" << point.x << ", " << point.y << ", " << point.z << ")";
 }
@@ -13,11 +13,11 @@ void printPoint(const Point& point)
 void printTriangle(const Triangle& triangle)
 {
     std::cout << "<";
-    printPoint(triangle.a);
+    printVector(triangle.a);
     std::cout << ", ";
-    printPoint(triangle.b);
+    printVector(triangle.b);
     std::cout << ", ";
-    printPoint(triangle.c);
+    printVector(triangle.c);
     std::cout << ">";
 }
 

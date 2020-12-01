@@ -1,16 +1,16 @@
 #pragma once
 
-#include "Point.h"
+#include "Vector.h"
 #include "Bounds.h"
 #include "Triangle.h"
 
 struct Ray
 {
-    Point origin;
-    Point direction;
+    Vector origin;
+    Vector direction;
 
     Ray() = default;
-    Ray(Point iorigin, Point idirection);
+    Ray(Vector iorigin, Vector idirection);
 };
 
 bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds);

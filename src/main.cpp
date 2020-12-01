@@ -5,11 +5,14 @@
 #include "PngWriter.h"
 #include "TriangleTree.h"
 #include "Utility.h"
+#include "Object.h"
+#include "Quaternion.h"
 
 #include <tiny_obj_loader.h>
 
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <string>
 #include <limits>
@@ -34,95 +37,20 @@ int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
 
-    // std::cout << "Running TriangleTree test" << std::endl;
+    std::shared_ptr<Object> root = std::make_unique<Object>("Root");
+    std::shared_ptr<Object> knot = std::make_unique<Object>("Knot");
+    std::shared_ptr<Object> camera = std::make_unique<Object>("Camera");
 
-    // Triangle xyTriangle{
-    //     {-0.5f, -0.5f, 0.0f},
-    //     {0.5f, -0.5f, 0.0f},
-    //     {0.0f, 0.5f, 0.0f}
-    // };
+    Object::setParent(knot, root);
+    Object::setParent(camera, root);
 
-    // Triangle zyTriangle{
-    //     {0.0f, -0.5f, -0.5f},
-    //     {0.0f, -0.5f, 0.5f},
-    //     {0.0f, 0.5f, 0.0f}
-    // };
+    Quaternion quat0 = Quaternion::fromPitchYawRoll(1.5707963267f, 0, 0);
+    Quaternion quat1 = Quaternion::fromPitchYawRoll(0, 1.5707963267f, 0);
+    Quaternion quat2 = Quaternion::fromPitchYawRoll(0, 0, 1.5707963267f);
 
-    // Triangle xzTriangle{
-    //     {0.0f, -0.5f, -0.5f},
-    //     {0.0f, 0.5f, -0.5f},
-    //     {0.0f, 0.0f, 0.5f}
-    // };
-
-    // std::vector<Triangle> triangles = {{
-    //     xyTriangle + Point(-2, 2, 0),
-    //     xyTriangle + Point(-2, -2, 0),
-    //     xyTriangle + Point(0, 0, 0),
-    //     xyTriangle + Point(2, 2, 0),
-    //     xyTriangle + Point(2, -2, 0)
-    // }};
-
-    // std::cout << "input triangles:" << std::endl;
-    // for (const auto& triangle : triangles)
-    // {
-    //     printTriangle(triangle);
-    //     std::cout << std::endl;
-    // }
-
-    // TriangleTree directTree = TriangleTree(triangles);
-    // directTree.print();
-
-    // Bounds bounds = directTree.root()->bounds;
-
-    // std::cout << "root bounds:" << std::endl;
-    // std::cout << "X: " << bounds.x.min << ", " << bounds.x.max << std::endl;
-    // std::cout << "Y: " << bounds.y.min << ", " << bounds.y.max << std::endl;
-    // std::cout << "Z: " << bounds.z.min << ", " << bounds.z.max << std::endl;
-
-    // Bounds testBounds{
-    //     {0.0f, 2.0f},
-    //     {-2.0f, 2.0f},
-    //     {-1.0f, 1.0f},
-    // };
-
-    // std::vector<Triangle> fetchedTriangles = directTree.fetchTrianglesIntersectingBounds(testBounds);
-
-    // std::cout << "fetched triangles:" << std::endl;
-    // for (const auto& triangle : fetchedTriangles)
-    // {
-    //     printTriangle(triangle);
-    //     std::cout << std::endl;
-    // }
-
-    // TriangleTree tree;
-
-    // tree.addTriangle(xyTriangle + Point(-2, 0, 0));
-
-    // tree.print();
-
-    // tree.addTriangle(xyTriangle + Point(-1, 0, 0));
-
-    // tree.print();
-
-    // tree.addTriangle(xyTriangle + Point(0, 0, 0));
-
-    // tree.print();
-
-    // tree.addTriangle(xyTriangle + Point(1, 0, 0));
-
-    // tree.print();
-
-    // tree.addTriangle(xyTriangle + Point(2, 0, 0));
-
-    // tree.print();
-
-    // tree.addTriangle(xyTriangle + Point(-1, -2, 0));
-    // tree.addTriangle(xyTriangle + Point(-1, -1, 0));
-    // tree.addTriangle(xyTriangle + Point(-1, 0, 0));
-    // tree.addTriangle(xyTriangle + Point(-1, 1, 0));
-    // tree.addTriangle(xyTriangle + Point(-1, 2, 0));
-
-    // tree.print();
+    std::cout << "quat0: " << quat0.x << ", " << quat0.y << ", " << quat0.z << ", " << quat0.w << std::endl;
+    std::cout << "quat1: " << quat1.x << ", " << quat1.y << ", " << quat1.z << ", " << quat1.w << std::endl;
+    std::cout << "quat2: " << quat2.x << ", " << quat2.y << ", " << quat2.z << ", " << quat2.w << std::endl;
 
     std::cout << "OBJ loader test" << std::endl;
 
@@ -149,7 +77,7 @@ int main(int argc, char** argv)
     }
 
     std::vector<Triangle> objTriangles;
-    std::array<Point, 3> points;
+    std::array<Vector, 3> points;
 
     if (result)
     {
@@ -161,14 +89,14 @@ int main(int argc, char** argv)
         {
             std::cout << "num_face_vertices: " << shape.mesh.num_face_vertices.size() << std::endl;
 
-            size_t indexOffset = 0;
+            int indexOffset = 0;
 
             for (const int vertexCount : shape.mesh.num_face_vertices)
             {
-                for (size_t v = 0; v < vertexCount; ++v)
+                for (int v = 0; v < vertexCount; ++v)
                 {
                     tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-                    size_t vertexIndex = 3 * idx.vertex_index;
+                    int vertexIndex = 3 * idx.vertex_index;
                     points[v].x = attrib.vertices[vertexIndex + 0];
                     points[v].y = attrib.vertices[vertexIndex + 1];
                     points[v].z = attrib.vertices[vertexIndex + 2];
@@ -202,12 +130,16 @@ int main(int argc, char** argv)
 
     Image image(1024, 1024);
     Pixel workingPixel;
-    Point origin{0.0f, 0.0f, -70.0f};
+    Vector origin{0.0f, 0.0f, -70.0f};
 
     float pixelCount = image.width() * image.height();
 
     float horizontalFov = 80.0f;
     float verticalFov = 80.0f;
+
+    std::chrono::time_point renderStart = std::chrono::system_clock::now();
+    int pixelMinDuration = 999;
+    int pixelMaxDuration = 0;
 
     for (int y = 0; y < image.height(); ++y)
     {
@@ -215,9 +147,10 @@ int main(int argc, char** argv)
 
         for (int x = 0; x < image.width(); ++x)
         {
+            std::chrono::time_point pixelStart = std::chrono::system_clock::now();
             float angleX = (horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov);
 
-            Point direction{
+            Vector direction{
                 std::sin(radians(angleX)),
                 std::sin(radians(angleY)),
                 std::cos(radians(angleX))
@@ -243,7 +176,7 @@ int main(int argc, char** argv)
                     }
                 }
 
-                const Point& normal = closestTriangle.normal;
+                const Vector& normal = closestTriangle.normal;
                 workingPixel.red = std::abs(normal.x) * 255;
                 workingPixel.green = std::abs(normal.y) * 255;
                 workingPixel.blue = std::abs(normal.z) * 255;
@@ -256,8 +189,22 @@ int main(int argc, char** argv)
             }
 
             image.setPixel(x, y, workingPixel);
+
+            std::chrono::time_point pixelEnd = std::chrono::system_clock::now();
+            int pixelDuration = std::chrono::duration_cast<std::chrono::microseconds>(pixelEnd - pixelStart).count();
+            pixelMinDuration = std::min(pixelDuration, pixelMinDuration);
+            pixelMaxDuration = std::max(pixelDuration, pixelMaxDuration);
         }
     }
+
+    std::chrono::time_point renderEnd = std::chrono::system_clock::now();
+    std::chrono::microseconds renderTime = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
+
+    std::cout << "Render time:" << std::endl;
+    std::cout << "Total:   " << renderTime.count() / 1000 << " ms" << std::endl;
+    std::cout << "Average: " << renderTime.count() / pixelCount << " us" << std::endl;
+    std::cout << "Minimum: " << pixelMinDuration << " us" << std::endl;
+    std::cout << "Maximum: " << pixelMaxDuration << " us" << std::endl;
 
     writeImage("test.png", image, "test");
 

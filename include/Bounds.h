@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Point.h"
+#include "Vector.h"
 
 struct Limits
 {
@@ -29,7 +29,7 @@ struct Bounds
     void extend(Limits limits, Axis axis);
     Limits getLimits(Axis axis) const;
     Limits operator[](Axis axis) const;
-    bool contains(const Point& point) const;
+    bool contains(const Vector& vector) const;
     bool intersects(const Bounds& other) const;
 
     Bounds operator=(const Bounds& rhs);
