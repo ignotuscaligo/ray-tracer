@@ -217,45 +217,6 @@ int main(int argc, char** argv)
                     workingPixel.blue = 0;
                 }
 
-                // std::vector<Triangle> hitTriangles = objTree.fetchTrianglesIntersectingRay({cameraPosition, direction});
-
-                // if (hitTriangles.size() > 0)
-                // {
-                //     Triangle closestTriangle;
-                //     float lowestDistance = std::numeric_limits<float>::max();
-
-                //     for (const auto& triangle : hitTriangles)
-                //     {
-                //         float distance = (triangle.center - cameraPosition).magnitude();
-
-                //         if (distance < lowestDistance)
-                //         {
-                //             lowestDistance = distance;
-                //             closestTriangle = triangle;
-                //         }
-                //     }
-
-                //     const Vector& normal = closestTriangle.normal;
-                //     Vector delta = -direction - normal;
-                //     workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
-                //     workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
-                //     workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
-
-                //     // workingPixel.red = std::abs(normal.x) * 255;
-                //     // workingPixel.green = std::abs(normal.y) * 255;
-                //     // workingPixel.blue = std::abs(normal.z) * 255;
-
-                //     // workingPixel.red = std::abs(delta.x * 0.5f) * 255;
-                //     // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
-                //     // workingPixel.blue = std::abs(delta.z * 0.5f) * 255;
-                // }
-                // else
-                // {
-                //     workingPixel.red = 0;
-                //     workingPixel.green = 0;
-                //     workingPixel.blue = 0;
-                // }
-
                 image.setPixel(x, y, workingPixel);
 
                 std::chrono::time_point pixelEnd = std::chrono::system_clock::now();
