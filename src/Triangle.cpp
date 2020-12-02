@@ -14,7 +14,7 @@ Triangle::Triangle(Vector ia, Vector ib, Vector ic)
 {
     Vector ab = b - a;
     Vector ac = c - a;
-    normal = cross(ab, ac);
+    normal = Vector::cross(ab, ac);
     normal.normalize();
 }
 

@@ -63,9 +63,9 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
     Vector ac = triangle.c - triangle.a;
     Vector qp = -ray.direction;
 
-    Vector n = cross(ab, ac);
+    Vector n = Vector::cross(ab, ac);
 
-    float d = dot(qp, n);
+    float d = Vector::dot(qp, n);
 
     if (d <= 0.0f)
     {
@@ -73,21 +73,21 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
     }
 
     Vector ap = ray.origin - triangle.a;
-    float t = dot(ap, n);
+    float t = Vector::dot(ap, n);
 
     if (t < 0.0f)
     {
         return std::nullopt;
     }
 
-    Vector e = cross(qp,ap);
-    float v = dot(ac, e);
+    Vector e = Vector::cross(qp,ap);
+    float v = Vector::dot(ac, e);
     if (v < 0.0f || v > d)
     {
         return std::nullopt;
     }
 
-    float w = -dot(ab, e);
+    float w = -Vector::dot(ab, e);
     if (w < 0.0f || v + w > d)
     {
         return std::nullopt;

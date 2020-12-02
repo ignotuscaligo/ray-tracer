@@ -27,6 +27,9 @@ struct Vector
 
     float magnitude() const;
     Vector normalize();
+
+    static Vector cross(const Vector& a, const Vector& b);
+    static float dot(const Vector& a, const Vector& b);
 };
 
 static Vector operator+(const Vector& lhs, const Vector& rhs)
@@ -73,6 +76,3 @@ static Vector operator*(const float& lhs, const Vector& rhs)
         rhs.z * lhs
     );
 }
-
-Vector cross(const Vector& a, const Vector& b);
-float dot(const Vector& a, const Vector& b);

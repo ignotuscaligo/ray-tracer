@@ -1,5 +1,6 @@
 #include "Vector.h"
 
+#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -83,7 +84,7 @@ Vector Vector::normalize()
     return *this;
 }
 
-Vector cross(const Vector& a, const Vector& b)
+Vector Vector::cross(const Vector& a, const Vector& b)
 {
     return Vector(
         (a.y * b.z) - (a.z * b.y),
@@ -92,7 +93,7 @@ Vector cross(const Vector& a, const Vector& b)
     );
 }
 
-float dot(const Vector& a, const Vector& b)
+float Vector::dot(const Vector& a, const Vector& b)
 {
     return (a.x * b.x) + (a.y * b.y) + (a.z * b.z);
 }

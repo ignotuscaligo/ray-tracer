@@ -20,7 +20,7 @@
 
 void writeImage(const std::string& filename, Image& image, const std::string& title)
 {
-    std::cout << "writeImage " << filename << std::endl;
+    std::cout << "Write image " << filename << std::endl;
     PngWriter writer(filename);
 
     if (!writer.valid())
@@ -42,12 +42,14 @@ int main(int argc, char** argv)
     std::shared_ptr<Object> knot = std::make_unique<Object>("Knot");
     std::shared_ptr<Object> cameraPivot = std::make_unique<Object>("CameraPivot");
     std::shared_ptr<Object> camera = std::make_unique<Object>("Camera");
+    std::shared_ptr<Object> sun = std::make_unique<Object>("Sun");
 
     Object::setParent(knot, root);
     Object::setParent(cameraPivot, root);
     Object::setParent(camera, cameraPivot);
+    Object::setParent(sun, root);
 
-    std::cout << "OBJ loader test" << std::endl;
+    std::cout << "Loading OBJ" << std::endl;
 
     std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
 
@@ -83,8 +85,6 @@ int main(int argc, char** argv)
 
         for (const auto& shape : shapes)
         {
-            std::cout << "num_face_vertices: " << shape.mesh.num_face_vertices.size() << std::endl;
-
             int indexOffset = 0;
 
             for (const int vertexCount : shape.mesh.num_face_vertices)
@@ -121,25 +121,17 @@ int main(int argc, char** argv)
 
     std::cout << "Loaded " << objTriangles.size() << " triangles" << std::endl;
 
-    std::cout << "Generating triangle tree from OBJ" << std::endl;
-
-    TriangleTree objTree = TriangleTree(objTriangles);
-
+    std::cout << "Generating mesh from OBJ" << std::endl;
     MeshVolume knotMesh{objTriangles};
-
-    Bounds bounds = objTree.root()->bounds;
-
-    std::cout << "root bounds:" << std::endl;
-    std::cout << "X: " << bounds.x.min << ", " << bounds.x.max << std::endl;
-    std::cout << "Y: " << bounds.y.min << ", " << bounds.y.max << std::endl;
-    std::cout << "Z: " << bounds.z.min << ", " << bounds.z.max << std::endl;
-
-    std::cout << "Running Image test" << std::endl;
 
     Image image(512, 512);
     Pixel workingPixel;
 
     camera->transform.position = {0.0f, 0.0f, -70.0f};
+
+    sun->transform.rotation = Quaternion::fromPitchYawRoll(45.0f, 0.0f, 0.0f);
+
+    Vector sunDirection = -sun->transform.forward();
 
     int startFrame = 0;
     int frameCount = 36;
@@ -186,10 +178,16 @@ int main(int argc, char** argv)
 
                 if (hit)
                 {
-                    int distance = std::min(std::max(0.0f, (hit->distance - 30.0f) / 70.0f), 1.0f) * 255;
-                    workingPixel.red = distance;
-                    workingPixel.green = distance;
-                    workingPixel.blue = distance;
+                    int sunCross = std::max(0.0f, Vector::dot(sunDirection, hit->normal)) * 255;
+
+                    workingPixel.red = sunCross;
+                    workingPixel.green = sunCross;
+                    workingPixel.blue = sunCross;
+
+                    // int distance = std::min(std::max(0.0f, (hit->distance - 30.0f) / 70.0f), 1.0f) * 255;
+                    // workingPixel.red = distance;
+                    // workingPixel.green = distance;
+                    // workingPixel.blue = distance;
 
                     // workingPixel.red = std::abs(hit->normal.x) * 255;
                     // workingPixel.green = std::abs(hit->normal.y) * 255;
@@ -243,7 +241,7 @@ int main(int argc, char** argv)
         std::cout << "Minimum: " << pixelMinDuration << " us" << std::endl;
         std::cout << "Maximum: " << pixelMaxDuration << " us" << std::endl;
 
-        writeImage("distance_test_0." + std::to_string(frame) + ".png", image, "test");
+        writeImage("sun_test_0." + std::to_string(frame) + ".png", image, "test");
     }
 
     std::cout << "Goodbye!" << std::endl;
