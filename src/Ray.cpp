@@ -99,11 +99,11 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
     w *= ood;
     float u = 1.0f - v - w;
 
-    hit.triangle = triangle;
-    hit.coords = Vector(u, v, w);
-    hit.position = hit.triangle.getPosition(hit.coords);
-    hit.normal = hit.triangle.getNormal(hit.coords).normalize();
+    Vector coords{u, v, w};
     hit.incident = ray.direction;
+    hit.position = triangle.getPosition(coords);
+    hit.normal = triangle.getNormal(coords).normalize();
+    hit.distance = (hit.position - ray.origin).magnitude();
 
     return hit;
 }

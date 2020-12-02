@@ -6,8 +6,6 @@
 #include <iostream>
 #include <string>
 
-void addTriangleToNode(const Triangle& newTriangle, std::shared_ptr<Node> node);
-
 float axisMedian(const std::vector<Triangle>& triangles, Axis axis)
 {
     size_t size = triangles.size();
@@ -121,119 +119,6 @@ TriangleTree::TriangleTree(const std::vector<Triangle>& triangles)
     m_root = generateTree(triangles, Axis::X);
 }
 
-void rebalanceNode(std::shared_ptr<Node> node)
-{
-    if (node->page->contents.size() >= 2)
-    {
-        // std::cout << "Overflow, redistribute" << std::endl;
-
-		node->left = std::make_shared<Node>();
-		node->left->depth = node->depth + 1;
-		node->left->page = std::make_unique<Page>();
-
-		node->right = std::make_shared<Node>();
-		node->right->depth = node->depth + 1;
-		node->right->page = std::make_unique<Page>();
-
-        std::vector<Triangle> contents = node->page->contents;
-		node->page = nullptr;
-
-        // std::cout << "Re-adding triangles" << std::endl;
-
-        for (const auto& triangle : contents)
-        {
-            addTriangleToNode(triangle, node);
-        }
-    }
-}
-
-void recalculatePivot(std::shared_ptr<Node> node)
-{
-    if (!node->page)
-    {
-        return;
-    }
-
-    Vector center;
-
-    for (const auto& triangle : node->page->contents)
-    {
-        center += triangle.center;
-    }
-
-    center /= static_cast<float>(node->page->contents.size());
-
-    switch (node->depth % 3)
-    {
-        case 0:
-            node->pivot = center.x;
-            break;
-
-        case 1:
-            node->pivot = center.y;
-            break;
-
-        case 2:
-            node->pivot = center.z;
-            break;
-    }
-}
-
-void addTriangleToNode(const Triangle& newTriangle, std::shared_ptr<Node> node)
-{
-    std::shared_ptr<Node> currentNode = node;
-
-    while (currentNode->page == nullptr && currentNode->left && currentNode->right)
-    {
-        float test = 0.0f;
-
-        switch (currentNode->depth % 3)
-        {
-            case 0:
-                test = newTriangle.center.x;
-                break;
-
-            case 1:
-                test = newTriangle.center.y;
-                break;
-
-            case 2:
-                test = newTriangle.center.z;
-                break;
-        }
-
-        // std::cout << test << " vs " << currentNode->pivot << std::endl;
-
-        if (test <= currentNode->pivot)
-        {
-            // std::cout << "Go down left node" << std::endl;
-            currentNode = currentNode->left;
-        }
-        else
-        {
-            // std::cout << "Go down right node" << std::endl;
-            currentNode = currentNode->right;
-        }
-    }
-
-    if (currentNode->page == nullptr)
-    {
-        // Error, reached malformed node
-        return;
-    }
-
-    // std::cout << "Add triangle to page" << std::endl;
-    currentNode->page->contents.push_back(newTriangle);
-
-    recalculatePivot(currentNode);
-    rebalanceNode(currentNode);
-}
-
-void TriangleTree::addTriangle(Triangle newTriangle)
-{
-    addTriangleToNode(newTriangle, m_root);
-}
-
 void printNode(const std::string& name, std::shared_ptr<Node> node)
 {
     if (node->left)
@@ -276,73 +161,6 @@ std::shared_ptr<Node> TriangleTree::root()
     return m_root;
 }
 
-void fetchTrianglesIntersectingBoundsFromNode(const Bounds& bounds, std::shared_ptr<Node> node, std::vector<Triangle>& results)
-{
-    if (node->bounds.intersects(bounds))
-    {
-
-        if (node->page)
-        {
-            results.insert(results.end(), node->page->contents.begin(), node->page->contents.end());
-        }
-
-        if (node->left)
-        {
-            fetchTrianglesIntersectingBoundsFromNode(bounds, node->left, results);
-        }
-
-        if (node->right)
-        {
-            fetchTrianglesIntersectingBoundsFromNode(bounds, node->right, results);
-        }
-    }
-}
-
-std::vector<Triangle> TriangleTree::fetchTrianglesIntersectingBounds(const Bounds& bounds) const
-{
-    std::vector<Triangle> results;
-
-    fetchTrianglesIntersectingBoundsFromNode(bounds, m_root, results);
-
-    return results;
-}
-
-void fetchTrianglesIntersectingRayFromNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Triangle>& results)
-{
-    if (rayIntersectsBounds(ray, node->bounds))
-    {
-        if (node->page)
-        {
-            for (const auto& triangle : node->page->contents)
-            {
-                if (rayIntersectsTriangle(ray, triangle))
-                {
-                    results.push_back(triangle);
-                }
-            }
-        }
-
-        if (node->left)
-        {
-            fetchTrianglesIntersectingRayFromNode(ray, node->left, results);
-        }
-
-        if (node->right)
-        {
-            fetchTrianglesIntersectingRayFromNode(ray, node->right, results);
-        }
-    }
-}
-
-std::vector<Triangle> TriangleTree::fetchTrianglesIntersectingRay(const Ray& ray) const
-{
-    std::vector<Triangle> results;
-
-    fetchTrianglesIntersectingRayFromNode(ray, m_root, results);
-
-    return results;
-}
-
 void castRayIntoNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Hit>& hits)
 {
     std::optional<Hit> hit;
@@ -374,9 +192,23 @@ void castRayIntoNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Hit
     }
 }
 
-std::vector<Hit> TriangleTree::castRay(const Ray& ray) const
+std::optional<Hit> TriangleTree::castRay(const Ray& ray) const
 {
     std::vector<Hit> hits;
+
     castRayIntoNode(ray, m_root, hits);
-    return hits;
+
+    float minDistance;
+    std::optional<Hit> result;
+
+    for (const auto& hit : hits)
+    {
+        if (!result || hit.distance < minDistance)
+        {
+            result = hit;
+            minDistance = hit.distance;
+        }
+    }
+
+    return result;
 }

@@ -141,11 +141,14 @@ int main(int argc, char** argv)
 
     camera->transform.position = {0.0f, 0.0f, -70.0f};
 
-    for (int frame = 0; frame < 72; ++frame)
+    int startFrame = 0;
+    int frameCount = 36;
+
+    for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
     {
         std::cout << "Rendering frame " << frame << std::endl;
 
-        cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
+        cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 10.0f), 0);
 
         Vector cameraPosition = camera->position();
         Quaternion cameraRotation = camera->rotation();
@@ -183,13 +186,18 @@ int main(int argc, char** argv)
 
                 if (hit)
                 {
+                    int distance = std::min(std::max(0.0f, (hit->distance - 30.0f) / 70.0f), 1.0f) * 255;
+                    workingPixel.red = distance;
+                    workingPixel.green = distance;
+                    workingPixel.blue = distance;
+
                     // workingPixel.red = std::abs(hit->normal.x) * 255;
                     // workingPixel.green = std::abs(hit->normal.y) * 255;
                     // workingPixel.blue = std::abs(hit->normal.z) * 255;
 
-                    workingPixel.red = (0.5f + (hit->normal.x / 2.0f)) * 255;
-                    workingPixel.green = (0.5f + (hit->normal.y / 2.0f)) * 255;
-                    workingPixel.blue = (0.5f + (hit->normal.z / 2.0f)) * 255;
+                    // workingPixel.red = (0.5f + (hit->normal.x / 2.0f)) * 255;
+                    // workingPixel.green = (0.5f + (hit->normal.y / 2.0f)) * 255;
+                    // workingPixel.blue = (0.5f + (hit->normal.z / 2.0f)) * 255;
 
                     // workingPixel.red = hit->coords.x * 255;
                     // workingPixel.green = hit->coords.y * 255;
@@ -235,7 +243,7 @@ int main(int argc, char** argv)
         std::cout << "Minimum: " << pixelMinDuration << " us" << std::endl;
         std::cout << "Maximum: " << pixelMaxDuration << " us" << std::endl;
 
-        writeImage("mesh_volume_test_2." + std::to_string(frame) + ".png", image, "test");
+        writeImage("distance_test_0." + std::to_string(frame) + ".png", image, "test");
     }
 
     std::cout << "Goodbye!" << std::endl;
