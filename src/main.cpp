@@ -1,12 +1,13 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 
 #include "Image.h"
+#include "MeshVolume.h"
+#include "Object.h"
 #include "Pixel.h"
 #include "PngWriter.h"
+#include "Quaternion.h"
 #include "TriangleTree.h"
 #include "Utility.h"
-#include "Object.h"
-#include "Quaternion.h"
 
 #include <tiny_obj_loader.h>
 
@@ -72,6 +73,7 @@ int main(int argc, char** argv)
 
     std::vector<Triangle> objTriangles;
     std::array<Vector, 3> points;
+    std::array<Vector, 3> normals;
 
     if (result)
     {
@@ -91,12 +93,22 @@ int main(int argc, char** argv)
                 {
                     tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
                     int vertexIndex = 3 * idx.vertex_index;
+                    int normalIndex = 3 * idx.normal_index;
                     points[v].x = attrib.vertices[vertexIndex + 0];
                     points[v].y = attrib.vertices[vertexIndex + 1];
                     points[v].z = attrib.vertices[vertexIndex + 2];
+
+                    normals[v].x = attrib.normals[normalIndex + 0];
+                    normals[v].y = attrib.normals[normalIndex + 1];
+                    normals[v].z = attrib.normals[normalIndex + 2];
                 }
 
-                objTriangles.emplace_back(points[0], points[1], points[2]);
+                Triangle triangle{points[0], points[1], points[2]};
+                triangle.aNormal = normals[0];
+                triangle.bNormal = normals[1];
+                triangle.cNormal = normals[2];
+
+                objTriangles.push_back(triangle);
 
                 indexOffset += vertexCount;
             }
@@ -113,6 +125,8 @@ int main(int argc, char** argv)
 
     TriangleTree objTree = TriangleTree(objTriangles);
 
+    MeshVolume knotMesh{objTriangles};
+
     Bounds bounds = objTree.root()->bounds;
 
     std::cout << "root bounds:" << std::endl;
@@ -127,11 +141,11 @@ int main(int argc, char** argv)
 
     camera->transform.position = {0.0f, 0.0f, -70.0f};
 
-    for (int frame = 0; frame < 36; ++frame)
+    for (int frame = 0; frame < 72; ++frame)
     {
         std::cout << "Rendering frame " << frame << std::endl;
 
-        cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 10.0f), 0);
+        cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
 
         Vector cameraPosition = camera->position();
         Quaternion cameraRotation = camera->rotation();
@@ -165,33 +179,32 @@ int main(int argc, char** argv)
 
                 direction = cameraRotation * direction;
 
-                std::vector<Triangle> hitTriangles = objTree.fetchTrianglesIntersectingRay({cameraPosition, direction});
+                std::optional<Hit> hit = knotMesh.castRay({cameraPosition, direction});
 
-                if (hitTriangles.size() > 0)
+                if (hit)
                 {
-                    Triangle closestTriangle;
-                    float lowestDistance = std::numeric_limits<float>::max();
+                    // workingPixel.red = std::abs(hit->normal.x) * 255;
+                    // workingPixel.green = std::abs(hit->normal.y) * 255;
+                    // workingPixel.blue = std::abs(hit->normal.z) * 255;
 
-                    for (const auto& triangle : hitTriangles)
-                    {
-                        float distance = (triangle.center - cameraPosition).magnitude();
+                    workingPixel.red = (0.5f + (hit->normal.x / 2.0f)) * 255;
+                    workingPixel.green = (0.5f + (hit->normal.y / 2.0f)) * 255;
+                    workingPixel.blue = (0.5f + (hit->normal.z / 2.0f)) * 255;
 
-                        if (distance < lowestDistance)
-                        {
-                            lowestDistance = distance;
-                            closestTriangle = triangle;
-                        }
-                    }
+                    // workingPixel.red = hit->coords.x * 255;
+                    // workingPixel.green = hit->coords.y * 255;
+                    // workingPixel.blue = hit->coords.z * 255;
 
-                    const Vector& normal = closestTriangle.normal;
-                    Vector delta = -direction - normal;
-                    workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
-                    workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
-                    workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
+                    // const Vector& normal = hit->triangle.normal;
 
-                    // workingPixel.red = std::abs(normal.x) * 255;
-                    // workingPixel.green = std::abs(normal.y) * 255;
-                    // workingPixel.blue = std::abs(normal.z) * 255;
+                    // Vector delta = -direction - normal;
+                    // workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
+                    // workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
+                    // workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
+
+                    // workingPixel.red = (0.5f + (hit->triangle.aNormal.x / 2.0f)) * 255;
+                    // workingPixel.green = (0.5f + (hit->triangle.aNormal.y / 2.0f)) * 255;
+                    // workingPixel.blue = (0.5f + (hit->triangle.aNormal.z / 2.0f)) * 255;
 
                     // workingPixel.red = std::abs(delta.x * 0.5f) * 255;
                     // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
@@ -203,6 +216,45 @@ int main(int argc, char** argv)
                     workingPixel.green = 0;
                     workingPixel.blue = 0;
                 }
+
+                // std::vector<Triangle> hitTriangles = objTree.fetchTrianglesIntersectingRay({cameraPosition, direction});
+
+                // if (hitTriangles.size() > 0)
+                // {
+                //     Triangle closestTriangle;
+                //     float lowestDistance = std::numeric_limits<float>::max();
+
+                //     for (const auto& triangle : hitTriangles)
+                //     {
+                //         float distance = (triangle.center - cameraPosition).magnitude();
+
+                //         if (distance < lowestDistance)
+                //         {
+                //             lowestDistance = distance;
+                //             closestTriangle = triangle;
+                //         }
+                //     }
+
+                //     const Vector& normal = closestTriangle.normal;
+                //     Vector delta = -direction - normal;
+                //     workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
+                //     workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
+                //     workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
+
+                //     // workingPixel.red = std::abs(normal.x) * 255;
+                //     // workingPixel.green = std::abs(normal.y) * 255;
+                //     // workingPixel.blue = std::abs(normal.z) * 255;
+
+                //     // workingPixel.red = std::abs(delta.x * 0.5f) * 255;
+                //     // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
+                //     // workingPixel.blue = std::abs(delta.z * 0.5f) * 255;
+                // }
+                // else
+                // {
+                //     workingPixel.red = 0;
+                //     workingPixel.green = 0;
+                //     workingPixel.blue = 0;
+                // }
 
                 image.setPixel(x, y, workingPixel);
 
@@ -222,7 +274,7 @@ int main(int argc, char** argv)
         std::cout << "Minimum: " << pixelMinDuration << " us" << std::endl;
         std::cout << "Maximum: " << pixelMaxDuration << " us" << std::endl;
 
-        writeImage("normal_test_2." + std::to_string(frame) + ".png", image, "test");
+        writeImage("mesh_volume_test_2." + std::to_string(frame) + ".png", image, "test");
     }
 
     std::cout << "Goodbye!" << std::endl;

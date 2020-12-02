@@ -116,7 +116,7 @@ TriangleTree::TriangleTree()
     m_root->page = std::make_unique<Page>();
 }
 
-TriangleTree::TriangleTree(std::vector<Triangle> triangles)
+TriangleTree::TriangleTree(const std::vector<Triangle>& triangles)
 {
     m_root = generateTree(triangles, Axis::X);
 }
@@ -341,4 +341,42 @@ std::vector<Triangle> TriangleTree::fetchTrianglesIntersectingRay(const Ray& ray
     fetchTrianglesIntersectingRayFromNode(ray, m_root, results);
 
     return results;
+}
+
+void castRayIntoNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Hit>& hits)
+{
+    std::optional<Hit> hit;
+
+    if (rayIntersectsBounds(ray, node->bounds))
+    {
+        if (node->page)
+        {
+            for (const auto& triangle : node->page->contents)
+            {
+                hit = rayIntersectsTriangle(ray, triangle);
+
+                if (hit)
+                {
+                    hits.push_back(*hit);
+                }
+            }
+        }
+
+        if (node->left)
+        {
+            castRayIntoNode(ray, node->left, hits);
+        }
+
+        if (node->right)
+        {
+            castRayIntoNode(ray, node->right, hits);
+        }
+    }
+}
+
+std::vector<Hit> TriangleTree::castRay(const Ray& ray) const
+{
+    std::vector<Hit> hits;
+    castRayIntoNode(ray, m_root, hits);
+    return hits;
 }

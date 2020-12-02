@@ -55,8 +55,10 @@ bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds)
     return true;
 }
 
-bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
+std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
 {
+    Hit hit;
+
     Vector ab = triangle.b - triangle.a;
     Vector ac = triangle.c - triangle.a;
     Vector qp = -ray.direction;
@@ -67,7 +69,7 @@ bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
 
     if (d <= 0.0f)
     {
-        return false;
+        return std::nullopt;
     }
 
     Vector ap = ray.origin - triangle.a;
@@ -75,21 +77,33 @@ bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
 
     if (t < 0.0f)
     {
-        return false;
+        return std::nullopt;
     }
 
     Vector e = cross(qp,ap);
     float v = dot(ac, e);
     if (v < 0.0f || v > d)
     {
-        return false;
+        return std::nullopt;
     }
 
     float w = -dot(ab, e);
     if (w < 0.0f || v + w > d)
     {
-        return false;
+        return std::nullopt;
     }
 
-    return true;
+    float ood = 1.0f / d;
+    t *= ood;
+    v *= ood;
+    w *= ood;
+    float u = 1.0f - v - w;
+
+    hit.triangle = triangle;
+    hit.coords = Vector(u, v, w);
+    hit.position = hit.triangle.getPosition(hit.coords);
+    hit.normal = hit.triangle.getNormal(hit.coords).normalize();
+    hit.incident = ray.direction;
+
+    return hit;
 }

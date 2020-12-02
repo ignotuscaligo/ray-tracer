@@ -26,7 +26,7 @@ struct Vector
     Vector operator/=(float rhs);
 
     float magnitude() const;
-    void normalize();
+    Vector normalize();
 };
 
 static Vector operator+(const Vector& lhs, const Vector& rhs)
@@ -62,6 +62,15 @@ static Vector operator*(const Vector& lhs, const float& rhs)
         lhs.x * rhs,
         lhs.y * rhs,
         lhs.z * rhs
+    );
+}
+
+static Vector operator*(const float& lhs, const Vector& rhs)
+{
+    return Vector(
+        rhs.x * lhs,
+        rhs.y * lhs,
+        rhs.z * lhs
     );
 }
 

@@ -71,7 +71,7 @@ float Vector::magnitude() const
     return std::sqrt((x * x) + (y * y) + (z * z));
 }
 
-void Vector::normalize()
+Vector Vector::normalize()
 {
     float hyp = magnitude();
 
@@ -79,6 +79,8 @@ void Vector::normalize()
     {
         *this /= hyp;
     }
+
+    return *this;
 }
 
 Vector cross(const Vector& a, const Vector& b)

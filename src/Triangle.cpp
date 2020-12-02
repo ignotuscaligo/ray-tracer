@@ -38,3 +38,13 @@ Bounds Triangle::getBounds() const
         getLimits(Axis::Z)
     };
 }
+
+Vector Triangle::getPosition(const Vector& coords) const
+{
+    return (coords.x * a) + (coords.y * b) + (coords.z * c);
+}
+
+Vector Triangle::getNormal(const Vector& coords) const
+{
+    return (coords.x * aNormal) + (coords.y * bNormal) + (coords.z * cNormal);
+}

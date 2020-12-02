@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Triangle.h"
+#include "Hit.h"
 #include "Ray.h"
+#include "Triangle.h"
 
 #include <memory>
 #include <vector>
@@ -26,7 +27,7 @@ class TriangleTree
 {
 public:
     TriangleTree();
-    TriangleTree(std::vector<Triangle> triangles);
+    TriangleTree(const std::vector<Triangle>& triangles);
     ~TriangleTree() = default;
 
     void addTriangle(Triangle triangle);
@@ -34,6 +35,7 @@ public:
     std::shared_ptr<Node> root();
     std::vector<Triangle> fetchTrianglesIntersectingBounds(const Bounds& bounds) const;
     std::vector<Triangle> fetchTrianglesIntersectingRay(const Ray& Ray) const;
+    std::vector<Hit> castRay(const Ray& ray) const;
 
 private:
     std::shared_ptr<Node> m_root;

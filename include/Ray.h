@@ -3,6 +3,9 @@
 #include "Vector.h"
 #include "Bounds.h"
 #include "Triangle.h"
+#include "Hit.h"
+
+#include <optional>
 
 struct Ray
 {
@@ -14,4 +17,5 @@ struct Ray
 };
 
 bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds);
-bool rayIntersectsTriangle(const Ray& ray, const Triangle& triangle);
+
+std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle);

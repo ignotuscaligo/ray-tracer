@@ -56,6 +56,15 @@ target_sources(ray-tracer
 
         include/Quaternion.h
         src/Quaternion.cpp
+
+        include/Hit.h
+        src/Hit.cpp
+
+        include/Volume.h
+        src/Volume.cpp
+
+        include/MeshVolume.h
+        src/MeshVolume.cpp
 )
 
 target_include_directories(ray-tracer
