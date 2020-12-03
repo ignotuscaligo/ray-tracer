@@ -1,5 +1,7 @@
 #include "Image.h"
 
+#include <cstring>
+
 Image::Image(int width, int height)
     : m_width(width)
     , m_height(height)
@@ -25,4 +27,9 @@ Pixel* Image::getRow(int row)
 void Image::setPixel(int x, int y, Pixel pixel)
 {
     m_pixels.get()[(y * m_width) + x] = pixel;
+}
+
+void Image::clear()
+{
+    std::memset(m_pixels.get(), 0, m_width * m_height * sizeof(Pixel));
 }

@@ -1,4 +1,5 @@
 #include "Ray.h"
+
 #include "Utility.h"
 
 #include <algorithm>
@@ -100,7 +101,6 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
     float u = 1.0f - v - w;
 
     Vector coords{u, v, w};
-    hit.incident = ray.direction;
     hit.position = triangle.getPosition(coords);
     hit.normal = triangle.getNormal(coords).normalize();
     hit.distance = (hit.position - ray.origin).magnitude();

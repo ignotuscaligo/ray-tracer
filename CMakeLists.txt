@@ -72,8 +72,8 @@ target_sources(ray-tracer
         include/Photon.h
         src/Photon.cpp
 
-        include/PhotonQueue.h
-        src/PhotonQueue.cpp
+        include/WorkQueue.h
+        src/WorkQueue.cpp
 )
 
 target_include_directories(ray-tracer

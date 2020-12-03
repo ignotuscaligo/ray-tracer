@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Vector.h"
 #include "Bounds.h"
-#include "Triangle.h"
 #include "Hit.h"
+#include "Triangle.h"
+#include "Vector.h"
 
 #include <optional>
 
