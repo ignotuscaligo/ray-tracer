@@ -65,6 +65,15 @@ target_sources(ray-tracer
 
         include/MeshVolume.h
         src/MeshVolume.cpp
+
+        include/Color.h
+        src/Color.cpp
+
+        include/Photon.h
+        src/Photon.cpp
+
+        include/PhotonQueue.h
+        src/PhotonQueue.cpp
 )
 
 target_include_directories(ray-tracer

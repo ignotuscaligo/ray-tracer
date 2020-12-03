@@ -8,6 +8,8 @@
 #include "Quaternion.h"
 #include "TriangleTree.h"
 #include "Utility.h"
+#include "Photon.h"
+#include "PhotonQueue.h"
 
 #include <tiny_obj_loader.h>
 
@@ -37,6 +39,25 @@ void writeImage(const std::string& filename, Image& image, const std::string& ti
 int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
+
+    std::vector<Photon> dummyQueue(10);
+
+    int index = 0;
+
+    for (auto& photon : dummyQueue)
+    {
+        photon.color.red = index;
+        ++index;
+    }
+
+    PhotonBlock testBlock(5, 15, dummyQueue);
+
+    for (auto& photon : testBlock)
+    {
+        std::cout << "photon iteration: " << photon.color.red << std::endl;
+    }
+
+    std::cout << "Setting up scene for render" << std::endl;
 
     std::shared_ptr<Object> root = std::make_unique<Object>("Root");
     std::shared_ptr<Object> knot = std::make_unique<Object>("Knot");
@@ -134,7 +155,7 @@ int main(int argc, char** argv)
     Vector sunDirection = -sun->transform.forward();
 
     int startFrame = 0;
-    int frameCount = 36;
+    int frameCount = 1;
 
     for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
     {
