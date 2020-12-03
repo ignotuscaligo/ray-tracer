@@ -14,12 +14,58 @@
 #include <tiny_obj_loader.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <exception>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <thread>
+
+struct Worker
+{
+    WorkQueue<Photon>& photonQueue;
+    WorkQueue<PhotonHit>& hitQueue;
+    MeshVolume& volume;
+    size_t fetchSize;
+    std::atomic_bool running;
+
+    void run()
+    {
+        std::cout << "start thread" << std::endl;
+        while (running)
+        {
+            std::cout << "thread loop" << std::endl;
+            if (photonQueue.available() > 0)
+            {
+                std::cout << "fetching " << fetchSize << " photons" << std::endl;
+                auto photons = photonQueue.fetch(fetchSize);
+
+                for (auto& photon : photons)
+                {
+                    std::optional<Hit> hit = volume.castRay(photon.ray);
+
+                    if (hit)
+                    {
+                        auto hits = hitQueue.initialize(1);
+                        hits[0].photon = photon;
+                        hits[0].hit = *hit;
+                        hitQueue.ready(hits);
+                    }
+                }
+
+                photonQueue.release(photons);
+            }
+            else
+            {
+                std::cout << "sleep" << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        std::cout << "end thread" << std::endl;
+    }
+};
 
 void writeImage(const std::string& filename, Image& image, const std::string& title)
 {
@@ -241,26 +287,63 @@ int main(int argc, char** argv)
 
             std::cout << "Casting " << photonQueue.available() << " photons" << std::endl;
 
-            auto photons = photonQueue.fetch(photonQueue.available());
+            const size_t workerCount = 1;
 
-            std::cout << "photons.startIndex: " << photons.startIndex << std::endl;
-            std::cout << "photons.endIndex:   " << photons.endIndex << std::endl;
+            Worker workers[workerCount] = {{
+                photonQueue,
+                hitQueue,
+                knotMesh,
+                10000,
+                true
+            }};
 
-            for (auto& photon : photons)
+            std::thread threads[workerCount];
+
+            for (int i = 0; i < workerCount; ++i)
             {
-                // std::cout << "photon.ray: " << photon.ray.origin.x << ", " << photon.ray.origin.y << ", " << photon.ray.origin.z << std::endl;
-                std::optional<Hit> hit = knotMesh.castRay(photon.ray);
-
-                if (hit)
-                {
-                    auto hits = hitQueue.initialize(1);
-                    hits[0].photon = photon;
-                    hits[0].hit = *hit;
-                    hitQueue.ready(hits);
-                }
+                threads[i] = std::thread([&]() {
+                    std::cout << "running thread" << std::endl;
+                    workers[i].run();
+                });
             }
 
-            photonQueue.release(photons);
+            while (photonQueue.available() > 0)
+            {
+                std::cout << photonQueue.available() << " photons remaining" << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                // std::cout << "sleep finished" << std::endl;
+            }
+
+            for (int i = 0; i < workerCount; ++i)
+            {
+                workers[i].running = false;
+            }
+
+            for (int i = 0; i < workerCount; ++i)
+            {
+                threads[i].join();
+            }
+
+            // auto photons = photonQueue.fetch(photonQueue.available());
+
+            // std::cout << "photons.startIndex: " << photons.startIndex << std::endl;
+            // std::cout << "photons.endIndex:   " << photons.endIndex << std::endl;
+
+            // for (auto& photon : photons)
+            // {
+            //     // std::cout << "photon.ray: " << photon.ray.origin.x << ", " << photon.ray.origin.y << ", " << photon.ray.origin.z << std::endl;
+            //     std::optional<Hit> hit = knotMesh.castRay(photon.ray);
+
+            //     if (hit)
+            //     {
+            //         auto hits = hitQueue.initialize(1);
+            //         hits[0].photon = photon;
+            //         hits[0].hit = *hit;
+            //         hitQueue.ready(hits);
+            //     }
+            // }
+
+            // photonQueue.release(photons);
 
             std::chrono::time_point processPhotonsEnd = std::chrono::system_clock::now();
 

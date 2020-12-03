@@ -221,45 +221,27 @@ size_t WorkQueue<T>::capacity() const
 template<typename T>
 size_t WorkQueue<T>::allocated() const
 {
-    // size_t count = 0;
+    size_t count = 0;
 
-    // {
-    //     std::scoped_lock(m_mutex);
+    {
+        std::scoped_lock(m_mutex);
+        count = m_allocated;
+    }
 
-    //     if (m_memoryHead >= m_memoryTail)
-    //     {
-    //         count = m_memoryHead - m_memoryTail;
-    //     }
-    //     else
-    //     {
-    //         count = (m_memoryHead + m_size) - m_memoryTail;
-    //     }
-    // }
-
-    // return count;
-    return m_allocated;
+    return count;
 }
 
 template<typename T>
 size_t WorkQueue<T>::available() const
 {
-    // size_t count = 0;
+    size_t count = 0;
 
-    // {
-    //     std::scoped_lock(m_mutex);
+    {
+        std::scoped_lock(m_mutex);
+        count = m_available;
+    }
 
-    //     if (m_readyHead >= m_readyTail)
-    //     {
-    //         count = m_readyHead - m_readyTail;
-    //     }
-    //     else
-    //     {
-    //         count = (m_readyHead + m_size) - m_readyTail;
-    //     }
-    // }
-
-    // return count;
-    return m_available;
+    return count;
 }
 
 template WorkQueue<Photon>::Block::Block(size_t start, size_t end, std::vector<Photon>& queue);
