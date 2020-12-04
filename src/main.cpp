@@ -33,6 +33,10 @@ struct Worker
     std::atomic_bool running;
     std::atomic_bool suspend;
 
+    size_t workDuration = 0;
+    size_t pushHitDuration = 0;
+    size_t castDuration = 0;
+
     Worker() = default;
 
     Worker(const Worker& other)
@@ -50,6 +54,8 @@ struct Worker
     {
         // std::cout << index << ": start thread" << std::endl;
 
+        std::vector<PhotonHit> hits;
+
         if (!photonQueue || !hitQueue || !volume)
         {
             std::cout << index << ": abort thread, missing required references" << std::endl;
@@ -59,6 +65,7 @@ struct Worker
         {
             if (photonQueue->available() > 0 && !suspend)
             {
+                auto workStart = std::chrono::system_clock::now();
                 // std::cout << index << ": fetching " << fetchSize << " photons" << std::endl;
                 auto photons = photonQueue->fetch(fetchSize);
 
@@ -66,15 +73,21 @@ struct Worker
 
                 // size_t hitsGenerated = 0;
 
-                std::vector<PhotonHit> hits;
+                hits.clear();
 
                 for (auto& photon : photons)
                 {
+                    auto castStart = std::chrono::system_clock::now();
                     std::optional<Hit> hit = volume->castRay(photon.ray);
+                    auto castEnd = std::chrono::system_clock::now();
+                    castDuration += std::chrono::duration_cast<std::chrono::microseconds>(castEnd - castStart).count();
 
                     if (hit)
                     {
+                        auto pushHitStart = std::chrono::system_clock::now();
                         hits.push_back({photon, *hit});
+                        auto pushHitEnd = std::chrono::system_clock::now();
+                        pushHitDuration += std::chrono::duration_cast<std::chrono::microseconds>(pushHitEnd - pushHitStart).count();
                         // ++hitsGenerated;
                     }
                 }
@@ -92,6 +105,10 @@ struct Worker
                 }
 
                 photonQueue->release(photons);
+
+                auto workEnd = std::chrono::system_clock::now();
+
+                workDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
 
                 // std::cout << index << ": finished processing, generated " << hitsGenerated << " hits" << std::endl;
             }
@@ -215,7 +232,7 @@ int main(int argc, char** argv)
         std::cout << "Generating mesh from OBJ" << std::endl;
         std::shared_ptr<MeshVolume> knotMesh = std::make_shared<MeshVolume>(objTriangles);
 
-        Image image(1024, 1024);
+        Image image(2048, 2048);
         Pixel workingPixel;
 
         std::cout << "Rendering image at " << image.width() << " px by " << image.height() << " px" << std::endl;
@@ -230,26 +247,42 @@ int main(int argc, char** argv)
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(image.width() * image.height());
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(image.width() * image.height());
 
-        // Release:
-        // 1: 806 ms
-        // 2: 607 ms
-        // 4: 404 ms
-        // 8: 404 ms
+        // Debug w/ batched hits + fetchSize 10k + no logging:
+        // 1: 13667 ms
+        // 2: 7022 ms
+        // 4: 3727 ms
+        // 8: 2635 ms
+        // 16: 2355 ms
+
+        // Debug w/ batched hits + fetchSize 1k + no logging:
+        // 1: 13624 ms
+        // 2: 6899 ms
+        // 4: 3721 ms
+        // 8: 2589 ms
+        // 16: 2388 ms
+
+        // Release 1024x1024 + fetchSize 1k:
+        // 1: 784 ms
+        // 2: 453 ms
+        // 4: 252 ms
+        // 8: 285 ms
         // 16: 403 ms
 
-        // Debug:
-        // 1: 14036 ms
-        // 2: 7232 ms
-        // 4: 4511 ms
-        // 8: 3407 ms
-        // 16: 3707 ms
+        // Release 2048x2048 + fetchSize 100k:
+        // 1: 3005 ms
+        // 2: 1657 ms
+        // 4: 1003 ms
+        // 8: 961 ms
+        // 16: 702 ms
+        // 32: 590 ms
 
-        // Debug w/ batched hits:
-        // 1: 13730 ms
-        // 2: 7119 ms
-        // 4: 4312 ms
-        // 8: 3105 ms
-        // 16: 3307 ms
+        // Debug 2048x2048 + fetchSize 100k:
+        // 1: 54634 ms, 4.8%, 482.8MB
+        // 2: 27786 ms, 8.9%, 486.8MB
+        // 4: 14556 ms, 16.3%, 495.5MB
+        // 8: 9882 ms, 31.1%, 512.5MB
+        // 16: 9379 ms, 59.7%, 550.5MB
+        // 32: 12538 ms, 98.8%, 549.6MB
         const size_t workerCount = 16;
 
         Worker workers[workerCount];
@@ -358,21 +391,21 @@ int main(int argc, char** argv)
             }
 
             size_t currPhotons = photonQueue->allocated();
-            size_t prevPhotons = currPhotons;
+            // size_t prevPhotons = currPhotons;
 
             while (currPhotons > 0)
             {
                 currPhotons = photonQueue->allocated();
 
-                if (currPhotons != prevPhotons)
-                {
-                    std::cout << currPhotons << " photons remaining" << std::endl;
-                    std::cout << hitQueue->available() << " hits generated" << std::endl;
-                }
+                // if (currPhotons != prevPhotons)
+                // {
+                //     std::cout << currPhotons << " photons remaining" << std::endl;
+                //     std::cout << hitQueue->available() << " hits generated" << std::endl;
+                // }
 
-                prevPhotons = currPhotons;
+                // prevPhotons = currPhotons;
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 // std::cout << "sleep finished" << std::endl;
             }
 
@@ -454,6 +487,20 @@ int main(int argc, char** argv)
             std::chrono::time_point renderEnd = std::chrono::system_clock::now();
             std::chrono::microseconds renderTime = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
 
+            size_t workDuration = 0;
+            size_t pushHitDuration = 0;
+            size_t castDuration = 0;
+
+            for (int i = 0; i < workerCount; ++i)
+            {
+                workDuration += workers[i].workDuration;
+                workers[i].workDuration = 0;
+                pushHitDuration += workers[i].pushHitDuration;
+                workers[i].pushHitDuration = 0;
+                castDuration += workers[i].castDuration;
+                workers[i].castDuration = 0;
+            }
+
             std::cout << "Render time:" << std::endl;
             std::cout << "Total:   " << renderTime.count() / 1000 << " ms" << std::endl;
             std::cout << "Average: " << renderTime.count() / pixelCount << " us" << std::endl;
@@ -465,6 +512,9 @@ int main(int argc, char** argv)
             std::cout << "Hits generated:                " << hitsGenerated << std::endl;
             std::cout << "Hits generation total time:    " << processHitsDuration.count() << " us" << std::endl;
             std::cout << "Hits generation avg time:      " << processHitsAverage << " us" << std::endl;
+            std::cout << "Worker total duration:         " << workDuration << " us" << std::endl;
+            std::cout << "Worker push hit duration:      " << pushHitDuration << " us" << std::endl;
+            std::cout << "Worker cast duration:          " << castDuration << " us" << std::endl;
 
             writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sun_test_0." + std::to_string(frame) + ".png", image, "test");
         }

@@ -58,7 +58,7 @@ private:
     size_t m_memoryTail;
     size_t m_readyHead;
     size_t m_readyTail;
-    size_t m_allocated;
-    size_t m_available;
+    std::atomic<size_t> m_allocated;
+    std::atomic<size_t> m_available;
     mutable std::mutex m_mutex;
 };
