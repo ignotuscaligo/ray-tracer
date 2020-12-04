@@ -51,6 +51,12 @@ T& WorkQueue<T>::Block::operator[](size_t accessIndex)
 }
 
 template<typename T>
+size_t WorkQueue<T>::Block::size() const
+{
+    return endIndex - startIndex;
+}
+
+template<typename T>
 WorkQueue<T>::WorkQueue(size_t size)
     : m_queue(size)
     , m_size(size)
@@ -66,32 +72,38 @@ WorkQueue<T>::WorkQueue(size_t size)
 template<typename T>
 typename WorkQueue<T>::Block WorkQueue<T>::initialize(size_t count)
 {
-    size_t start;
-    size_t end;
+    size_t start = 0;
+    size_t end = 0;
 
+    if (count > 0)
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
 
-        // std::cout << "memoryHead " << m_memoryHead;
+        size_t remaining = m_size - m_allocated;
 
-        start = m_memoryHead;
-        end = m_memoryHead + std::min(count, m_size - m_allocated);
+        if (remaining > 0)
+        {
+            // std::cout << "memoryHead " << m_memoryHead;
 
-        // if (m_memoryHead >= m_memoryTail)
-        // {
-        //     end = std::min(end, m_memoryTail + m_size);
-        // }
-        // else
-        // {
-        //     end = std::min(end, m_memoryTail);
-        // }
+            start = m_memoryHead;
+            end = m_memoryHead + std::min(count, remaining);
 
-        m_memoryHead = end % m_size;
-        m_allocated += end - start;
+            // if (m_memoryHead >= m_memoryTail)
+            // {
+            //     end = std::min(end, m_memoryTail + m_size);
+            // }
+            // else
+            // {
+            //     end = std::min(end, m_memoryTail);
+            // }
 
-        // std::cout << " -> " << m_memoryHead << std::endl;
+            m_memoryHead = end % m_size;
+            m_allocated += end - start;
 
-        m_initializing.insert(end);
+            // std::cout << " -> " << m_memoryHead << std::endl;
+
+            m_initializing.insert(end);
+        }
     }
 
     return {
@@ -105,69 +117,76 @@ template<typename T>
 void WorkQueue<T>::ready(Block block)
 {
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
 
-        auto it = m_initializing.find(block.endIndex);
-        m_initializing.erase(it);
-
-        size_t head = m_memoryHead;
-
-        if (!m_initializing.empty())
+        if (block.startIndex != block.endIndex)
         {
-            head = *m_initializing.begin() % m_size;
+            auto it = m_initializing.find(block.endIndex);
+            m_initializing.erase(it);
+
+            size_t head = m_memoryHead;
+
+            if (!m_initializing.empty())
+            {
+                head = *m_initializing.begin() % m_size;
+            }
+
+            // std::cout << "readyHead " << m_readyHead;
+
+            size_t prev = m_readyHead;
+            m_readyHead = head;
+
+            if (head > prev)
+            {
+                m_available += m_readyHead - prev;
+            }
+            else if (head < prev)
+            {
+                m_available += (m_readyHead + m_size) - prev;
+            }
+
+            // std::cout << " -> " << m_readyHead << std::endl;
         }
-
-        // std::cout << "readyHead " << m_readyHead;
-
-        size_t prev = m_readyHead;
-        m_readyHead = head;
-
-        if (head > prev)
-        {
-            m_available += m_readyHead - prev;
-        }
-        else
-        {
-            m_available += (m_readyHead + m_size) - prev;
-        }
-
-        // std::cout << " -> " << m_readyHead << std::endl;
     }
 }
 
 template<typename T>
 typename WorkQueue<T>::Block WorkQueue<T>::fetch(size_t count)
 {
-    size_t start;
-    size_t end;
+    size_t start = 0;
+    size_t end = 0;
 
+    if (count > 0)
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
 
-        // std::cout << "fetch(" << count << ")" << std::endl;
+        if (m_available > 0)
+        {
+            // std::cout << "fetch(" << count << ")" << std::endl;
 
-        start = m_readyTail;
-        end = m_readyTail + std::min(count, m_available);
+            start = m_readyTail;
+            end = m_readyTail + std::min(count, m_available);
 
-        // std::cout << "start: " << start << std::endl;
-        // std::cout << "end:   " << end << std::endl;
+            // std::cout << "start: " << start << std::endl;
+            // std::cout << "end:   " << end << std::endl;
 
-        // if (m_readyHead >= m_readyTail)
-        // {
-        //     end = std::min(end, m_readyHead);
-        // }
-        // else
-        // {
-        //     end = std::min(end, m_readyHead + m_size);
-        // }
+            // if (m_readyHead >= m_readyTail)
+            // {
+            //     end = std::min(end, m_readyHead);
+            // }
+            // else
+            // {
+            //     end = std::min(end, m_readyHead + m_size);
+            // }
 
-        m_readyTail = end % m_size;
-        m_available -= end - start;
+            m_readyTail = end % m_size;
+            m_available -= end - start;
 
-        // std::cout << "readyTail " << start;
-        // std::cout << " -> " << m_readyTail << std::endl;
+            // std::cout << "readyTail " << start;
+            // std::cout << " -> " << m_readyTail << std::endl;
 
-        m_processing.insert(start);
+            m_processing.insert(start);
+        }
     }
 
     return {
@@ -181,34 +200,36 @@ template<typename T>
 void WorkQueue<T>::release(Block block)
 {
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
 
-        auto it = m_processing.find(block.startIndex);
-        m_processing.erase(it);
-
-        size_t tail = m_readyTail;
-
-        if (!m_processing.empty())
+        if (block.startIndex != block.endIndex)
         {
-            tail = *m_processing.begin() % m_size;
+            auto it = m_processing.find(block.startIndex);
+            m_processing.erase(it);
+
+            size_t tail = m_readyTail;
+
+            if (!m_processing.empty())
+            {
+                tail = *m_processing.begin() % m_size;
+            }
+
+            // std::cout << "memoryTail " << m_memoryTail;
+
+            size_t prev = m_memoryTail;
+            m_memoryTail = tail;
+
+            if (tail > prev)
+            {
+                m_allocated -= m_memoryTail - prev;
+            }
+            else if (tail < prev)
+            {
+                m_allocated -= (m_memoryTail + m_size) - prev;
+            }
+
+            // std::cout << " -> " << m_memoryTail << std::endl;
         }
-
-        // std::cout << "memoryTail " << m_memoryTail;
-
-        size_t prev = m_memoryTail;
-        m_memoryTail = tail;
-        m_allocated -= m_memoryTail - prev;
-
-        if (tail > prev)
-        {
-            m_allocated -= m_memoryTail - prev;
-        }
-        else
-        {
-            m_allocated -= (m_memoryTail + m_size) - prev;
-        }
-
-        // std::cout << " -> " << m_memoryTail << std::endl;
     }
 }
 
@@ -224,7 +245,7 @@ size_t WorkQueue<T>::allocated() const
     size_t count = 0;
 
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
         count = m_allocated;
     }
 
@@ -236,10 +257,15 @@ size_t WorkQueue<T>::available() const
 {
     size_t count = 0;
 
+    // std::cout << "WorkQueue::available()" << std::endl;
+
     {
-        std::scoped_lock(m_mutex);
+        std::scoped_lock<std::mutex> lock(m_mutex);
+        // std::cout << "Acquired lock" << std::endl;
         count = m_available;
     }
+
+    // std::cout << "return count" << std::endl;
 
     return count;
 }
@@ -251,6 +277,7 @@ template void WorkQueue<Photon>::Block::Iterator::operator++();
 template typename WorkQueue<Photon>::Block::Iterator WorkQueue<Photon>::Block::begin() const;
 template typename WorkQueue<Photon>::Block::Iterator WorkQueue<Photon>::Block::end() const;
 template Photon& WorkQueue<Photon>::Block::operator[](size_t accessIndex);
+template size_t WorkQueue<Photon>::Block::size() const;
 template WorkQueue<Photon>::WorkQueue(size_t size);
 template typename WorkQueue<Photon>::Block WorkQueue<Photon>::initialize(size_t count);
 template void WorkQueue<Photon>::ready(Block block);
@@ -267,6 +294,7 @@ template void WorkQueue<PhotonHit>::Block::Iterator::operator++();
 template typename WorkQueue<PhotonHit>::Block::Iterator WorkQueue<PhotonHit>::Block::begin() const;
 template typename WorkQueue<PhotonHit>::Block::Iterator WorkQueue<PhotonHit>::Block::end() const;
 template PhotonHit& WorkQueue<PhotonHit>::Block::operator[](size_t accessIndex);
+template size_t WorkQueue<PhotonHit>::Block::size() const;
 template WorkQueue<PhotonHit>::WorkQueue(size_t size);
 template typename WorkQueue<PhotonHit>::Block WorkQueue<PhotonHit>::initialize(size_t count);
 template void WorkQueue<PhotonHit>::ready(Block block);

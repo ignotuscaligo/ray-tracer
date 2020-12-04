@@ -29,6 +29,8 @@ public:
 
         T& operator[](size_t accessIndex);
 
+        size_t size() const;
+
         const size_t startIndex;
         const size_t endIndex;
 
