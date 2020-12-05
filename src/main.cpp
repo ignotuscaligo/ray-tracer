@@ -155,7 +155,7 @@ int main(int argc, char** argv)
         Object::setParent(knot, root);
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
-        Object::setParent(sun, root);
+        Object::setParent(sun, cameraPivot);
 
         std::cout << "Loading OBJ" << std::endl;
 
@@ -232,16 +232,14 @@ int main(int argc, char** argv)
         std::cout << "Generating mesh from OBJ" << std::endl;
         std::shared_ptr<MeshVolume> knotMesh = std::make_shared<MeshVolume>(objTriangles);
 
-        Image image(2048, 2048);
+        Image image(512, 512);
         Pixel workingPixel;
 
         std::cout << "Rendering image at " << image.width() << " px by " << image.height() << " px" << std::endl;
 
         camera->transform.position = {0.0f, 0.0f, -70.0f};
 
-        sun->transform.rotation = Quaternion::fromPitchYawRoll(45.0f, 0.0f, 0.0f);
-
-        Vector sunDirection = -sun->transform.forward();
+        sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
         std::cout << "Creating queues" << std::endl;
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(image.width() * image.height());
@@ -293,9 +291,9 @@ int main(int argc, char** argv)
             workers[i].photonQueue = photonQueue;
             workers[i].hitQueue = hitQueue;
             workers[i].volume = knotMesh;
-            workers[i].fetchSize = 100000;
+            workers[i].fetchSize = 10000;
             workers[i].running = true;
-            workers[i].suspend = true;
+            workers[i].suspend = false;
         }
 
         std::thread threads[workerCount];
@@ -309,34 +307,38 @@ int main(int argc, char** argv)
         }
 
         int startFrame = 0;
-        int frameCount = 1;
+        int frameCount = 72;
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
-            std::cout << "Rendering frame " << frame << std::endl;
+            std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
 
             image.clear();
 
-            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 10.0f), 0);
+            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
-            Vector cameraForward = camera->transform.forward();
+            Vector cameraForward = camera->forward();
+            Vector sunDirection = -sun->forward();
+
+            // std::cout << "cameraPosition: " << cameraPosition.x << ", " << cameraPosition.y << ", " << cameraPosition.z << std::endl;
+            // std::cout << "cameraForward: " << cameraForward.x << ", " << cameraForward.y << ", " << cameraForward.z << std::endl;
 
             float pixelCount = image.width() * image.height();
 
             float horizontalFov = 80.0f;
             float verticalFov = 80.0f;
 
-            for (int i = 0; i < workerCount; ++i)
-            {
-                workers[i].suspend = true;
-            }
+            // for (int i = 0; i < workerCount; ++i)
+            // {
+            //     workers[i].suspend = true;
+            // }
 
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
             std::chrono::time_point generatePhotonsStart = std::chrono::system_clock::now();
 
-            std::cout << "Generating photons" << std::endl;
+            // std::cout << "Generating photons" << std::endl;
             for (int y = 0; y < image.height(); ++y)
             {
                 float pitch = -((verticalFov / 2.0f) - ((y / (image.height() - 1.0f)) * verticalFov));
@@ -347,18 +349,12 @@ int main(int argc, char** argv)
                 {
                     float yaw = (horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov);
 
-                    Vector manualDirection{
-                        std::sin(radians(yaw)),
-                        std::sin(radians(pitch)),
-                        std::cos(radians(yaw))
-                    };
+                    Quaternion pixelAngle = cameraRotation * Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
+                    Vector direction = pixelAngle * Vector(0, 0, 1);
 
-                    manualDirection.normalize();
-
-                    Quaternion pixelAngle = Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
-                    Vector direction = pixelAngle * cameraForward;
-
-                    manualDirection = cameraRotation * manualDirection;
+                    // std::cout << "pitch, yaw: " << pitch << ", " << yaw << std::endl;
+                    // std::cout << "cameraForward: " << cameraForward.x << ", " << cameraForward.y << ", " << cameraForward.z << std::endl;
+                    // std::cout << "direction: " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
 
                     photons[x].ray = {cameraPosition, direction};
                     photons[x].x = x;
@@ -372,9 +368,6 @@ int main(int argc, char** argv)
 
             size_t photonsGenerated = image.width() * image.height();
 
-            std::cout << "Cast " << photonsGenerated << " photons" << std::endl;
-
-            std::cout << "Calculating average" << std::endl;
             std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
             float generatePhotonsAverage = 0;
 
@@ -385,10 +378,10 @@ int main(int argc, char** argv)
 
             std::chrono::time_point processPhotonsStart = std::chrono::system_clock::now();
 
-            for (int i = 0; i < workerCount; ++i)
-            {
-                workers[i].suspend = false;
-            }
+            // for (int i = 0; i < workerCount; ++i)
+            // {
+            //     workers[i].suspend = false;
+            // }
 
             size_t currPhotons = photonQueue->allocated();
             // size_t prevPhotons = currPhotons;
@@ -421,14 +414,10 @@ int main(int argc, char** argv)
 
             size_t hitsGenerated = hitQueue->available();
 
-            std::cout << hitsGenerated << " photons hit" << std::endl;
-
             std::chrono::time_point processHitsStart = std::chrono::system_clock::now();
 
-            std::cout << "fetching hits" << std::endl;
             auto hits = hitQueue->fetch(hitQueue->available());
 
-            std::cout << "processing hits" << std::endl;
             for (auto& photonHit : hits)
             {
                 int sunCross = std::max(0.0f, Vector::dot(sunDirection, photonHit.hit.normal)) * 255;
@@ -502,21 +491,27 @@ int main(int argc, char** argv)
             }
 
             std::cout << "Render time:" << std::endl;
-            std::cout << "Total:   " << renderTime.count() / 1000 << " ms" << std::endl;
-            std::cout << "Average: " << renderTime.count() / pixelCount << " us" << std::endl;
-            std::cout << "Photons generated:             " << photonsGenerated << std::endl;
-            std::cout << "Photons generation total time: " << generatePhotonsDuration.count() / 1000.0f << " ms" << std::endl;
-            std::cout << "Photons generation avg time:   " << generatePhotonsAverage << " us" << std::endl;
-            std::cout << "Photons process total time:    " << processPhotonsDuration.count() / 1000.0f << " ms" << std::endl;
-            std::cout << "Photons process avg time:      " << processPhotonsAverage << " us" << std::endl;
-            std::cout << "Hits generated:                " << hitsGenerated << std::endl;
-            std::cout << "Hits generation total time:    " << processHitsDuration.count() << " us" << std::endl;
-            std::cout << "Hits generation avg time:      " << processHitsAverage << " us" << std::endl;
-            std::cout << "Worker total duration:         " << workDuration << " us" << std::endl;
-            std::cout << "Worker push hit duration:      " << pushHitDuration << " us" << std::endl;
-            std::cout << "Worker cast duration:          " << castDuration << " us" << std::endl;
+            std::cout << "|- Total:        " << renderTime.count() / 1000 << " ms" << std::endl;
+            std::cout << "|- Average / px: " << renderTime.count() / pixelCount << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sun_test_0." + std::to_string(frame) + ".png", image, "test");
+            std::cout << "Photons:" << std::endl;
+            std::cout << "|- generated:             " << photonsGenerated << std::endl;
+            std::cout << "|- generation total time: " << generatePhotonsDuration.count() / 1000.0f << " ms" << std::endl;
+            std::cout << "|- generation avg time:   " << generatePhotonsAverage << " us" << std::endl;
+            std::cout << "|- process total time:    " << processPhotonsDuration.count() / 1000.0f << " ms" << std::endl;
+            std::cout << "|- process avg time:      " << processPhotonsAverage << " us" << std::endl;
+
+            std::cout << "Hits:" << std::endl;
+            std::cout << "|- generated:             " << hitsGenerated << std::endl;
+            std::cout << "|- generation total time: " << processHitsDuration.count() << " us" << std::endl;
+            std::cout << "|- generation avg time:   " << processHitsAverage << " us" << std::endl;
+
+            std::cout << "Workers:" << std::endl;
+            std::cout << "|- total duration:    " << workDuration << " us" << std::endl;
+            std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
+            std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
+
+            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sun_test_1." + std::to_string(frame) + ".png", image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)

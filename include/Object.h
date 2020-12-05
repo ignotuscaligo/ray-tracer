@@ -18,6 +18,7 @@ struct Object
 
     Vector position() const;
     Quaternion rotation() const;
+    Vector forward() const;
 
     static void setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent);
 };
