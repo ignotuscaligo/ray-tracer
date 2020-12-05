@@ -1,8 +1,10 @@
 #include "MeshVolume.h"
 
 MeshVolume::MeshVolume(const std::vector<Triangle>& triangles)
-    : m_tree(triangles)
+    : Volume()
+    , m_tree(triangles)
 {
+    registerType<MeshVolume>();
 }
 
 std::optional<Hit> MeshVolume::castRay(const Ray& ray) const

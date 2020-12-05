@@ -26,9 +26,9 @@
 struct Worker
 {
     size_t index;
+    std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
-    std::shared_ptr<MeshVolume> volume;
     size_t fetchSize;
     std::atomic_bool running;
     std::atomic_bool suspend;
@@ -42,9 +42,9 @@ struct Worker
     Worker(const Worker& other)
     {
         index = other.index;
+        objects = other.objects;
         photonQueue = other.photonQueue;
         hitQueue = other.hitQueue;
-        volume = other.volume;
         fetchSize = other.fetchSize;
         running = other.running.load();
         suspend = other.suspend.load();
@@ -56,7 +56,7 @@ struct Worker
 
         std::vector<PhotonHit> hits;
 
-        if (!photonQueue || !hitQueue || !volume)
+        if (!photonQueue || !hitQueue)
         {
             std::cout << index << ": abort thread, missing required references" << std::endl;
         }
@@ -77,17 +77,44 @@ struct Worker
 
                 for (auto& photon : photons)
                 {
-                    auto castStart = std::chrono::system_clock::now();
-                    std::optional<Hit> hit = volume->castRay(photon.ray);
-                    auto castEnd = std::chrono::system_clock::now();
-                    castDuration += std::chrono::duration_cast<std::chrono::microseconds>(castEnd - castStart).count();
+                    std::vector<PhotonHit> hitResults;
 
-                    if (hit)
+                    for (auto& object : objects)
                     {
-                        auto pushHitStart = std::chrono::system_clock::now();
-                        hits.push_back({photon, *hit});
-                        auto pushHitEnd = std::chrono::system_clock::now();
-                        pushHitDuration += std::chrono::duration_cast<std::chrono::microseconds>(pushHitEnd - pushHitStart).count();
+                        if (!object->hasType<Volume>())
+                        {
+                            continue;
+                        }
+
+                        auto castStart = std::chrono::system_clock::now();
+                        std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(photon.ray);
+                        auto castEnd = std::chrono::system_clock::now();
+                        castDuration += std::chrono::duration_cast<std::chrono::microseconds>(castEnd - castStart).count();
+
+                        if (hit)
+                        {
+                            auto pushHitStart = std::chrono::system_clock::now();
+                            hitResults.push_back({photon, *hit});
+                            auto pushHitEnd = std::chrono::system_clock::now();
+                            pushHitDuration += std::chrono::duration_cast<std::chrono::microseconds>(pushHitEnd - pushHitStart).count();
+                        }
+                    }
+
+                    if (!hitResults.empty())
+                    {
+                        float minDistance = std::numeric_limits<float>::max();
+                        size_t minIndex = 0;
+
+                        for (int i = 0; i < hitResults.size(); ++i)
+                        {
+                            if (hitResults[i].hit.distance < minDistance)
+                            {
+                                minIndex = i;
+                                minDistance = hitResults[i].hit.distance;
+                            }
+                        }
+
+                        hits.push_back(hitResults[minIndex]);
                         // ++hitsGenerated;
                     }
                 }
@@ -138,6 +165,82 @@ void writeImage(const std::string& filename, Image& image, const std::string& ti
     writer.writeImage(image);
 }
 
+std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
+{
+    std::cout << "Loading OBJ " << filename << std::endl;
+
+    tinyobj::attrib_t attrib;
+
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+
+    std::string warn;
+    std::string err;
+
+    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str());
+
+    if (!warn.empty())
+    {
+        std::cout << "warn: " << warn << std::endl;
+    }
+
+    if (!err.empty())
+    {
+        std::cout << "err: " << err << std::endl;
+    }
+
+    std::vector<Triangle> objTriangles;
+    std::array<Vector, 3> points;
+    std::array<Vector, 3> normals;
+
+    if (result)
+    {
+        std::cout << "Loaded obj successfully" << std::endl;
+
+        std::cout << "Found " << shapes.size() << " shapes" << std::endl;
+
+        for (const auto& shape : shapes)
+        {
+            int indexOffset = 0;
+
+            for (const int vertexCount : shape.mesh.num_face_vertices)
+            {
+                for (int v = 0; v < vertexCount; ++v)
+                {
+                    tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
+                    int vertexIndex = 3 * idx.vertex_index;
+                    int normalIndex = 3 * idx.normal_index;
+                    points[v].x = attrib.vertices[vertexIndex + 0];
+                    points[v].y = attrib.vertices[vertexIndex + 1];
+                    points[v].z = attrib.vertices[vertexIndex + 2];
+
+                    normals[v].x = attrib.normals[normalIndex + 0];
+                    normals[v].y = attrib.normals[normalIndex + 1];
+                    normals[v].z = attrib.normals[normalIndex + 2];
+                }
+
+                Triangle triangle{points[0], points[1], points[2]};
+                triangle.aNormal = normals[0];
+                triangle.bNormal = normals[1];
+                triangle.cNormal = normals[2];
+
+                objTriangles.push_back(triangle);
+
+                indexOffset += vertexCount;
+            }
+        }
+    }
+    else
+    {
+        std::cout << "Failed to load obj" << std::endl;
+    }
+
+    std::cout << "Loaded " << objTriangles.size() << " triangles" << std::endl;
+
+    std::cout << "Generating mesh from OBJ" << std::endl;
+    return std::make_shared<MeshVolume>(objTriangles);
+}
+
 int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
@@ -146,91 +249,25 @@ int main(int argc, char** argv)
     {
         std::cout << "Setting up scene for render" << std::endl;
 
-        std::shared_ptr<Object> root = std::make_unique<Object>("Root");
-        std::shared_ptr<Object> knot = std::make_unique<Object>("Knot");
-        std::shared_ptr<Object> cameraPivot = std::make_unique<Object>("CameraPivot");
-        std::shared_ptr<Object> camera = std::make_unique<Object>("Camera");
-        std::shared_ptr<Object> sun = std::make_unique<Object>("Sun");
+        std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
 
-        Object::setParent(knot, root);
+        std::vector<std::shared_ptr<Object>> objects;
+
+        std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> cameraPivot = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> camera = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
+
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
         Object::setParent(sun, cameraPivot);
+        Object::setParent(knotMesh, root);
 
-        std::cout << "Loading OBJ" << std::endl;
-
-        std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
-
-        tinyobj::attrib_t attrib;
-
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-
-        std::string warn;
-        std::string err;
-
-        bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputFile.c_str());
-
-        if (!warn.empty())
-        {
-            std::cout << "warn: " << warn << std::endl;
-        }
-
-        if (!err.empty())
-        {
-            std::cout << "err: " << err << std::endl;
-        }
-
-        std::vector<Triangle> objTriangles;
-        std::array<Vector, 3> points;
-        std::array<Vector, 3> normals;
-
-        if (result)
-        {
-            std::cout << "Loaded obj successfully" << std::endl;
-
-            std::cout << "Found " << shapes.size() << " shapes" << std::endl;
-
-            for (const auto& shape : shapes)
-            {
-                int indexOffset = 0;
-
-                for (const int vertexCount : shape.mesh.num_face_vertices)
-                {
-                    for (int v = 0; v < vertexCount; ++v)
-                    {
-                        tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-                        int vertexIndex = 3 * idx.vertex_index;
-                        int normalIndex = 3 * idx.normal_index;
-                        points[v].x = attrib.vertices[vertexIndex + 0];
-                        points[v].y = attrib.vertices[vertexIndex + 1];
-                        points[v].z = attrib.vertices[vertexIndex + 2];
-
-                        normals[v].x = attrib.normals[normalIndex + 0];
-                        normals[v].y = attrib.normals[normalIndex + 1];
-                        normals[v].z = attrib.normals[normalIndex + 2];
-                    }
-
-                    Triangle triangle{points[0], points[1], points[2]};
-                    triangle.aNormal = normals[0];
-                    triangle.bNormal = normals[1];
-                    triangle.cNormal = normals[2];
-
-                    objTriangles.push_back(triangle);
-
-                    indexOffset += vertexCount;
-                }
-            }
-        }
-        else
-        {
-            std::cout << "Failed to load obj" << std::endl;
-        }
-
-        std::cout << "Loaded " << objTriangles.size() << " triangles" << std::endl;
-
-        std::cout << "Generating mesh from OBJ" << std::endl;
-        std::shared_ptr<MeshVolume> knotMesh = std::make_shared<MeshVolume>(objTriangles);
+        std::cout << "knotMesh->hasType<Object>():     " << knotMesh->hasType<Object>() << std::endl;
+        std::cout << "knotMesh->hasType<Volume>():     " << knotMesh->hasType<Volume>() << std::endl;
+        std::cout << "knotMesh->hasType<MeshVolume>(): " << knotMesh->hasType<MeshVolume>() << std::endl;
+        std::cout << "knotMesh->hasType<int>():        " << knotMesh->hasType<int>() << std::endl;
 
         Image image(512, 512);
         Pixel workingPixel;
@@ -288,9 +325,9 @@ int main(int argc, char** argv)
         for (int i = 0; i < workerCount; ++i)
         {
             workers[i].index = i;
+            workers[i].objects = objects;
             workers[i].photonQueue = photonQueue;
             workers[i].hitQueue = hitQueue;
-            workers[i].volume = knotMesh;
             workers[i].fetchSize = 10000;
             workers[i].running = true;
             workers[i].suspend = false;
@@ -307,7 +344,7 @@ int main(int argc, char** argv)
         }
 
         int startFrame = 0;
-        int frameCount = 72;
+        int frameCount = 1;
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
@@ -511,7 +548,7 @@ int main(int argc, char** argv)
             std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
             std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sun_test_1." + std::to_string(frame) + ".png", image, "test");
+            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\object_test_0." + std::to_string(frame) + ".png", image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)

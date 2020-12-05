@@ -74,6 +74,8 @@ target_sources(ray-tracer
 
         include/WorkQueue.h
         src/WorkQueue.cpp
+
+        include/TypedObject.h
 )
 
 target_include_directories(ray-tracer

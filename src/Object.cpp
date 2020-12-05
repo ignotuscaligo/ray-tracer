@@ -2,16 +2,27 @@
 
 #include <algorithm>
 
-Object::Object(const std::string& iname)
-    : name(iname)
+Object::Object()
+    : TypedObject()
 {
+    registerType<Object>();
+}
+
+void Object::name(const std::string& name)
+{
+    m_name = name;
+}
+
+std::string Object::name() const
+{
+    return m_name;
 }
 
 Vector Object::position() const
 {
-    if (parent)
+    if (m_parent)
     {
-        return parent->position() + (parent->rotation() * transform.position);
+        return m_parent->position() + (m_parent->rotation() * transform.position);
     }
     else
     {
@@ -21,9 +32,9 @@ Vector Object::position() const
 
 Quaternion Object::rotation() const
 {
-    if (parent)
+    if (m_parent)
     {
-        return parent->rotation() * transform.rotation;
+        return m_parent->rotation() * transform.rotation;
     }
     else
     {
@@ -38,26 +49,26 @@ Vector Object::forward() const
 
 void Object::setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent)
 {
-    if (child->parent == parent)
+    if (child->m_parent == parent)
     {
         return;
     }
 
-    if (child->parent)
+    if (child->m_parent)
     {
-        auto it = std::find(std::begin(parent->children), std::end(parent->children), child);
+        auto it = std::find(std::begin(parent->m_children), std::end(parent->m_children), child);
 
-        if (it != parent->children.end())
+        if (it != parent->m_children.end())
         {
-            parent->children.erase(it);
+            parent->m_children.erase(it);
         }
 
-        child->parent = nullptr;
+        child->m_parent = nullptr;
     }
 
     if (parent)
     {
-        parent->children.push_back(child);
-        child->parent = parent;
+        parent->m_children.push_back(child);
+        child->m_parent = parent;
     }
 }
