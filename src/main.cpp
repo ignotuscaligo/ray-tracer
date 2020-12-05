@@ -9,7 +9,9 @@
 #include "TriangleTree.h"
 #include "Utility.h"
 #include "Photon.h"
+#include "Plane.h"
 #include "WorkQueue.h"
+#include "OmniLight.h"
 
 #include <tiny_obj_loader.h>
 
@@ -69,9 +71,9 @@ struct Worker
                 // std::cout << index << ": fetching " << fetchSize << " photons" << std::endl;
                 auto photons = photonQueue->fetch(fetchSize);
 
-                // std::cout << index << ": processing " << photons.endIndex - photons.startIndex << " photons" << std::endl;
+                // std::cout << index << ": processing " << photons.size() << " photons" << std::endl;
 
-                // size_t hitsGenerated = 0;
+                size_t hitsGenerated = 0;
 
                 hits.clear();
 
@@ -115,7 +117,7 @@ struct Worker
                         }
 
                         hits.push_back(hitResults[minIndex]);
-                        // ++hitsGenerated;
+                        ++hitsGenerated;
                     }
                 }
 
@@ -241,9 +243,114 @@ std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
     return std::make_shared<MeshVolume>(objTriangles);
 }
 
+struct PixelSensor
+{
+    PixelSensor() = default;
+
+    PixelSensor(Vector origin, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
+    {
+        base = origin;
+        // float pitchAB = pitch - (pitchStep / 2.0f);
+        // float pitchCD = pitch + (pitchStep / 2.0f);
+        // float yawAC = yaw + (yawStep / 2.0f);
+        // float yawBD = yaw - (yawStep / 2.0f);
+
+        // Quaternion angleA = Quaternion::fromPitchYawRoll(pitchAB, yawAC, 0);
+        // Quaternion angleB = Quaternion::fromPitchYawRoll(pitchAB, yawBD, 0);
+        // Quaternion angleC = Quaternion::fromPitchYawRoll(pitchCD, yawAC, 0);
+        // Quaternion angleD = Quaternion::fromPitchYawRoll(pitchCD, yawBD, 0);
+
+        // Vector directionA = (rotation * (angleA * Vector(0, 0, 1))) + origin;
+        // Vector directionB = (rotation * (angleB * Vector(0, 0, 1))) + origin;
+        // Vector directionC = (rotation * (angleC * Vector(0, 0, 1))) + origin;
+        // Vector directionD = (rotation * (angleD * Vector(0, 0, 1))) + origin;
+
+        // negY = Plane(origin, directionA, directionB);
+        // posY = Plane(origin, directionD, directionC);
+        // negX = Plane(origin, directionC, directionA);
+        // posX = Plane(origin, directionB, directionD);
+
+        float yCompAngle = pitch - (pitchStep / 2.0f);
+        float xCompAngle = yaw - (yawStep / 2.0f);
+
+        Quaternion centerRotation = Quaternion::fromPitchYawRoll(pitch, yaw, 0);
+        Quaternion yCompRotation = Quaternion::fromPitchYawRoll(0, yCompAngle, 0);
+        Quaternion xCompRotation = Quaternion::fromPitchYawRoll(xCompAngle, 0, 0);
+
+        Vector direction = (rotation * (centerRotation * Vector(0, 0, 1)));
+        Vector yCompDirection = (rotation * (centerRotation * (yCompRotation * Vector(0, 0, 1))));
+        Vector xCompDirection = (rotation * (centerRotation * (xCompRotation * Vector(0, 0, 1))));
+
+        yComp = yCompDirection - direction;
+        xComp = xCompDirection - direction;
+
+        yMag = yComp.magnitude();
+        xMag = xComp.magnitude();
+    }
+
+    bool containsPoint(const Vector& point) const
+    {
+        // return negY.pointAbovePlane(point)
+        //     && posY.pointAbovePlane(point)
+        //     && negX.pointAbovePlane(point)
+        //     && posX.pointAbovePlane(point);
+
+        std::cout << "containsPoint : point: " << point.x << ", " << point.y << ", " << point.z << std::endl;
+
+        Vector direction = (point - base).normalize();
+
+        std::cout << "containsPoint : direction: " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
+        std::cout << "containsPoint : yComp:     " << yComp.x << ", " << yComp.y << ", " << yComp.z << std::endl;
+        std::cout << "containsPoint : xComp:     " << xComp.x << ", " << xComp.y << ", " << xComp.z << std::endl;
+
+        return std::abs(Vector::dot(direction, yComp)) <= yMag
+            && std::abs(Vector::dot(direction, xComp)) <= xMag;
+    }
+
+    int x;
+    int y;
+    // Plane negY;
+    // Plane posY;
+    // Plane negX;
+    // Plane posX;
+
+    Vector base;
+    Vector yComp;
+    Vector xComp;
+    float yMag;
+    float xMag;
+};
+
 int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
+
+    // std::cout << "Plane test" << std::endl;
+
+    // Vector farAbovePoint{0, 1.5f, 0};
+    // Vector abovePoint{0, 0.5, 0};
+    // Vector onPoint{0, 0, 0};
+    // Vector belowPoint{0, -0.5, 0};
+    // Vector farBelowPoint{0, -1.5f, 0};
+
+    // Plane plane({0, 0, 0}, {1, 0, 0}, {0, 0, -1});
+
+    // PixelSensor sensor({0, 0, -1}, {}, 0, 0, radians(90), radians(90));
+
+    // std::cout << "sensor.negY.normal: " << sensor.negY.normal.x << ", " << sensor.negY.normal.y << ", " << sensor.negY.normal.z << std::endl;
+    // std::cout << "sensor.posY.normal: " << sensor.posY.normal.x << ", " << sensor.posY.normal.y << ", " << sensor.posY.normal.z << std::endl;
+    // std::cout << "sensor.negX.normal: " << sensor.negX.normal.x << ", " << sensor.negX.normal.y << ", " << sensor.negX.normal.z << std::endl;
+    // std::cout << "sensor.posX.normal: " << sensor.posX.normal.x << ", " << sensor.posX.normal.y << ", " << sensor.posX.normal.z << std::endl;
+
+    // std::cout << "plane.pointAbovePlane(abovePoint): " << plane.pointAbovePlane(abovePoint) << std::endl;
+    // std::cout << "plane.pointAbovePlane(onPoint):    " << plane.pointAbovePlane(onPoint) << std::endl;
+    // std::cout << "plane.pointAbovePlane(belowPoint): " << plane.pointAbovePlane(belowPoint) << std::endl;
+
+    // std::cout << "sensor.containsPoint(farAbovePoint): " << sensor.containsPoint(farAbovePoint) << std::endl;
+    // std::cout << "sensor.containsPoint(abovePoint):    " << sensor.containsPoint(abovePoint) << std::endl;
+    // std::cout << "sensor.containsPoint(onPoint):       " << sensor.containsPoint(onPoint) << std::endl;
+    // std::cout << "sensor.containsPoint(belowPoint):    " << sensor.containsPoint(belowPoint) << std::endl;
+    // std::cout << "sensor.containsPoint(farBelowPoint): " << sensor.containsPoint(farBelowPoint) << std::endl;
 
     try
     {
@@ -258,16 +365,17 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> camera = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
+        std::shared_ptr<OmniLight> omniLight = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
         Object::setParent(sun, cameraPivot);
         Object::setParent(knotMesh, root);
+        Object::setParent(omniLight, root);
 
-        std::cout << "knotMesh->hasType<Object>():     " << knotMesh->hasType<Object>() << std::endl;
-        std::cout << "knotMesh->hasType<Volume>():     " << knotMesh->hasType<Volume>() << std::endl;
-        std::cout << "knotMesh->hasType<MeshVolume>(): " << knotMesh->hasType<MeshVolume>() << std::endl;
-        std::cout << "knotMesh->hasType<int>():        " << knotMesh->hasType<int>() << std::endl;
+        omniLight->transform.position = {40, 40, 40};
+        omniLight->color({1.0f, 1.0f, 1.0f});
+        omniLight->brightness(1000000);
 
         Image image(512, 512);
         Pixel workingPixel;
@@ -279,8 +387,9 @@ int main(int argc, char** argv)
         sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
         std::cout << "Creating queues" << std::endl;
-        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(image.width() * image.height());
-        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(image.width() * image.height());
+        const size_t photonCount = 10000000;
+        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
+        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
 
         // Debug w/ batched hits + fetchSize 10k + no logging:
         // 1: 13667 ms
@@ -367,6 +476,11 @@ int main(int argc, char** argv)
             float horizontalFov = 80.0f;
             float verticalFov = 80.0f;
 
+            float pitchStep = verticalFov / static_cast<float>(image.height());
+            float yawStep = horizontalFov / static_cast<float>(image.width());
+
+            std::vector<PixelSensor> pixelSensors(image.width() * image.height());
+
             // for (int i = 0; i < workerCount; ++i)
             // {
             //     workers[i].suspend = true;
@@ -375,35 +489,46 @@ int main(int argc, char** argv)
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
             std::chrono::time_point generatePhotonsStart = std::chrono::system_clock::now();
 
-            // std::cout << "Generating photons" << std::endl;
+            std::cout << "Cast photons" << std::endl;
+            auto photons = photonQueue->initialize(photonCount);
+
+            std::cout << "Emitting " << photons.size() << " photons" << std::endl;
+            omniLight->emit(photons);
+
+            photonQueue->ready(photons);
+
+            std::cout << "photonQueue->available(): " << photonQueue->available() << std::endl;
+
+            std::cout << "Generate sensors" << std::endl;
             for (int y = 0; y < image.height(); ++y)
             {
                 float pitch = -((verticalFov / 2.0f) - ((y / (image.height() - 1.0f)) * verticalFov));
 
-                auto photons = photonQueue->initialize(image.width());
+                // auto photons = photonQueue->initialize(image.width());
 
                 for (int x = 0; x < image.width(); ++x)
                 {
-                    float yaw = (horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov);
+                    float yaw = -((horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov));
 
-                    Quaternion pixelAngle = cameraRotation * Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
-                    Vector direction = pixelAngle * Vector(0, 0, 1);
+                    // Quaternion pixelAngle = Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
+                    // Vector pixelDirection = pixelAngle * Vector(0, 0, 1);
+                    // Vector direction = cameraRotation * pixelDirection;
 
-                    // std::cout << "pitch, yaw: " << pitch << ", " << yaw << std::endl;
-                    // std::cout << "cameraForward: " << cameraForward.x << ", " << cameraForward.y << ", " << cameraForward.z << std::endl;
-                    // std::cout << "direction: " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
+                    pixelSensors[x + (y * image.width())] = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
+                    pixelSensors[x + (y * image.width())].x = x;
+                    pixelSensors[x + (y * image.width())].y = y;
 
-                    photons[x].ray = {cameraPosition, direction};
-                    photons[x].x = x;
-                    photons[x].y = y;
+                    // photons[x].ray = {cameraPosition, direction};
+                    // photons[x].x = x;
+                    // photons[x].y = y;
                 }
 
-                photonQueue->ready(photons);
+                // photonQueue->ready(photons);
             }
 
             std::chrono::time_point generatePhotonsEnd = std::chrono::system_clock::now();
 
-            size_t photonsGenerated = image.width() * image.height();
+            size_t photonsGenerated = photonCount;
 
             std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
             float generatePhotonsAverage = 0;
@@ -421,22 +546,20 @@ int main(int argc, char** argv)
             // }
 
             size_t currPhotons = photonQueue->allocated();
-            // size_t prevPhotons = currPhotons;
+            size_t prevPhotons = currPhotons;
 
+            std::cout << "Wait for " << currPhotons << " photons to be processed" << std::endl;
             while (currPhotons > 0)
             {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 currPhotons = photonQueue->allocated();
 
-                // if (currPhotons != prevPhotons)
-                // {
-                //     std::cout << currPhotons << " photons remaining" << std::endl;
-                //     std::cout << hitQueue->available() << " hits generated" << std::endl;
-                // }
+                if (currPhotons != prevPhotons)
+                {
+                    std::cout << currPhotons << " remaining" << std::endl;
+                }
 
-                // prevPhotons = currPhotons;
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                // std::cout << "sleep finished" << std::endl;
+                prevPhotons = currPhotons;
             }
 
             std::chrono::time_point processPhotonsEnd = std::chrono::system_clock::now();
@@ -453,52 +576,117 @@ int main(int argc, char** argv)
 
             std::chrono::time_point processHitsStart = std::chrono::system_clock::now();
 
+            std::cout << "Scan sensors" << std::endl;
             auto hits = hitQueue->fetch(hitQueue->available());
 
-            for (auto& photonHit : hits)
+            size_t currentSensor = 0;
+
+            float maxValue = 0;
+
+            for (const auto& sensor : pixelSensors)
             {
-                int sunCross = std::max(0.0f, Vector::dot(sunDirection, photonHit.hit.normal)) * 255;
+                Color color{};
 
-                workingPixel.red = sunCross;
-                workingPixel.green = sunCross;
-                workingPixel.blue = sunCross;
+                if (currentSensor % 500 == 0)
+                {
+                    std::cout << "sensor " << currentSensor << " / " << pixelSensors.size() << std::endl;
+                }
 
-                // int distance = std::min(std::max(0.0f, (hit->distance - 30.0f) / 70.0f), 1.0f) * 255;
-                // workingPixel.red = distance;
-                // workingPixel.green = distance;
-                // workingPixel.blue = distance;
+                for (auto& photonHit : hits)
+                {
+                    if (photonHit.processed)
+                    {
+                        continue;
+                    }
 
-                // workingPixel.red = std::abs(hit->normal.x) * 255;
-                // workingPixel.green = std::abs(hit->normal.y) * 255;
-                // workingPixel.blue = std::abs(hit->normal.z) * 255;
+                    if (sensor.containsPoint(photonHit.hit.position))
+                    {
+                        photonHit.processed = true;
+                        color += photonHit.photon.color;
+                    }
+                }
 
-                // workingPixel.red = (0.5f + (hit->normal.x / 2.0f)) * 255;
-                // workingPixel.green = (0.5f + (hit->normal.y / 2.0f)) * 255;
-                // workingPixel.blue = (0.5f + (hit->normal.z / 2.0f)) * 255;
+                auto pixel = image.getPixel(sensor.x, sensor.y);
+                pixel.red = std::min(static_cast<int>(color.red * 255), 255);
+                pixel.green = std::min(static_cast<int>(color.green * 255), 255);
+                pixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
+                image.setPixel(sensor.x, sensor.y, pixel);
 
-                // workingPixel.red = hit->coords.x * 255;
-                // workingPixel.green = hit->coords.y * 255;
-                // workingPixel.blue = hit->coords.z * 255;
+                maxValue = std::max(color.red, maxValue);
 
-                // const Vector& normal = hit->triangle.normal;
-
-                // Vector delta = -direction - normal;
-                // workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
-                // workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
-                // workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
-
-                // workingPixel.red = (0.5f + (hit->triangle.aNormal.x / 2.0f)) * 255;
-                // workingPixel.green = (0.5f + (hit->triangle.aNormal.y / 2.0f)) * 255;
-                // workingPixel.blue = (0.5f + (hit->triangle.aNormal.z / 2.0f)) * 255;
-
-                // workingPixel.red = std::abs(delta.x * 0.5f) * 255;
-                // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
-                // workingPixel.blue = std::abs(delta.z * 0.5f) * 255;
-
-                image.setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
+                ++currentSensor;
             }
 
+            std::cout << "brightest pixel: " << maxValue * 255 << std::endl;
+
+            // for (auto& photonHit : hits)
+            // {
+            //     if (currentHit % 1000 == 0)
+            //     {
+            //         std::cout << "hit: " << currentHit << " / " << hitsGenerated << std::endl;
+            //     }
+
+            //     for (const auto& sensor : pixelSensors)
+            //     {
+            //         if (sensor.containsPoint(photonHit.hit.position))
+            //         {
+            //             auto pixel = image.getPixel(sensor.x, sensor.y);
+            //             pixel.red = std::min(pixel.red + static_cast<int>(photonHit.photon.color.red * 255), 255);
+            //             pixel.green = std::min(pixel.green + static_cast<int>(photonHit.photon.color.green * 255), 255);
+            //             pixel.blue = std::min(pixel.blue + static_cast<int>(photonHit.photon.color.blue * 255), 255);
+
+            //             // std::cout << "set pixel " << sensor.x << ", " << sensor.y << std::endl;
+
+            //             // image.setPixel(sensor.x, sensor.y, workingPixel);
+            //             break;
+            //         }
+            //     }
+
+            //     ++currentHit;
+            //     // int sunCross = std::max(0.0f, Vector::dot(sunDirection, photonHit.hit.normal)) * 255;
+
+            //     // workingPixel.red = sunCross;
+            //     // workingPixel.green = sunCross;
+            //     // workingPixel.blue = sunCross;
+
+            //     // // int distance = std::min(std::max(0.0f, (hit->distance - 30.0f) / 70.0f), 1.0f) * 255;
+            //     // // workingPixel.red = distance;
+            //     // // workingPixel.green = distance;
+            //     // // workingPixel.blue = distance;
+
+            //     // // workingPixel.red = std::abs(hit->normal.x) * 255;
+            //     // // workingPixel.green = std::abs(hit->normal.y) * 255;
+            //     // // workingPixel.blue = std::abs(hit->normal.z) * 255;
+
+            //     // // workingPixel.red = (0.5f + (hit->normal.x / 2.0f)) * 255;
+            //     // // workingPixel.green = (0.5f + (hit->normal.y / 2.0f)) * 255;
+            //     // // workingPixel.blue = (0.5f + (hit->normal.z / 2.0f)) * 255;
+
+            //     // // workingPixel.red = hit->coords.x * 255;
+            //     // // workingPixel.green = hit->coords.y * 255;
+            //     // // workingPixel.blue = hit->coords.z * 255;
+
+            //     // // const Vector& normal = hit->triangle.normal;
+
+            //     // // Vector delta = -direction - normal;
+            //     // // workingPixel.red = std::min(std::max(0, static_cast<int>((0.5f + (delta.x * 0.4f)) * 255)), 255);
+            //     // // workingPixel.green = std::min(std::max(0, static_cast<int>((0.5f + (delta.y * 0.4f)) * 255)), 255);
+            //     // // workingPixel.blue = std::min(std::max(0, static_cast<int>((0.5f + (delta.z * 0.4f)) * 255)), 255);
+
+            //     // // workingPixel.red = (0.5f + (hit->triangle.aNormal.x / 2.0f)) * 255;
+            //     // // workingPixel.green = (0.5f + (hit->triangle.aNormal.y / 2.0f)) * 255;
+            //     // // workingPixel.blue = (0.5f + (hit->triangle.aNormal.z / 2.0f)) * 255;
+
+            //     // // workingPixel.red = std::abs(delta.x * 0.5f) * 255;
+            //     // // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
+            //     // // workingPixel.blue = std::abs(delta.z * 0.5f) * 255;
+
+            //     // image.setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
+            // }
+
             hitQueue->release(hits);
+
+            std::cout << "Finished" << std::endl;
 
             std::chrono::time_point processHitsEnd = std::chrono::system_clock::now();
 
@@ -548,7 +736,7 @@ int main(int argc, char** argv)
             std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
             std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\object_test_0." + std::to_string(frame) + ".png", image, "test");
+            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sensor_test_0." + std::to_string(frame) + ".png", image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)

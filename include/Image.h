@@ -14,6 +14,7 @@ public:
 
     Pixel* getRow(int row);
     void setPixel(int x, int y, Pixel pixel);
+    Pixel getPixel(int x, int y);
     void clear();
 
 private:

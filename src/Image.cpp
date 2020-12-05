@@ -29,6 +29,11 @@ void Image::setPixel(int x, int y, Pixel pixel)
     m_pixels.get()[(y * m_width) + x] = pixel;
 }
 
+Pixel Image::getPixel(int x, int y)
+{
+    return m_pixels.get()[(y * m_width) + x];
+}
+
 void Image::clear()
 {
     std::memset(m_pixels.get(), 0, m_width * m_height * sizeof(Pixel));

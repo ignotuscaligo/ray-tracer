@@ -76,6 +76,15 @@ target_sources(ray-tracer
         src/WorkQueue.cpp
 
         include/TypedObject.h
+
+        include/Light.h
+        src/Light.cpp
+
+        include/OmniLight.h
+        src/OmniLight.cpp
+
+        include/Plane.h
+        src/Plane.cpp
 )
 
 target_include_directories(ray-tracer

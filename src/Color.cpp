@@ -1,5 +1,10 @@
 #include "Color.h"
 
+Color::Color()
+    : Color(0.0f)
+{
+}
+
 Color::Color(float grey)
     : red(grey)
     , green(grey)
@@ -12,6 +17,15 @@ Color::Color(float ired, float igreen, float iblue)
     , green(igreen)
     , blue(iblue)
 {
+}
+
+Color Color::operator+=(const Color& rhs)
+{
+    red += rhs.red;
+    green += rhs.green;
+    blue += rhs.blue;
+
+    return *this;
 }
 
 Color operator*(const Color& lhs, float rhs)

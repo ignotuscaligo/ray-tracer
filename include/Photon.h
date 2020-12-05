@@ -20,4 +20,5 @@ struct PhotonHit
 {
     Photon photon;
     Hit hit;
+    bool processed;
 };

@@ -6,9 +6,11 @@ struct Color
     float green;
     float blue;
 
-    Color() = default;
+    Color();
     Color(float grey);
     Color(float ired, float igreen, float iblue);
+
+    Color operator+=(const Color& rhs);
 };
 
 Color operator*(const Color& lhs, float rhs);

@@ -67,7 +67,6 @@ WorkQueue<T>::WorkQueue(size_t size)
     , m_allocated(0)
     , m_available(0)
 {
-    std::cout << "m_allocated is lock free? " << m_allocated.is_lock_free() << std::endl;
 }
 
 template<typename T>
@@ -123,23 +122,24 @@ void WorkQueue<T>::ready(Block block)
         if (block.startIndex != block.endIndex)
         {
             auto it = m_initializing.find(block.endIndex);
-            m_initializing.erase(it);
 
             size_t head = m_memoryHead;
 
             if (!m_initializing.empty())
             {
-                head = *m_initializing.begin() % m_size;
+                head = *m_initializing.begin();
             }
+
+            m_initializing.erase(it);
 
             // std::cout << "readyHead " << m_readyHead;
 
             size_t prev = m_readyHead;
-            m_readyHead = head;
+            m_readyHead = head % m_size;
 
             if (head > prev)
             {
-                m_available.fetch_add(m_readyHead - prev);
+                m_available.fetch_add(head - prev);
             }
             else if (head < prev)
             {
@@ -212,22 +212,30 @@ void WorkQueue<T>::release(Block block)
 
             if (!m_processing.empty())
             {
-                tail = *m_processing.begin() % m_size;
+                tail = *m_processing.begin();
             }
 
             // std::cout << "memoryTail " << m_memoryTail;
 
             size_t prev = m_memoryTail;
-            m_memoryTail = tail;
+            m_memoryTail = tail % m_size;
 
-            if (tail > prev)
-            {
-                m_allocated.fetch_sub(m_memoryTail - prev);
-            }
-            else if (tail < prev)
-            {
-                m_allocated.fetch_sub((m_memoryTail + m_size) - prev);
-            }
+            // std::cout << "release : block.startIndex: " << block.startIndex << std::endl;
+            // std::cout << "release : block.endIndex:   " << block.endIndex << std::endl;
+            // std::cout << "release : m_readyTail:      " << m_readyTail << std::endl;
+            // std::cout << "release : tail:             " << tail << std::endl;
+            // std::cout << "release : prev:             " << prev << std::endl;
+
+            m_allocated.fetch_sub(block.endIndex - block.startIndex);
+
+            // if (tail > prev)
+            // {
+            //     m_allocated.fetch_sub(tail - prev);
+            // }
+            // else if (tail < prev)
+            // {
+            //     m_allocated.fetch_sub((m_memoryTail + m_size) - prev);
+            // }
 
             // std::cout << " -> " << m_memoryTail << std::endl;
         }
