@@ -3,15 +3,15 @@
 #include "Image.h"
 #include "MeshVolume.h"
 #include "Object.h"
-#include "Pixel.h"
-#include "PngWriter.h"
-#include "Quaternion.h"
-#include "TriangleTree.h"
-#include "Utility.h"
-#include "Photon.h"
-#include "Plane.h"
-#include "WorkQueue.h"
 #include "OmniLight.h"
+#include "Photon.h"
+#include "Pixel.h"
+#include "Plane.h"
+#include "PngWriter.h"
+#include "Pyramid.h"
+#include "Quaternion.h"
+#include "Utility.h"
+#include "WorkQueue.h"
 
 #include <tiny_obj_loader.h>
 
@@ -248,89 +248,19 @@ struct PixelSensor
     PixelSensor() = default;
 
     PixelSensor(Vector position, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
+        : pyramid(position, rotation, pitch, yaw, pitchStep, yawStep)
     {
-        origin = position;
-        // float pitchAB = pitch - (pitchStep / 2.0f);
-        // float pitchCD = pitch + (pitchStep / 2.0f);
-        // float yawAC = yaw + (yawStep / 2.0f);
-        // float yawBD = yaw - (yawStep / 2.0f);
-
-        // Quaternion angleA = Quaternion::fromPitchYawRoll(pitchAB, yawAC, 0);
-        // Quaternion angleB = Quaternion::fromPitchYawRoll(pitchAB, yawBD, 0);
-        // Quaternion angleC = Quaternion::fromPitchYawRoll(pitchCD, yawAC, 0);
-        // Quaternion angleD = Quaternion::fromPitchYawRoll(pitchCD, yawBD, 0);
-
-        // Vector directionA = (rotation * (angleA * Vector(0, 0, 1))) + position;
-        // Vector directionB = (rotation * (angleB * Vector(0, 0, 1))) + position;
-        // Vector directionC = (rotation * (angleC * Vector(0, 0, 1))) + position;
-        // Vector directionD = (rotation * (angleD * Vector(0, 0, 1))) + position;
-
-        // negY = Plane(position, directionA, directionB);
-        // posY = Plane(position, directionD, directionC);
-        // negX = Plane(position, directionC, directionA);
-        // posX = Plane(position, directionB, directionD);
-
-        // float yCompAngle = pitch - (pitchStep / 2.0f);
-        // float xCompAngle = yaw - (yawStep / 2.0f);
-
-        Quaternion centerRotation = Quaternion::fromPitchYawRoll(pitch, yaw, 0);
-        // Vector yCompRotation = Quaternion::fromPitchYawRoll(0, yCompAngle, 0);
-        // Vector xCompRotation = Quaternion::fromPitchYawRoll(xCompAngle, 0, 0);
-
-        yComp = {0, std::sin(pitchStep / 2.0f), 0};
-        xComp = {std::sin(yawStep / 2.0f), 0, 0};
-
-        direction = (rotation * (centerRotation * Vector(0, 0, 1)));
-        // Vector yCompDirection = (rotation * (yCompRotation * Vector(0, 0, 1)));
-        // Vector xCompDirection = (rotation * (xCompRotation * Vector(0, 0, 1)));
-
-        yComp = (rotation * (centerRotation * yComp));
-        xComp = (rotation * (centerRotation * xComp));
-
-        yDot = yComp.magnitude();
-        yDot *= yDot;
-        xDot = xComp.magnitude();
-        xDot *= xDot;
     }
 
     bool containsPoint(const Vector& point) const
     {
-        // return negY.pointAbovePlane(point)
-        //     && posY.pointAbovePlane(point)
-        //     && negX.pointAbovePlane(point)
-        //     && posX.pointAbovePlane(point);
-
-        Vector test = (point - origin).normalize();
-
-        // std::cout << "containsPoint --------------------" << std::endl;
-        // std::cout << "containsPoint : point:            " << point.x << ", " << point.y << ", " << point.z << std::endl;
-        // std::cout << "containsPoint : test:             " << test.x << ", " << test.y << ", " << test.z << std::endl;
-        // std::cout << "containsPoint : direction:        " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
-        // std::cout << "containsPoint : yComp:            " << yComp.x << ", " << yComp.y << ", " << yComp.z << std::endl;
-        // std::cout << "containsPoint : yDot:             " << yDot << std::endl;
-        // std::cout << "containsPoint : xComp:            " << xComp.x << ", " << xComp.y << ", " << xComp.z << std::endl;
-        // std::cout << "containsPoint : xDot:             " << xDot << std::endl;
-        // std::cout << "containsPoint : dot(test, yComp): " << Vector::dot(test, yComp) << std::endl;
-        // std::cout << "containsPoint : dot(test, xComp): " << Vector::dot(test, xComp) << std::endl;
-
-        return Vector::dot(test, direction) > 0
-            && std::abs(Vector::dot(test, yComp)) <= yDot
-            && std::abs(Vector::dot(test, xComp)) <= xDot;
+        return pyramid.containsPoint(point);
     }
 
     int x;
     int y;
-    // Plane negY;
-    // Plane posY;
-    // Plane negX;
-    // Plane posX;
 
-    Vector origin;
-    Vector direction;
-    Vector yComp;
-    Vector xComp;
-    float yDot;
-    float xDot;
+    Pyramid pyramid;
 };
 
 int main(int argc, char** argv)
@@ -387,7 +317,7 @@ int main(int argc, char** argv)
 
         omniLight->transform.position = {40, 40, -40};
         omniLight->color({1.0f, 1.0f, 1.0f});
-        omniLight->brightness(1000000);
+        omniLight->brightness(100000);
 
         Image image(256, 256);
         Pixel workingPixel;
@@ -589,9 +519,15 @@ int main(int argc, char** argv)
             std::chrono::time_point processHitsStart = std::chrono::system_clock::now();
 
             std::cout << "Scan sensors" << std::endl;
-            auto hits = hitQueue->fetch(hitQueue->available());
+            auto hitsBlock = hitQueue->fetch(hitQueue->available());
 
-            std::cout << "Processing " << hits.size() << " hits" << std::endl;
+            std::vector<PhotonHit> finalHits{hitsBlock.toVector()};
+
+            hitQueue->release(hitsBlock);
+
+            std::cout << "Processing " << finalHits.size() << " hits" << std::endl;
+
+            Tree<PhotonHit> finalTree{finalHits};
 
             size_t currentSensor = 0;
 
@@ -609,18 +545,12 @@ int main(int argc, char** argv)
                     containedPoints = 0;
                 }
 
+                std::vector<PhotonHit> hits = finalTree.fetchWithinPyramid(sensor.pyramid);
+
                 for (auto& photonHit : hits)
                 {
-                    if (sensor.containsPoint(photonHit.hit.position))
-                    {
-                        // std::cout << "containsPoint : yes" << std::endl;
-                        color += photonHit.photon.color;
-                        ++containedPoints;
-                    }
-                    else
-                    {
-                        // std::cout << "containsPoint : no xxx" << std::endl;
-                    }
+                    color += photonHit.photon.color;
+                    ++containedPoints;
                 }
 
                 workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
@@ -635,7 +565,7 @@ int main(int argc, char** argv)
 
             std::cout << "brightest pixel: " << maxValue * 255 << std::endl;
 
-            // for (auto& photonHit : hits)
+            // for (auto& photonHit : finalHits)
             // {
             //     if (currentHit % 1000 == 0)
             //     {
@@ -699,8 +629,6 @@ int main(int argc, char** argv)
 
             //     // image.setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
             // }
-
-            hitQueue->release(hits);
 
             std::cout << "Finished" << std::endl;
 

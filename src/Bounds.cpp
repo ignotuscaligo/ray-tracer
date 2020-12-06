@@ -14,6 +14,11 @@ Limits::Limits(float imin, float imax)
 {
 }
 
+Limits::Limits(float value)
+    : Limits(value, value)
+{
+}
+
 bool Limits::contains(float value) const
 {
     return value >= min && value <= max;
@@ -48,6 +53,11 @@ Bounds::Bounds(Limits ix, Limits iy, Limits iz)
     : x(ix)
     , y(iy)
     , z(iz)
+{
+}
+
+Bounds::Bounds(Vector vector)
+    : Bounds({vector.x}, {vector.y}, {vector.z})
 {
 }
 

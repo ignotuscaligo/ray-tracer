@@ -9,6 +9,7 @@ struct Limits
 
     Limits();
     Limits(float imin, float imax);
+    Limits(float value);
 
     bool contains(float value) const;
     bool intersects(const Limits& other) const;
@@ -25,6 +26,7 @@ struct Bounds
 
     Bounds();
     Bounds(Limits ix, Limits iy, Limits iz);
+    Bounds(Vector vector);
 
     void extend(Limits limits, Axis axis);
     Limits getLimits(Axis axis) const;

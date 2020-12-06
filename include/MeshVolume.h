@@ -2,7 +2,7 @@
 
 #include "Hit.h"
 #include "Ray.h"
-#include "TriangleTree.h"
+#include "Tree.h"
 #include "Volume.h"
 
 #include <optional>
@@ -16,5 +16,5 @@ public:
     std::optional<Hit> castRay(const Ray& ray) const override;
 
 private:
-    TriangleTree m_tree;
+    Tree<Triangle> m_tree;
 };

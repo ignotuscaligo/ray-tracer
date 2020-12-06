@@ -36,8 +36,8 @@ target_sources(ray-tracer
         include/Triangle.h
         src/Triangle.cpp
 
-        include/TriangleTree.h
-        src/TriangleTree.cpp
+        include/Tree.h
+        src/Tree.cpp
 
         include/Utility.h
         src/Utility.cpp
@@ -85,6 +85,9 @@ target_sources(ray-tracer
 
         include/Plane.h
         src/Plane.cpp
+
+        include/Pyramid.h
+        src/Pyramid.cpp
 )
 
 target_include_directories(ray-tracer

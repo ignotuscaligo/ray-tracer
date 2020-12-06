@@ -47,6 +47,12 @@ typename WorkQueue<T>::Block::Iterator WorkQueue<T>::Block::end() const
 template<typename T>
 T& WorkQueue<T>::Block::operator[](size_t accessIndex)
 {
+    return at(accessIndex);
+}
+
+template<typename T>
+T& WorkQueue<T>::Block::at(size_t accessIndex)
+{
     return m_queue[(startIndex + accessIndex) % m_queue.size()];
 }
 
@@ -54,6 +60,19 @@ template<typename T>
 size_t WorkQueue<T>::Block::size() const
 {
     return endIndex - startIndex;
+}
+
+template<typename T>
+std::vector<T> WorkQueue<T>::Block::toVector() const
+{
+    std::vector<T> objects(size());
+
+    for (size_t i = 0; i < size(); ++i)
+    {
+        objects.push_back(m_queue[(startIndex + i) % m_queue.size()]);
+    }
+
+    return objects;
 }
 
 template<typename T>
@@ -267,7 +286,9 @@ template void WorkQueue<Photon>::Block::Iterator::operator++();
 template typename WorkQueue<Photon>::Block::Iterator WorkQueue<Photon>::Block::begin() const;
 template typename WorkQueue<Photon>::Block::Iterator WorkQueue<Photon>::Block::end() const;
 template Photon& WorkQueue<Photon>::Block::operator[](size_t accessIndex);
+template Photon& WorkQueue<Photon>::Block::at(size_t accessIndex);
 template size_t WorkQueue<Photon>::Block::size() const;
+template std::vector<Photon> WorkQueue<Photon>::Block::toVector() const;
 template WorkQueue<Photon>::WorkQueue(size_t size);
 template typename WorkQueue<Photon>::Block WorkQueue<Photon>::initialize(size_t count);
 template void WorkQueue<Photon>::ready(Block block);
@@ -284,7 +305,9 @@ template void WorkQueue<PhotonHit>::Block::Iterator::operator++();
 template typename WorkQueue<PhotonHit>::Block::Iterator WorkQueue<PhotonHit>::Block::begin() const;
 template typename WorkQueue<PhotonHit>::Block::Iterator WorkQueue<PhotonHit>::Block::end() const;
 template PhotonHit& WorkQueue<PhotonHit>::Block::operator[](size_t accessIndex);
+template PhotonHit& WorkQueue<PhotonHit>::Block::at(size_t accessIndex);
 template size_t WorkQueue<PhotonHit>::Block::size() const;
+template std::vector<PhotonHit> WorkQueue<PhotonHit>::Block::toVector() const;
 template WorkQueue<PhotonHit>::WorkQueue(size_t size);
 template typename WorkQueue<PhotonHit>::Block WorkQueue<PhotonHit>::initialize(size_t count);
 template void WorkQueue<PhotonHit>::ready(Block block);

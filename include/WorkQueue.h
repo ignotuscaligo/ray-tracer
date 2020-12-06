@@ -28,8 +28,11 @@ public:
         Iterator end() const;
 
         T& operator[](size_t accessIndex);
+        T& at(size_t accessIndex);
 
         size_t size() const;
+
+        std::vector<T> toVector() const;
 
         const size_t startIndex;
         const size_t endIndex;
