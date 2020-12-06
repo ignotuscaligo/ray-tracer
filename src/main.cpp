@@ -247,9 +247,9 @@ struct PixelSensor
 {
     PixelSensor() = default;
 
-    PixelSensor(Vector origin, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
+    PixelSensor(Vector position, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
     {
-        base = origin;
+        origin = position;
         // float pitchAB = pitch - (pitchStep / 2.0f);
         // float pitchCD = pitch + (pitchStep / 2.0f);
         // float yawAC = yaw + (yawStep / 2.0f);
@@ -260,32 +260,37 @@ struct PixelSensor
         // Quaternion angleC = Quaternion::fromPitchYawRoll(pitchCD, yawAC, 0);
         // Quaternion angleD = Quaternion::fromPitchYawRoll(pitchCD, yawBD, 0);
 
-        // Vector directionA = (rotation * (angleA * Vector(0, 0, 1))) + origin;
-        // Vector directionB = (rotation * (angleB * Vector(0, 0, 1))) + origin;
-        // Vector directionC = (rotation * (angleC * Vector(0, 0, 1))) + origin;
-        // Vector directionD = (rotation * (angleD * Vector(0, 0, 1))) + origin;
+        // Vector directionA = (rotation * (angleA * Vector(0, 0, 1))) + position;
+        // Vector directionB = (rotation * (angleB * Vector(0, 0, 1))) + position;
+        // Vector directionC = (rotation * (angleC * Vector(0, 0, 1))) + position;
+        // Vector directionD = (rotation * (angleD * Vector(0, 0, 1))) + position;
 
-        // negY = Plane(origin, directionA, directionB);
-        // posY = Plane(origin, directionD, directionC);
-        // negX = Plane(origin, directionC, directionA);
-        // posX = Plane(origin, directionB, directionD);
+        // negY = Plane(position, directionA, directionB);
+        // posY = Plane(position, directionD, directionC);
+        // negX = Plane(position, directionC, directionA);
+        // posX = Plane(position, directionB, directionD);
 
-        float yCompAngle = pitch - (pitchStep / 2.0f);
-        float xCompAngle = yaw - (yawStep / 2.0f);
+        // float yCompAngle = pitch - (pitchStep / 2.0f);
+        // float xCompAngle = yaw - (yawStep / 2.0f);
 
         Quaternion centerRotation = Quaternion::fromPitchYawRoll(pitch, yaw, 0);
-        Quaternion yCompRotation = Quaternion::fromPitchYawRoll(0, yCompAngle, 0);
-        Quaternion xCompRotation = Quaternion::fromPitchYawRoll(xCompAngle, 0, 0);
+        // Vector yCompRotation = Quaternion::fromPitchYawRoll(0, yCompAngle, 0);
+        // Vector xCompRotation = Quaternion::fromPitchYawRoll(xCompAngle, 0, 0);
 
-        Vector direction = (rotation * (centerRotation * Vector(0, 0, 1)));
-        Vector yCompDirection = (rotation * (centerRotation * (yCompRotation * Vector(0, 0, 1))));
-        Vector xCompDirection = (rotation * (centerRotation * (xCompRotation * Vector(0, 0, 1))));
+        yComp = {0, std::sin(pitchStep / 2.0f), 0};
+        xComp = {std::sin(yawStep / 2.0f), 0, 0};
 
-        yComp = yCompDirection - direction;
-        xComp = xCompDirection - direction;
+        direction = (rotation * (centerRotation * Vector(0, 0, 1)));
+        // Vector yCompDirection = (rotation * (yCompRotation * Vector(0, 0, 1)));
+        // Vector xCompDirection = (rotation * (xCompRotation * Vector(0, 0, 1)));
 
-        yMag = yComp.magnitude();
-        xMag = xComp.magnitude();
+        yComp = (rotation * (centerRotation * yComp));
+        xComp = (rotation * (centerRotation * xComp));
+
+        yDot = yComp.magnitude();
+        yDot *= yDot;
+        xDot = xComp.magnitude();
+        xDot *= xDot;
     }
 
     bool containsPoint(const Vector& point) const
@@ -295,16 +300,22 @@ struct PixelSensor
         //     && negX.pointAbovePlane(point)
         //     && posX.pointAbovePlane(point);
 
-        std::cout << "containsPoint : point: " << point.x << ", " << point.y << ", " << point.z << std::endl;
+        Vector test = (point - origin).normalize();
 
-        Vector direction = (point - base).normalize();
+        // std::cout << "containsPoint --------------------" << std::endl;
+        // std::cout << "containsPoint : point:            " << point.x << ", " << point.y << ", " << point.z << std::endl;
+        // std::cout << "containsPoint : test:             " << test.x << ", " << test.y << ", " << test.z << std::endl;
+        // std::cout << "containsPoint : direction:        " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
+        // std::cout << "containsPoint : yComp:            " << yComp.x << ", " << yComp.y << ", " << yComp.z << std::endl;
+        // std::cout << "containsPoint : yDot:             " << yDot << std::endl;
+        // std::cout << "containsPoint : xComp:            " << xComp.x << ", " << xComp.y << ", " << xComp.z << std::endl;
+        // std::cout << "containsPoint : xDot:             " << xDot << std::endl;
+        // std::cout << "containsPoint : dot(test, yComp): " << Vector::dot(test, yComp) << std::endl;
+        // std::cout << "containsPoint : dot(test, xComp): " << Vector::dot(test, xComp) << std::endl;
 
-        std::cout << "containsPoint : direction: " << direction.x << ", " << direction.y << ", " << direction.z << std::endl;
-        std::cout << "containsPoint : yComp:     " << yComp.x << ", " << yComp.y << ", " << yComp.z << std::endl;
-        std::cout << "containsPoint : xComp:     " << xComp.x << ", " << xComp.y << ", " << xComp.z << std::endl;
-
-        return std::abs(Vector::dot(direction, yComp)) <= yMag
-            && std::abs(Vector::dot(direction, xComp)) <= xMag;
+        return Vector::dot(test, direction) > 0
+            && std::abs(Vector::dot(test, yComp)) <= yDot
+            && std::abs(Vector::dot(test, xComp)) <= xDot;
     }
 
     int x;
@@ -314,11 +325,12 @@ struct PixelSensor
     // Plane negX;
     // Plane posX;
 
-    Vector base;
+    Vector origin;
+    Vector direction;
     Vector yComp;
     Vector xComp;
-    float yMag;
-    float xMag;
+    float yDot;
+    float xDot;
 };
 
 int main(int argc, char** argv)
@@ -373,21 +385,21 @@ int main(int argc, char** argv)
         Object::setParent(knotMesh, root);
         Object::setParent(omniLight, root);
 
-        omniLight->transform.position = {40, 40, 40};
+        omniLight->transform.position = {40, 40, -40};
         omniLight->color({1.0f, 1.0f, 1.0f});
         omniLight->brightness(1000000);
 
-        Image image(512, 512);
+        Image image(256, 256);
         Pixel workingPixel;
 
         std::cout << "Rendering image at " << image.width() << " px by " << image.height() << " px" << std::endl;
 
-        camera->transform.position = {0.0f, 0.0f, -70.0f};
+        camera->transform.position = {0.0f, 0.0f, -55.0f};
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
         std::cout << "Creating queues" << std::endl;
-        const size_t photonCount = 10000000;
+        const size_t photonCount = 1000000;
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
 
@@ -579,9 +591,13 @@ int main(int argc, char** argv)
             std::cout << "Scan sensors" << std::endl;
             auto hits = hitQueue->fetch(hitQueue->available());
 
+            std::cout << "Processing " << hits.size() << " hits" << std::endl;
+
             size_t currentSensor = 0;
 
             float maxValue = 0;
+
+            size_t containedPoints = 0;
 
             for (const auto& sensor : pixelSensors)
             {
@@ -589,28 +605,28 @@ int main(int argc, char** argv)
 
                 if (currentSensor % 500 == 0)
                 {
-                    std::cout << "sensor " << currentSensor << " / " << pixelSensors.size() << std::endl;
+                    std::cout << "sensor " << currentSensor << " / " << pixelSensors.size() << ", points: " << containedPoints << std::endl;
+                    containedPoints = 0;
                 }
 
                 for (auto& photonHit : hits)
                 {
-                    if (photonHit.processed)
-                    {
-                        continue;
-                    }
-
                     if (sensor.containsPoint(photonHit.hit.position))
                     {
-                        photonHit.processed = true;
+                        // std::cout << "containsPoint : yes" << std::endl;
                         color += photonHit.photon.color;
+                        ++containedPoints;
+                    }
+                    else
+                    {
+                        // std::cout << "containsPoint : no xxx" << std::endl;
                     }
                 }
 
-                auto pixel = image.getPixel(sensor.x, sensor.y);
-                pixel.red = std::min(static_cast<int>(color.red * 255), 255);
-                pixel.green = std::min(static_cast<int>(color.green * 255), 255);
-                pixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
-                image.setPixel(sensor.x, sensor.y, pixel);
+                workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
+                workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
+                workingPixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
+                image.setPixel(sensor.x, sensor.y, workingPixel);
 
                 maxValue = std::max(color.red, maxValue);
 
