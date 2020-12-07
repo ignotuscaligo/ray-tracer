@@ -12,7 +12,67 @@
 #include <string>
 
 template<typename T>
-Tree<T>::Tree(const std::vector<T>& objects)
+size_t Tree<T>::Node::size() const
+{
+    size_t count = 0;
+
+    if (page)
+    {
+        count += page->contents.size();
+    }
+
+    if (left)
+    {
+        count += left->size();
+    }
+
+    if (right)
+    {
+        count += right->size();
+    }
+
+    return count;
+}
+
+template<typename T>
+size_t Tree<T>::Node::nodeCount() const
+{
+    size_t count = 1;
+
+    if (left)
+    {
+        count += left->nodeCount();
+    }
+
+    if (right)
+    {
+        count += right->nodeCount();
+    }
+
+    return count;
+}
+
+template<typename T>
+size_t Tree<T>::Node::nodeDepth() const
+{
+    size_t depth = 1;
+
+    if (left)
+    {
+        depth = std::max(depth, left->nodeDepth() + 1);
+    }
+
+    if (right)
+    {
+        depth = std::max(depth, right->nodeDepth() + 1);
+    }
+
+    return depth;
+}
+
+template<typename T>
+Tree<T>::Tree(const std::vector<T>& objects, size_t pageSize)
+    : m_pageSize(pageSize)
 {
     m_root = generateTree(objects, Axis::X);
 }
@@ -21,6 +81,24 @@ template<typename T>
 std::shared_ptr<typename Tree<T>::Node> Tree<T>::root()
 {
     return m_root;
+}
+
+template<typename T>
+size_t Tree<T>::size() const
+{
+    return m_root->size();
+}
+
+template<typename T>
+size_t Tree<T>::nodeCount() const
+{
+    return m_root->nodeCount();
+}
+
+template<typename T>
+size_t Tree<T>::nodeDepth() const
+{
+    return m_root->nodeDepth();
 }
 
 template<typename T>
@@ -48,6 +126,7 @@ std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
 template<typename T>
 std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const
 {
+    // std::cout << "--- fetchWithinPyramid ---" << std::endl;
     std::vector<T> objects;
 
     Tree<T>::fetchWithinPyramidFromNode(pyramid, m_root, objects);
@@ -148,6 +227,27 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
             fetchWithinPyramidFromNode(pyramid, node->right, objects);
         }
     }
+
+    // if (node->page)
+    // {
+    //     for (const auto& object : node->page->contents)
+    //     {
+    //         if (pyramid.containsPoint(Tree<T>::getPivot(object)))
+    //         {
+    //             objects.push_back(object);
+    //         }
+    //     }
+    // }
+
+    // if (node->left)
+    // {
+    //     fetchWithinPyramidFromNode(pyramid, node->left, objects);
+    // }
+
+    // if (node->right)
+    // {
+    //     fetchWithinPyramidFromNode(pyramid, node->right, objects);
+    // }
 }
 
 template<typename T>
@@ -169,7 +269,7 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
         node->bounds += Tree<T>::getBounds(object);
     }
 
-    if (objects.size() <= 1)
+    if (objects.size() <= m_pageSize)
     {
         node->page = std::make_unique<Tree<T>::Node::Page>();
         node->page->contents = objects;
@@ -197,19 +297,19 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
             }
         }
 
-        if (leftObjects.size() > 0)
+        if (!leftObjects.empty())
         {
             // std::cout << "generateTree : left" << std::endl;
             node->left = generateTree(leftObjects, nextAxis(axis));
         }
 
-        if (rightObjects.size() > 0)
+        if (!rightObjects.empty())
         {
             // std::cout << "generateTree : right" << std::endl;
             node->right = generateTree(rightObjects, nextAxis(axis));
         }
 
-        if (middleObjects.size() > 0)
+        if (!middleObjects.empty())
         {
             node->page = std::make_unique<Tree<T>::Node::Page>();
             node->page->contents = middleObjects;
@@ -243,8 +343,14 @@ std::optional<Hit> Tree<Triangle>::rayIntersectsObject(const Ray& ray, const Tri
     return rayIntersectsTriangle(ray, object);
 }
 
-template Tree<Triangle>::Tree(const std::vector<Triangle>& objects);
+template size_t Tree<Triangle>::Node::size() const;
+template size_t Tree<Triangle>::Node::nodeCount() const;
+template size_t Tree<Triangle>::Node::nodeDepth() const;
+template Tree<Triangle>::Tree(const std::vector<Triangle>& objects, size_t pageSize);
 template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::root();
+template size_t Tree<Triangle>::size() const;
+template size_t Tree<Triangle>::nodeCount() const;
+template size_t Tree<Triangle>::nodeDepth() const;
 template std::optional<Hit> Tree<Triangle>::castRay(const Ray& ray) const;
 template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid& pyramid) const;
 template float Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
@@ -275,8 +381,14 @@ std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& ray, const Ph
     return std::nullopt;
 }
 
-template Tree<PhotonHit>::Tree(const std::vector<PhotonHit>& objects);
+template size_t Tree<PhotonHit>::Node::size() const;
+template size_t Tree<PhotonHit>::Node::nodeCount() const;
+template size_t Tree<PhotonHit>::Node::nodeDepth() const;
+template Tree<PhotonHit>::Tree(const std::vector<PhotonHit>& objects, size_t pageSize);
 template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::root();
+template size_t Tree<PhotonHit>::size() const;
+template size_t Tree<PhotonHit>::nodeCount() const;
+template size_t Tree<PhotonHit>::nodeDepth() const;
 template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray) const;
 template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const;
 template float Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);

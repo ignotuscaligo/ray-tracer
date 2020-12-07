@@ -22,6 +22,10 @@ public:
             std::vector<T> contents;
         };
 
+        size_t size() const;
+        size_t nodeCount() const;
+        size_t nodeDepth() const;
+
         Axis axis;
         float pivot;
         Bounds bounds;
@@ -32,10 +36,13 @@ public:
     };
 
     Tree() = delete;
-    Tree(const std::vector<T>& objects);
+    Tree(const std::vector<T>& objects, size_t pageSize = 1);
     ~Tree() = default;
 
     std::shared_ptr<Node> root();
+    size_t size() const;
+    size_t nodeCount() const;
+    size_t nodeDepth() const;
     std::optional<Hit> castRay(const Ray& ray) const;
     std::vector<T> fetchWithinPyramid(const Pyramid& pyramid) const;
 
@@ -50,5 +57,6 @@ private:
 
     std::shared_ptr<Node> generateTree(const std::vector<T>& objects, Axis axis);
 
+    const size_t m_pageSize;
     std::shared_ptr<Node> m_root;
 };

@@ -1,5 +1,6 @@
 #include "Pyramid.h"
 
+#include "Bounds.h"
 #include "Vector.h"
 #include "Quaternion.h"
 
@@ -36,5 +37,37 @@ bool Pyramid::containsPoint(const Vector& point) const
 
 bool Pyramid::intersectsBounds(const Bounds& bounds) const
 {
-    return false;
+    Vector minTest = (bounds.minimum() - origin).normalize();
+    Vector maxTest = (bounds.maximum() - origin).normalize();
+
+    float vertMag = vertical.magnitude();
+    float horizMag = horizontal.magnitude();
+
+    float minVert = Vector::dot(minTest * vertMag, vertical);
+    float maxVert = Vector::dot(maxTest * vertMag, vertical);
+
+    if (minVert > verticalDot && maxVert > verticalDot)
+    {
+        return false;
+    }
+
+    if (minVert < -verticalDot && maxVert < -verticalDot)
+    {
+        return false;
+    }
+
+    float minHoriz = Vector::dot(minTest * horizMag, horizontal);
+    float maxHoriz = Vector::dot(maxTest * horizMag, horizontal);
+
+    if (minHoriz > horizontalDot && maxHoriz > horizontalDot)
+    {
+        return false;
+    }
+
+    if (minHoriz < -horizontalDot && maxHoriz < -horizontalDot)
+    {
+        return false;
+    }
+
+    return true;
 }

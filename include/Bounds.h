@@ -27,12 +27,15 @@ struct Bounds
     Bounds();
     Bounds(Limits ix, Limits iy, Limits iz);
     Bounds(Vector vector);
+    Bounds(Vector min, Vector max);
 
     void extend(Limits limits, Axis axis);
     Limits getLimits(Axis axis) const;
     Limits operator[](Axis axis) const;
     bool contains(const Vector& vector) const;
     bool intersects(const Bounds& other) const;
+    Vector minimum() const;
+    Vector maximum() const;
 
     Bounds operator=(const Bounds& rhs);
     Bounds operator+=(const Bounds& rhs);

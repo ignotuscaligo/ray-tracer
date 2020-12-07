@@ -267,6 +267,31 @@ int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
 
+    // std::cout << "Pyramid test" << std::endl;
+
+    // Pyramid directPyramid{{0, 0, -1}, {}, 0.0f, 0.0f, radians(20.0f), radians(20.0f)};
+    // Vector outsideMin{-1, -1, -1};
+    // Vector outsideMax{1, 1, 1};
+    // Vector inside{0, 0, 0};
+
+    // std::cout << "directPyramid.containsPoint(outsideMin):             " << directPyramid.containsPoint(outsideMin) << std::endl;
+    // std::cout << "directPyramid.containsPoint(outsideMax):             " << directPyramid.containsPoint(outsideMax) << std::endl;
+    // std::cout << "directPyramid.containsPoint(inside):                 " << directPyramid.containsPoint(inside) << std::endl;
+
+    // Bounds outsideMinBounds{outsideMin};
+    // Bounds outsideMaxBounds{outsideMin};
+    // Bounds insideBounds{inside};
+    // Bounds overlapMinBounds{outsideMin, inside};
+    // Bounds overlapMaxBounds{inside, outsideMax};
+    // Bounds overlapMinMaxBounds{outsideMin, outsideMax};
+
+    // std::cout << "directPyramid.intersectsBounds(outsideMinBounds):    " << directPyramid.intersectsBounds(outsideMinBounds) << std::endl;
+    // std::cout << "directPyramid.intersectsBounds(outsideMaxBounds):    " << directPyramid.intersectsBounds(outsideMaxBounds) << std::endl;
+    // std::cout << "directPyramid.intersectsBounds(insideBounds):        " << directPyramid.intersectsBounds(insideBounds) << std::endl;
+    // std::cout << "directPyramid.intersectsBounds(overlapMinBounds):    " << directPyramid.intersectsBounds(overlapMinBounds) << std::endl;
+    // std::cout << "directPyramid.intersectsBounds(overlapMaxBounds):    " << directPyramid.intersectsBounds(overlapMaxBounds) << std::endl;
+    // std::cout << "directPyramid.intersectsBounds(overlapMinMaxBounds): " << directPyramid.intersectsBounds(overlapMinMaxBounds) << std::endl;
+
     // std::cout << "Plane test" << std::endl;
 
     // Vector farAbovePoint{0, 1.5f, 0};
@@ -317,9 +342,9 @@ int main(int argc, char** argv)
 
         omniLight->transform.position = {40, 40, -40};
         omniLight->color({1.0f, 1.0f, 1.0f});
-        omniLight->brightness(100000);
+        omniLight->brightness(200000);
 
-        Image image(256, 256);
+        Image image(512, 512);
         Pixel workingPixel;
 
         std::cout << "Rendering image at " << image.width() << " px by " << image.height() << " px" << std::endl;
@@ -395,7 +420,7 @@ int main(int argc, char** argv)
         }
 
         int startFrame = 0;
-        int frameCount = 1;
+        int frameCount = 36;
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
@@ -403,7 +428,7 @@ int main(int argc, char** argv)
 
             image.clear();
 
-            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
+            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 10.0f), 0);
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
@@ -450,19 +475,26 @@ int main(int argc, char** argv)
 
                 for (int x = 0; x < image.width(); ++x)
                 {
+                    size_t index = x + (y * image.width());
                     float yaw = -((horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov));
 
                     // Quaternion pixelAngle = Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
                     // Vector pixelDirection = pixelAngle * Vector(0, 0, 1);
                     // Vector direction = cameraRotation * pixelDirection;
 
-                    pixelSensors[x + (y * image.width())] = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
-                    pixelSensors[x + (y * image.width())].x = x;
-                    pixelSensors[x + (y * image.width())].y = y;
+                    pixelSensors[index] = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
+                    pixelSensors[index].x = x;
+                    pixelSensors[index].y = y;
 
                     // photons[x].ray = {cameraPosition, direction};
                     // photons[x].x = x;
                     // photons[x].y = y;
+
+                    if (x == 256 && y == 256)
+                    {
+                        PixelSensor& sensor = pixelSensors[index];
+                        std::cout << sensor.x << ", " << sensor.y << std::endl;
+                    }
                 }
 
                 // photonQueue->ready(photons);
@@ -523,11 +555,13 @@ int main(int argc, char** argv)
 
             std::vector<PhotonHit> finalHits{hitsBlock.toVector()};
 
-            hitQueue->release(hitsBlock);
-
             std::cout << "Processing " << finalHits.size() << " hits" << std::endl;
 
-            Tree<PhotonHit> finalTree{finalHits};
+            Tree<PhotonHit> finalTree(finalHits, 25);
+
+            std::cout << "Tree has " << finalTree.size() << " hits" << std::endl;
+            std::cout << "Tree has " << finalTree.nodeCount() << " nodes" << std::endl;
+            std::cout << "Tree is " << finalTree.nodeDepth() << " layers deep" << std::endl;
 
             size_t currentSensor = 0;
 
@@ -545,6 +579,11 @@ int main(int argc, char** argv)
                     containedPoints = 0;
                 }
 
+                // if (sensor.x == 180 && sensor.y == 110)
+                // {
+                //     std::cout << sensor.x << ", " << sensor.y << std::endl;
+                // }
+
                 std::vector<PhotonHit> hits = finalTree.fetchWithinPyramid(sensor.pyramid);
 
                 for (auto& photonHit : hits)
@@ -552,6 +591,31 @@ int main(int argc, char** argv)
                     color += photonHit.photon.color;
                     ++containedPoints;
                 }
+
+                // for (auto& photonHit : finalHits)
+                // {
+                //     if (sensor.pyramid.containsPoint(photonHit.hit.position))
+                //     {
+                //         color += photonHit.photon.color;
+                //         ++containedPoints;
+                //     }
+                // }
+
+                // if (!hits.empty())
+                // {
+                //     workingPixel.red = 255;
+                //     workingPixel.green = 255;
+                //     workingPixel.blue = 255;
+                //     image.setPixel(sensor.x, sensor.y, workingPixel);
+                // }
+
+                // if (color.red > 0)
+                // {
+                //     workingPixel.red = 255;
+                //     workingPixel.green = 255;
+                //     workingPixel.blue = 255;
+                //     image.setPixel(sensor.x, sensor.y, workingPixel);
+                // }
 
                 workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
                 workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
@@ -562,6 +626,8 @@ int main(int argc, char** argv)
 
                 ++currentSensor;
             }
+
+            hitQueue->release(hitsBlock);
 
             std::cout << "brightest pixel: " << maxValue * 255 << std::endl;
 

@@ -61,6 +61,13 @@ Bounds::Bounds(Vector vector)
 {
 }
 
+Bounds::Bounds(Vector min, Vector max)
+    : x(min.x, max.x)
+    , y(min.y, max.y)
+    , z(min.z, max.z)
+{
+}
+
 void Bounds::extend(Limits limits, Axis axis)
 {
     switch (axis)
@@ -111,6 +118,24 @@ bool Bounds::intersects(const Bounds& other) const
     return x.intersects(other.x)
         && y.intersects(other.y)
         && z.intersects(other.z);
+}
+
+Vector Bounds::minimum() const
+{
+    return {
+        x.min,
+        y.min,
+        z.min
+    };
+}
+
+Vector Bounds::maximum() const
+{
+    return {
+        x.max,
+        y.max,
+        z.max
+    };
 }
 
 Bounds Bounds::operator=(const Bounds& rhs)
