@@ -746,7 +746,7 @@ int main(int argc, char** argv)
             std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
             std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sensor_test_0." + std::to_string(frame) + ".png", image, "test");
+            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sensor_test_1." + std::to_string(frame) + ".png", image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)
