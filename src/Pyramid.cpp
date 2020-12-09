@@ -28,7 +28,7 @@ Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, float pitch
 
 bool Pyramid::containsPoint(const Vector& point) const
 {
-    Vector test = (point - origin).normalize();
+    Vector test = Vector::normalizedSub(point, origin);
 
     return Vector::dot(test, direction) > 0
         && std::abs(Vector::dot(test, vertical)) <= verticalDot
@@ -37,8 +37,8 @@ bool Pyramid::containsPoint(const Vector& point) const
 
 bool Pyramid::intersectsBounds(const Bounds& bounds) const
 {
-    Vector minTest = (bounds.minimum() - origin).normalize();
-    Vector maxTest = (bounds.maximum() - origin).normalize();
+    Vector minTest = Vector::normalizedSub(bounds.minimum(), origin);
+    Vector maxTest = Vector::normalizedSub(bounds.maximum(), origin);
 
     float vertMag = vertical.magnitude();
     float horizMag = horizontal.magnitude();
