@@ -31,7 +31,7 @@ struct Worker
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
-    size_t fetchSize;
+    size_t fetchSize = 0;
     std::atomic_bool running;
     std::atomic_bool suspend;
 
