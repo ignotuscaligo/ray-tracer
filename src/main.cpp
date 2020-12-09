@@ -25,15 +25,43 @@
 #include <string>
 #include <thread>
 
+struct PixelSensor
+{
+    PixelSensor() = default;
+
+    PixelSensor(Vector position, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
+        : pyramid(position, rotation, pitch, yaw, pitchStep, yawStep)
+    {
+    }
+
+    bool containsPoint(const Vector& point) const
+    {
+        return pyramid.containsPoint(point);
+    }
+
+    int x;
+    int y;
+
+    Pyramid pyramid;
+};
+
 struct Worker
 {
     size_t index;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
+    std::shared_ptr<std::vector<PixelSensor>> pixelSensors;
+    std::shared_ptr<Tree<PhotonHit>> finalTree;
+    std::shared_ptr<Image> image;
     size_t fetchSize = 0;
+    size_t startPixel = 0;
+    size_t endPixel = 0;
     std::atomic_bool running;
+    std::atomic_bool writePixels;
+    std::atomic_bool writeComplete;
     std::atomic_bool suspend;
+    Pixel workingPixel;
 
     size_t workDuration = 0;
     size_t pushHitDuration = 0;
@@ -49,7 +77,16 @@ struct Worker
         hitQueue = other.hitQueue;
         fetchSize = other.fetchSize;
         running = other.running.load();
+        writePixels = other.writePixels.load();
+        writeComplete = other.writeComplete.load();
         suspend = other.suspend.load();
+    }
+
+    void startWrite(std::shared_ptr<Tree<PhotonHit>> tree)
+    {
+        finalTree = tree;
+        writeComplete = false;
+        writePixels = true;
     }
 
     void run()
@@ -58,14 +95,57 @@ struct Worker
 
         std::vector<PhotonHit> hits;
 
-        if (!photonQueue || !hitQueue)
+        if (!photonQueue || !hitQueue || !pixelSensors || !image)
         {
             std::cout << index << ": abort thread, missing required references" << std::endl;
+            running = false;
         }
 
         while (running)
         {
-            if (photonQueue->available() > 0 && !suspend)
+            if (suspend)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            if (writePixels && !writeComplete)
+            {
+                if (!finalTree)
+                {
+                    std::cout << index << ": abort thread, finalTree missing when writePixels was enabled" << std::endl;
+                    break;
+                }
+
+                for (size_t i = startPixel; i < endPixel; ++i)
+                {
+                    PixelSensor& sensor = pixelSensors->at(i);
+
+                    Color color{};
+
+                    std::vector<PhotonHit> hits = finalTree->fetchWithinPyramid(sensor.pyramid);
+
+                    for (auto& photonHit : hits)
+                    {
+                        float dot = Vector::dot(-sensor.pyramid.direction, photonHit.hit.normal);
+
+                        if (dot > 0)
+                        {
+                            color += photonHit.photon.color;
+                        }
+                    }
+
+                    workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
+                    workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
+                    workingPixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
+                    image->setPixel(sensor.x, sensor.y, workingPixel);
+                }
+
+                writeComplete = true;
+                writePixels = false;
+                finalTree = nullptr;
+            }
+            else if (photonQueue->available() > 0)
             {
                 auto workStart = std::chrono::system_clock::now();
                 // std::cout << index << ": fetching " << fetchSize << " photons" << std::endl;
@@ -243,29 +323,39 @@ std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
     return std::make_shared<MeshVolume>(objTriangles);
 }
 
-struct PixelSensor
-{
-    PixelSensor() = default;
-
-    PixelSensor(Vector position, Quaternion rotation, float pitch, float yaw, float pitchStep, float yawStep)
-        : pyramid(position, rotation, pitch, yaw, pitchStep, yawStep)
-    {
-    }
-
-    bool containsPoint(const Vector& point) const
-    {
-        return pyramid.containsPoint(point);
-    }
-
-    int x;
-    int y;
-
-    Pyramid pyramid;
-};
-
 int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
+
+    // std::cout << "--- Vector tests ---" << std::endl;
+
+    // Vector a{10, 0, 0};
+    // std::cout << "a: " << a.x << ", " << a.y << ", " << a.z << std::endl;
+
+    // Vector b{ 0.5, 0.5, 0.5 };
+    // std::cout << "b: " << b.x << ", " << b.y << ", " << b.z << std::endl;
+
+    // Vector c = (b - a).normalize();
+    // std::cout << "c: " << c.x << ", " << c.y << ", " << c.z << std::endl;
+
+    // Vector d = Vector::normalizedSub(b, a);
+    // std::cout << "d: " << d.x << ", " << d.y << ", " << d.z << std::endl;
+
+    // a.normalize();
+    // b.normalize();
+    // c.normalize();
+
+    // std::cout << "post normalize a: " << a.x << ", " << a.y << ", " << a.z << std::endl;
+    // std::cout << "post normalize b: " << b.x << ", " << b.y << ", " << b.z << std::endl;
+    // std::cout << "post normalize c: " << c.x << ", " << c.y << ", " << c.z << std::endl;
+
+    // Vector d{ 1, 0, 0 };
+    // Vector e{ 0, 0, 1 };
+    // Vector f = Vector::cross(d, e);
+
+    // std::cout << "d: " << d.x << ", " << d.y << ", " << d.z << std::endl;
+    // std::cout << "e: " << e.x << ", " << e.y << ", " << e.z << std::endl;
+    // std::cout << "f: " << f.x << ", " << f.y << ", " << f.z << std::endl;
 
     // std::cout << "Pyramid test" << std::endl;
 
@@ -344,10 +434,20 @@ int main(int argc, char** argv)
         omniLight->color({1.0f, 1.0f, 1.0f});
         omniLight->brightness(200000);
 
-        Image image(512, 512);
+        std::shared_ptr<Image> image = std::make_shared<Image>(512, 512);
         Pixel workingPixel;
 
-        std::cout << "Rendering image at " << image.width() << " px by " << image.height() << " px" << std::endl;
+        float pixelCount = image->width() * image->height();
+
+        float horizontalFov = 80.0f;
+        float verticalFov = 80.0f;
+
+        float pitchStep = verticalFov / static_cast<float>(image->height());
+        float yawStep = horizontalFov / static_cast<float>(image->width());
+
+        std::shared_ptr<std::vector<PixelSensor>> pixelSensors = std::make_shared<std::vector<PixelSensor>>(image->width() * image->height());
+
+        std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
         camera->transform.position = {0.0f, 0.0f, -55.0f};
 
@@ -394,9 +494,11 @@ int main(int argc, char** argv)
         // 8: 9882 ms, 31.1%, 512.5MB
         // 16: 9379 ms, 59.7%, 550.5MB
         // 32: 12538 ms, 98.8%, 549.6MB
-        const size_t workerCount = 16;
+        const size_t workerCount = 32;
 
         Worker workers[workerCount];
+
+        size_t pixelStep = pixelSensors->size() / workerCount;
 
         for (int i = 0; i < workerCount; ++i)
         {
@@ -404,10 +506,19 @@ int main(int argc, char** argv)
             workers[i].objects = objects;
             workers[i].photonQueue = photonQueue;
             workers[i].hitQueue = hitQueue;
+            workers[i].pixelSensors = pixelSensors;
+            workers[i].finalTree = nullptr;
+            workers[i].image = image;
             workers[i].fetchSize = 10000;
+            workers[i].startPixel = i * pixelStep;
+            workers[i].endPixel = workers[i].startPixel + pixelStep;
             workers[i].running = true;
+            workers[i].writePixels = false;
+            workers[i].writeComplete = false;
             workers[i].suspend = false;
         }
+
+        workers[workerCount - 1].endPixel = pixelSensors->size() - 1;
 
         std::thread threads[workerCount];
 
@@ -420,15 +531,15 @@ int main(int argc, char** argv)
         }
 
         int startFrame = 0;
-        int frameCount = 36;
+        int frameCount = 72;
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
             std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
 
-            image.clear();
+            image->clear();
 
-            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 10.0f), 0);
+            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
@@ -437,16 +548,6 @@ int main(int argc, char** argv)
 
             // std::cout << "cameraPosition: " << cameraPosition.x << ", " << cameraPosition.y << ", " << cameraPosition.z << std::endl;
             // std::cout << "cameraForward: " << cameraForward.x << ", " << cameraForward.y << ", " << cameraForward.z << std::endl;
-
-            float pixelCount = image.width() * image.height();
-
-            float horizontalFov = 80.0f;
-            float verticalFov = 80.0f;
-
-            float pitchStep = verticalFov / static_cast<float>(image.height());
-            float yawStep = horizontalFov / static_cast<float>(image.width());
-
-            std::vector<PixelSensor> pixelSensors(image.width() * image.height());
 
             // for (int i = 0; i < workerCount; ++i)
             // {
@@ -467,24 +568,24 @@ int main(int argc, char** argv)
             std::cout << "photonQueue->available(): " << photonQueue->available() << std::endl;
 
             std::cout << "Generate sensors" << std::endl;
-            for (int y = 0; y < image.height(); ++y)
+            for (int y = 0; y < image->height(); ++y)
             {
-                float pitch = -((verticalFov / 2.0f) - ((y / (image.height() - 1.0f)) * verticalFov));
+                float pitch = -((verticalFov / 2.0f) - ((y / (image->height() - 1.0f)) * verticalFov));
 
-                // auto photons = photonQueue->initialize(image.width());
+                // auto photons = photonQueue->initialize(image->width());
 
-                for (int x = 0; x < image.width(); ++x)
+                for (int x = 0; x < image->width(); ++x)
                 {
-                    size_t index = x + (y * image.width());
-                    float yaw = -((horizontalFov / 2.0f) - ((x / (image.width() - 1.0f)) * horizontalFov));
+                    size_t index = x + (y * image->width());
+                    float yaw = -((horizontalFov / 2.0f) - ((x / (image->width() - 1.0f)) * horizontalFov));
 
                     // Quaternion pixelAngle = Quaternion::fromPitchYawRoll(radians(pitch), radians(yaw), 0);
                     // Vector pixelDirection = pixelAngle * Vector(0, 0, 1);
                     // Vector direction = cameraRotation * pixelDirection;
 
-                    pixelSensors[index] = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
-                    pixelSensors[index].x = x;
-                    pixelSensors[index].y = y;
+                    pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
+                    pixelSensors->at(index).x = x;
+                    pixelSensors->at(index).y = y;
 
                     // photons[x].ray = {cameraPosition, direction};
                     // photons[x].x = x;
@@ -492,7 +593,7 @@ int main(int argc, char** argv)
 
                     if (x == 256 && y == 256)
                     {
-                        PixelSensor& sensor = pixelSensors[index];
+                        PixelSensor& sensor = pixelSensors->at(index);
                         std::cout << sensor.x << ", " << sensor.y << std::endl;
                     }
                 }
@@ -557,79 +658,116 @@ int main(int argc, char** argv)
 
             std::cout << "Processing " << finalHits.size() << " hits" << std::endl;
 
-            Tree<PhotonHit> finalTree(finalHits, 25);
-
-            std::cout << "Tree has " << finalTree.size() << " hits" << std::endl;
-            std::cout << "Tree has " << finalTree.nodeCount() << " nodes" << std::endl;
-            std::cout << "Tree is " << finalTree.nodeDepth() << " layers deep" << std::endl;
-
-            size_t currentSensor = 0;
-
-            float maxValue = 0;
-
-            size_t containedPoints = 0;
-
-            for (const auto& sensor : pixelSensors)
-            {
-                Color color{};
-
-                if (currentSensor % 500 == 0)
-                {
-                    std::cout << "sensor " << currentSensor << " / " << pixelSensors.size() << ", points: " << containedPoints << std::endl;
-                    containedPoints = 0;
-                }
-
-                // if (sensor.x == 180 && sensor.y == 110)
-                // {
-                //     std::cout << sensor.x << ", " << sensor.y << std::endl;
-                // }
-
-                std::vector<PhotonHit> hits = finalTree.fetchWithinPyramid(sensor.pyramid);
-
-                for (auto& photonHit : hits)
-                {
-                    color += photonHit.photon.color;
-                    ++containedPoints;
-                }
-
-                // for (auto& photonHit : finalHits)
-                // {
-                //     if (sensor.pyramid.containsPoint(photonHit.hit.position))
-                //     {
-                //         color += photonHit.photon.color;
-                //         ++containedPoints;
-                //     }
-                // }
-
-                // if (!hits.empty())
-                // {
-                //     workingPixel.red = 255;
-                //     workingPixel.green = 255;
-                //     workingPixel.blue = 255;
-                //     image.setPixel(sensor.x, sensor.y, workingPixel);
-                // }
-
-                // if (color.red > 0)
-                // {
-                //     workingPixel.red = 255;
-                //     workingPixel.green = 255;
-                //     workingPixel.blue = 255;
-                //     image.setPixel(sensor.x, sensor.y, workingPixel);
-                // }
-
-                workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
-                workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
-                workingPixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
-                image.setPixel(sensor.x, sensor.y, workingPixel);
-
-                maxValue = std::max(color.red, maxValue);
-
-                ++currentSensor;
-            }
+            std::shared_ptr<Tree<PhotonHit>> finalTree = std::make_shared<Tree<PhotonHit>>(finalHits, 100);
 
             hitQueue->release(hitsBlock);
 
-            std::cout << "brightest pixel: " << maxValue * 255 << std::endl;
+            std::cout << "Tree has " << finalTree->size() << " hits" << std::endl;
+            std::cout << "Tree has " << finalTree->nodeCount() << " nodes" << std::endl;
+            std::cout << "Tree is " << finalTree->nodeDepth() << " layers deep" << std::endl;
+
+
+            for (int i = 0; i < workerCount; ++i)
+            {
+                workers[i].startWrite(finalTree);
+            }
+
+            size_t completedWorkers = 0;
+            size_t lastCompleted = 0;
+
+            while (completedWorkers != workerCount)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                completedWorkers = 0;
+
+                for (int i = 0; i < workerCount; ++i)
+                {
+                    if (workers[i].writeComplete.load())
+                    {
+                        ++completedWorkers;
+                    }
+                }
+
+                if (completedWorkers != lastCompleted)
+                {
+                    std::cout << completedWorkers << " / " << workerCount << " workers completed with write" << std::endl;
+                }
+
+                lastCompleted = completedWorkers;
+            }
+
+            // size_t currentSensor = 0;
+
+            // float maxValue = 0;
+
+            // size_t containedPoints = 0;
+
+            // for (const auto& sensor : pixelSensors)
+            // {
+            //     Color color{};
+
+            //     // if (currentSensor % 500 == 0)
+            //     // {
+            //     //     std::cout << "sensor " << currentSensor << " / " << pixelSensors->size() << ", points: " << containedPoints << std::endl;
+            //     //     containedPoints = 0;
+            //     // }
+
+            //     // if (sensor.x == 0 && sensor.y == 32)
+            //     // {
+            //     //     std::cout << sensor.x << ", " << sensor.y << std::endl;
+            //     // }
+            //     // else  if (sensor.x == 0 && sensor.y == 96)
+            //     // {
+            //     //     std::cout << sensor.x << ", " << sensor.y << std::endl;
+            //     // }
+
+            //     std::vector<PhotonHit> hits = finalTree->fetchWithinPyramid(sensor.pyramid);
+
+            //     for (auto& photonHit : hits)
+            //     {
+            //         color += photonHit.photon.color;
+            //         ++containedPoints;
+            //     }
+
+            //     // for (auto& photonHit : finalHits)
+            //     // {
+            //     //     if (sensor.pyramid.containsPoint(photonHit.hit.position))
+            //     //     {
+            //     //         color += photonHit.photon.color;
+            //     //         ++containedPoints;
+            //     //     }
+            //     // }
+
+            //     // if (!hits.empty())
+            //     // {
+            //     //     workingPixel.red = 255;
+            //     //     workingPixel.green = 255;
+            //     //     workingPixel.blue = 255;
+            //     //     image->setPixel(sensor.x, sensor.y, workingPixel);
+            //     // }
+
+            //     // if (color.red > 0)
+            //     // {
+            //     //     workingPixel.red = 255;
+            //     //     workingPixel.green = 255;
+            //     //     workingPixel.blue = 255;
+            //     //     image->setPixel(sensor.x, sensor.y, workingPixel);
+            //     // }
+
+            //     workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
+            //     workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
+            //     workingPixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
+            //     image->setPixel(sensor.x, sensor.y, workingPixel);
+
+            //     maxValue = std::max(color.red, maxValue);
+
+            //     ++currentSensor;
+            // }
+
+            
+
+            // std::cout << "brightest pixel: " << maxValue * 255 << std::endl;
 
             // for (auto& photonHit : finalHits)
             // {
@@ -642,14 +780,14 @@ int main(int argc, char** argv)
             //     {
             //         if (sensor.containsPoint(photonHit.hit.position))
             //         {
-            //             auto pixel = image.getPixel(sensor.x, sensor.y);
+            //             auto pixel = image->getPixel(sensor.x, sensor.y);
             //             pixel.red = std::min(pixel.red + static_cast<int>(photonHit.photon.color.red * 255), 255);
             //             pixel.green = std::min(pixel.green + static_cast<int>(photonHit.photon.color.green * 255), 255);
             //             pixel.blue = std::min(pixel.blue + static_cast<int>(photonHit.photon.color.blue * 255), 255);
 
             //             // std::cout << "set pixel " << sensor.x << ", " << sensor.y << std::endl;
 
-            //             // image.setPixel(sensor.x, sensor.y, workingPixel);
+            //             // image->setPixel(sensor.x, sensor.y, workingPixel);
             //             break;
             //         }
             //     }
@@ -693,7 +831,7 @@ int main(int argc, char** argv)
             //     // // workingPixel.green = std::abs(delta.y * 0.5f) * 255;
             //     // // workingPixel.blue = std::abs(delta.z * 0.5f) * 255;
 
-            //     // image.setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
+            //     // image->setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
             // }
 
             std::cout << "Finished" << std::endl;
@@ -746,7 +884,7 @@ int main(int argc, char** argv)
             std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
             std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sensor_test_1." + std::to_string(frame) + ".png", image, "test");
+            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\sensor_test_2." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)
