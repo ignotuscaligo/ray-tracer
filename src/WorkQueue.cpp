@@ -65,9 +65,11 @@ size_t WorkQueue<T>::Block::size() const
 template<typename T>
 std::vector<T> WorkQueue<T>::Block::toVector() const
 {
-    std::vector<T> objects(size());
+    size_t size = endIndex - startIndex;
+    std::vector<T> objects;
+    objects.reserve(size);
 
-    for (size_t i = 0; i < size(); ++i)
+    for (size_t i = 0; i < size; ++i)
     {
         objects.push_back(m_queue[(startIndex + i) % m_queue.size()]);
     }
