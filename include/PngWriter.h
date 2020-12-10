@@ -20,6 +20,8 @@ public:
     void setTitle(const std::string& title);
     void writeImage(Image& image);
 
+    static void writeImage(const std::string& filename, Image& image, const std::string& title);
+
 private:
     FILE* m_file = nullptr;
     png_structp m_structPtr = nullptr;

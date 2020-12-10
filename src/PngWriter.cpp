@@ -99,3 +99,20 @@ void PngWriter::writeImage(Image& image)
     // End write
     png_write_end(m_structPtr, nullptr);
 }
+
+void PngWriter::writeImage(const std::string& filename, Image& image, const std::string& title)
+{
+    std::cout << "---" << std::endl;
+    std::cout << "Write image " << filename << std::endl;
+    PngWriter writer(filename);
+
+    if (!writer.valid())
+    {
+        std::cout << "Failed to initialize png writer" << std::endl;
+        return;
+    }
+
+    // Set title
+    writer.setTitle(title);
+    writer.writeImage(image);
+}

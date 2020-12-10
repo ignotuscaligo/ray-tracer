@@ -26,23 +26,6 @@
 #include <thread>
 #include <tiny_obj_loader.h>
 
-void writeImage(const std::string& filename, Image& image, const std::string& title)
-{
-    std::cout << "---" << std::endl;
-    std::cout << "Write image " << filename << std::endl;
-    PngWriter writer(filename);
-
-    if (!writer.valid())
-    {
-        std::cout << "Failed to initialize png writer" << std::endl;
-        return;
-    }
-
-    // Set title
-    writer.setTitle(title);
-    writer.writeImage(image);
-}
-
 std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
 {
     std::cout << "---" << std::endl;
@@ -730,7 +713,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (int i = 0; i < workerCount; ++i)
