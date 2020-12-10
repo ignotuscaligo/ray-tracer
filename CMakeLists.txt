@@ -88,6 +88,11 @@ target_sources(ray-tracer
 
         include/Pyramid.h
         src/Pyramid.cpp
+
+        include/Worker.h
+        src/Worker.cpp
+
+        include/PixelSensor.h
 )
 
 target_include_directories(ray-tracer
