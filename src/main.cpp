@@ -133,17 +133,35 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> camera = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
-        std::shared_ptr<OmniLight> omniLight = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
         Object::setParent(sun, cameraPivot);
         Object::setParent(knotMesh, root);
-        Object::setParent(omniLight, root);
+        Object::setParent(omniLight0, root);
+        Object::setParent(omniLight1, root);
 
-        omniLight->transform.position = {40, 40, -40};
-        omniLight->color({1.0f, 1.0f, 1.0f});
-        omniLight->brightness(200000);
+        omniLight0->transform.position = {40, 40, -40};
+        omniLight0->color({1.0f, 0.95f, 0.87f});
+        omniLight0->brightness(200000);
+
+        omniLight1->transform.position = {-40, -40, 40};
+        omniLight1->color({0.7f, 0.7f, 1.0f});
+        omniLight1->brightness(200000);
+
+        size_t lightCount = 0;
+
+        for (const auto& object : objects)
+        {
+            if (object->hasType<Light>())
+            {
+                ++lightCount;
+            }
+        }
+
+        size_t photonsPerLight = photonCount / lightCount;
 
         std::shared_ptr<Image> image = std::make_shared<Image>(512, 512);
         Pixel workingPixel;
@@ -225,13 +243,18 @@ int main(int argc, char** argv)
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
             std::chrono::time_point generatePhotonsStart = std::chrono::system_clock::now();
 
-            std::cout << "Cast photons" << std::endl;
-            auto photons = photonQueue->initialize(photonCount);
+            std::cout << "Casting " << lightCount * photonsPerLight << " photons from " << lightCount << " lights" << std::endl;
+            for (const auto& object : objects)
+            {
+                if (object->hasType<Light>())
+                {
+                    auto photons = photonQueue->initialize(photonsPerLight);
 
-            std::cout << "Emitting " << photons.size() << " photons" << std::endl;
-            omniLight->emit(photons);
+                    std::static_pointer_cast<Light>(object)->emit(photons);
 
-            photonQueue->ready(photons);
+                    photonQueue->ready(photons);
+                }
+            }
 
             std::cout << "Generate sensors" << std::endl;
             for (int y = 0; y < image->height(); ++y)
@@ -385,7 +408,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_1." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (size_t i = 0; i < workerCount; ++i)
