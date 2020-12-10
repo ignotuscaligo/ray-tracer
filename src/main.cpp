@@ -226,6 +226,8 @@ int main(int argc, char** argv)
             });
         }
 
+        float rotationStep = 360.0f / static_cast<float>(frameCount);
+
         for (size_t frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
             std::cout << "---" << std::endl;
@@ -233,7 +235,7 @@ int main(int argc, char** argv)
 
             image->clear();
 
-            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * 5.0f), 0);
+            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * rotationStep), 0);
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
