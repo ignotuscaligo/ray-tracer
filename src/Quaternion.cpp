@@ -26,6 +26,16 @@ Quaternion::Quaternion(Vector vector)
 {
 }
 
+float Quaternion::magnitudeSqr() const
+{
+    return x * x + y * y + z * z + w * w;
+}
+
+float Quaternion::magnitude() const
+{
+    return std::sqrt(magnitudeSqr());
+}
+
 Quaternion Quaternion::conjugate() const
 {
     return {
@@ -34,6 +44,11 @@ Quaternion Quaternion::conjugate() const
         -z,
         w
     };
+}
+
+Quaternion Quaternion::inverse() const
+{
+    return conjugate() * (1.0f / magnitudeSqr());
 }
 
 Quaternion Quaternion::fromPitchYawRoll(float pitch, float yaw, float roll)
@@ -90,5 +105,15 @@ Vector operator*(const Quaternion& lhs, const Vector& rhs)
         v.x,
         v.y,
         v.z
+    };
+}
+
+Quaternion operator*(const Quaternion& lhs, float rhs)
+{
+    return {
+        lhs.x * rhs,
+        lhs.y * rhs,
+        lhs.z * rhs,
+        lhs.w * rhs
     };
 }
