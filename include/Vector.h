@@ -30,6 +30,7 @@ union Vector
     float magnitudeSquared() const;
     float magnitude() const;
     Vector normalize();
+    Vector normalized() const;
 
     static Vector cross(const Vector& a, const Vector& b);
     static float dot(const Vector& a, const Vector& b);
@@ -48,3 +49,4 @@ Vector operator-(const Vector& point);
 Vector operator-(const Vector& lhs, const Vector& rhs);
 Vector operator*(const Vector& lhs, const float& rhs);
 Vector operator*(const float& lhs, const Vector& rhs);
+Vector operator/(const Vector& lhs, const float& rhs);

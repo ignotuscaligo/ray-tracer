@@ -105,6 +105,21 @@ Vector Vector::normalize()
     return *this;
 }
 
+Vector Vector::normalized() const
+{
+    // mul = this * this
+    __m128 mul = _mm_mul_ps(data, data);
+
+    // magSqr =  mul.x + mul.y + mul.z
+    __m128 magSqr = _mm_set1_ps(mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]);
+
+    // invRoot = inverse_square(magSqr)
+    __m128 invRoot = _mm_rsqrt_ps(magSqr);
+
+    // result = this * invRoot
+    return _mm_mul_ps(data, invRoot);
+}
+
 Vector Vector::cross(const Vector& a, const Vector& b)
 {
     // y, z, x
@@ -170,4 +185,9 @@ Vector operator*(const Vector& lhs, const float& rhs)
 Vector operator*(const float& lhs, const Vector& rhs)
 {
     return _mm_mul_ps(_mm_set1_ps(lhs), rhs.data);
+}
+
+Vector operator/(const Vector& lhs, const float& rhs)
+{
+    return _mm_div_ps(lhs.data, _mm_set1_ps(rhs));
 }
