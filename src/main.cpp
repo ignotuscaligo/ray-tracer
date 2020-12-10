@@ -230,7 +230,7 @@ int main(int argc, char** argv)
         std::shared_ptr<Image> image = std::make_shared<Image>(512, 512);
         Pixel workingPixel;
 
-        float pixelCount = image->width() * image->height();
+        const size_t pixelCount = image->width() * image->height();
 
         float horizontalFov = 80.0f;
         float verticalFov = 80.0f;
@@ -238,7 +238,7 @@ int main(int argc, char** argv)
         float pitchStep = verticalFov / static_cast<float>(image->height());
         float yawStep = horizontalFov / static_cast<float>(image->width());
 
-        std::shared_ptr<std::vector<PixelSensor>> pixelSensors = std::make_shared<std::vector<PixelSensor>>(image->width() * image->height());
+        std::shared_ptr<std::vector<PixelSensor>> pixelSensors = std::make_shared<std::vector<PixelSensor>>(pixelCount);
 
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
@@ -291,7 +291,7 @@ int main(int argc, char** argv)
 
         size_t pixelStep = pixelSensors->size() / workerCount;
 
-        for (int i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < workerCount; ++i)
         {
             size_t index = i;
             size_t startPixel = i * pixelStep;
@@ -315,7 +315,7 @@ int main(int argc, char** argv)
 
         std::thread threads[workerCount];
 
-        for (int i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < workerCount; ++i)
         {
             workers[i]->start();
 
@@ -326,7 +326,7 @@ int main(int argc, char** argv)
             });
         }
 
-        for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
+        for (size_t frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
             std::cout << "---" << std::endl;
             std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
@@ -476,7 +476,7 @@ int main(int argc, char** argv)
             // std::cout << "Tree has " << finalTree->nodeCount() << " nodes" << std::endl;
             // std::cout << "Tree is " << finalTree->nodeDepth() << " layers deep" << std::endl;
 
-            for (int i = 0; i < workerCount; ++i)
+            for (size_t i = 0; i < workerCount; ++i)
             {
                 workers[i]->startWrite(finalTree);
             }
@@ -493,7 +493,7 @@ int main(int argc, char** argv)
 
                 workersCompleted = 0;
 
-                for (int i = 0; i < workerCount; ++i)
+                for (size_t i = 0; i < workerCount; ++i)
                 {
                     if (workers[i]->writeComplete())
                     {
@@ -654,7 +654,7 @@ int main(int argc, char** argv)
             size_t hitsProcessed = 0;
             size_t finalHitsProcessed = finalHits.size();
 
-            for (int i = 0; i < workerCount; ++i)
+            for (size_t i = 0; i < workerCount; ++i)
             {
                 photonsProcessed += workers[i]->photonsProcessed;
                 hitsProcessed += workers[i]->hitsProcessed;
@@ -679,7 +679,7 @@ int main(int argc, char** argv)
             size_t hitDuration = 0;
             size_t writeDuration = 0;
 
-            for (int i = 0; i < workerCount; ++i)
+            for (size_t i = 0; i < workerCount; ++i)
             {
                 photonDuration += workers[i]->photonDuration;
                 workers[i]->photonDuration = 0;
@@ -720,12 +720,12 @@ int main(int argc, char** argv)
             PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
         }
 
-        for (int i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < workerCount; ++i)
         {
             workers[i]->stop();
         }
 
-        for (int i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < workerCount; ++i)
         {
             threads[i].join();
         }
