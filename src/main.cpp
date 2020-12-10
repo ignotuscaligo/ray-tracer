@@ -26,6 +26,18 @@
 #include <thread>
 #include <tiny_obj_loader.h>
 
+namespace
+{
+
+constexpr size_t photonCount = 1000000;
+constexpr size_t workerCount = 32;
+constexpr size_t fetchSize = 10000;
+
+constexpr size_t startFrame = 0;
+constexpr size_t frameCount = 72;
+
+}
+
 std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
 {
     std::cout << "---" << std::endl;
@@ -235,7 +247,6 @@ int main(int argc, char** argv)
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
-        const size_t photonCount = 1000000;
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
         std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
@@ -276,13 +287,9 @@ int main(int argc, char** argv)
         // 8: 9882 ms, 31.1%, 512.5MB
         // 16: 9379 ms, 59.7%, 550.5MB
         // 32: 12538 ms, 98.8%, 549.6MB
-        const size_t workerCount = 32;
-
         std::shared_ptr<Worker> workers[workerCount];
 
         size_t pixelStep = pixelSensors->size() / workerCount;
-
-        size_t fetchSize = 10000;
 
         for (int i = 0; i < workerCount; ++i)
         {
@@ -318,9 +325,6 @@ int main(int argc, char** argv)
                 workers[i]->exec();
             });
         }
-
-        int startFrame = 0;
-        int frameCount = 72;
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
