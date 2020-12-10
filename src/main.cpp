@@ -28,6 +28,7 @@
 
 void writeImage(const std::string& filename, Image& image, const std::string& title)
 {
+    std::cout << "---" << std::endl;
     std::cout << "Write image " << filename << std::endl;
     PngWriter writer(filename);
 
@@ -44,6 +45,7 @@ void writeImage(const std::string& filename, Image& image, const std::string& ti
 
 std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
 {
+    std::cout << "---" << std::endl;
     std::cout << "Loading OBJ " << filename << std::endl;
 
     tinyobj::attrib_t attrib;
@@ -206,6 +208,7 @@ int main(int argc, char** argv)
 
     try
     {
+        std::cout << "---" << std::endl;
         std::cout << "Setting up scene for render" << std::endl;
 
         std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
@@ -242,16 +245,17 @@ int main(int argc, char** argv)
 
         std::shared_ptr<std::vector<PixelSensor>> pixelSensors = std::make_shared<std::vector<PixelSensor>>(image->width() * image->height());
 
+        std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
         camera->transform.position = {0.0f, 0.0f, -55.0f};
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
-        std::cout << "Creating queues" << std::endl;
         const size_t photonCount = 1000000;
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
+        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
 
         // Debug w/ batched hits + fetchSize 10k + no logging:
         // 1: 13667 ms
@@ -309,9 +313,11 @@ int main(int argc, char** argv)
             }
 
             workers[i] = std::make_shared<Worker>(index, fetchSize, startPixel, endPixel);
+            workers[i]->camera = camera;
             workers[i]->objects = objects;
             workers[i]->photonQueue = photonQueue;
             workers[i]->hitQueue = hitQueue;
+            workers[i]->finalHitQueue = finalHitQueue;
             workers[i]->pixelSensors = pixelSensors;
             workers[i]->finalTree = nullptr;
             workers[i]->image = image;
@@ -335,6 +341,7 @@ int main(int argc, char** argv)
 
         for (int frame = startFrame; frame < startFrame + frameCount; ++frame)
         {
+            std::cout << "---" << std::endl;
             std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
 
             image->clear();
@@ -365,8 +372,6 @@ int main(int argc, char** argv)
 
             photonQueue->ready(photons);
 
-            std::cout << "photonQueue->available(): " << photonQueue->available() << std::endl;
-
             std::cout << "Generate sensors" << std::endl;
             for (int y = 0; y < image->height(); ++y)
             {
@@ -393,98 +398,129 @@ int main(int argc, char** argv)
 
             std::chrono::time_point generatePhotonsEnd = std::chrono::system_clock::now();
 
-            size_t photonsGenerated = photonCount;
+            // size_t photonsGenerated = photonCount;
 
-            std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
-            float generatePhotonsAverage = 0;
+            // std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
+            // float generatePhotonsAverage = 0;
 
-            if (photonsGenerated > 0)
-            {
-                generatePhotonsAverage = generatePhotonsDuration.count() / static_cast<float>(photonsGenerated);
-            }
-
-            std::chrono::time_point processPhotonsStart = std::chrono::system_clock::now();
-
-            // for (int i = 0; i < workerCount; ++i)
+            // if (photonsGenerated > 0)
             // {
-            //     workers[i]->resume();
+            //     generatePhotonsAverage = generatePhotonsDuration.count() / static_cast<float>(photonsGenerated);
             // }
 
-            size_t currPhotons = photonQueue->allocated();
-            size_t prevPhotons = currPhotons;
+            // std::chrono::time_point processPhotonsStart = std::chrono::system_clock::now();
 
-            std::cout << "Wait for " << currPhotons << " photons to be processed" << std::endl;
-            while (currPhotons > 0)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                currPhotons = photonQueue->allocated();
+            // // for (int i = 0; i < workerCount; ++i)
+            // // {
+            // //     workers[i]->resume();
+            // // }
 
-                if (currPhotons != prevPhotons)
-                {
-                    std::cout << currPhotons << " remaining" << std::endl;
-                }
+            // size_t currPhotons = photonQueue->allocated();
+            // size_t prevPhotons = currPhotons;
 
-                prevPhotons = currPhotons;
-            }
+            // std::cout << "Wait for " << currPhotons << " photons to be processed" << std::endl;
+            // while (currPhotons > 0)
+            // {
+            //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            //     currPhotons = photonQueue->allocated();
 
-            std::chrono::time_point processPhotonsEnd = std::chrono::system_clock::now();
+            //     if (currPhotons != prevPhotons)
+            //     {
+            //         std::cout << currPhotons << " remaining" << std::endl;
+            //     }
 
-            std::chrono::microseconds processPhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(processPhotonsEnd - processPhotonsStart);
-            int processPhotonsAverage = 0;
+            //     prevPhotons = currPhotons;
+            // }
 
-            if (photonsGenerated > 0)
-            {
-                processPhotonsAverage = processPhotonsDuration.count() / photonsGenerated;
-            }
+            // std::chrono::time_point processPhotonsEnd = std::chrono::system_clock::now();
 
-            size_t hitsGenerated = hitQueue->available();
+            // std::chrono::microseconds processPhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(processPhotonsEnd - processPhotonsStart);
+            // int processPhotonsAverage = 0;
+
+            // if (photonsGenerated > 0)
+            // {
+            //     processPhotonsAverage = processPhotonsDuration.count() / photonsGenerated;
+            // }
+
+            // size_t hitsGenerated = hitQueue->available();
 
             std::chrono::time_point processHitsStart = std::chrono::system_clock::now();
 
-            std::cout << "Scan sensors" << std::endl;
-            auto hitsBlock = hitQueue->fetch(hitQueue->available());
+            size_t photonsAllocated = photonQueue->allocated();
+            size_t hitsAllocated = hitQueue->allocated();
+
+            std::cout << "---" << std::endl;
+            std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+            std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+
+            size_t lastPhotons = photonsAllocated;
+            size_t lastHits = hitsAllocated;
+
+            while (photonsAllocated > 0 || hitsAllocated > 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                photonsAllocated = photonQueue->allocated();
+                hitsAllocated = hitQueue->allocated();
+
+                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits)
+                {
+                    std::cout << "---" << std::endl;
+                    std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+                    std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+                }
+
+                lastPhotons = photonsAllocated;
+                lastHits = hitsAllocated;
+            }
+
+            std::cout << "---" << std::endl;
+            std::cout << "Collecting photons into pixels" << std::endl;
+
+            auto hitsBlock = finalHitQueue->fetch(finalHitQueue->available());
 
             std::vector<PhotonHit> finalHits{hitsBlock.toVector()};
 
-            std::cout << "Processing " << finalHits.size() << " hits" << std::endl;
-
             std::shared_ptr<Tree<PhotonHit>> finalTree = std::make_shared<Tree<PhotonHit>>(finalHits, 100);
 
-            hitQueue->release(hitsBlock);
+            finalHitQueue->release(hitsBlock);
 
-            std::cout << "Tree has " << finalTree->size() << " hits" << std::endl;
-            std::cout << "Tree has " << finalTree->nodeCount() << " nodes" << std::endl;
-            std::cout << "Tree is " << finalTree->nodeDepth() << " layers deep" << std::endl;
-
+            // std::cout << "Tree has " << finalTree->size() << " hits" << std::endl;
+            // std::cout << "Tree has " << finalTree->nodeCount() << " nodes" << std::endl;
+            // std::cout << "Tree is " << finalTree->nodeDepth() << " layers deep" << std::endl;
 
             for (int i = 0; i < workerCount; ++i)
             {
                 workers[i]->startWrite(finalTree);
             }
 
-            size_t completedWorkers = 0;
-            size_t lastCompleted = 0;
+            size_t workersCompleted = 0;
+            size_t lastCompleted = workersCompleted;
 
-            while (completedWorkers != workerCount)
+            std::cout << "---" << std::endl;
+            std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+
+            while (workersCompleted < workerCount)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-                completedWorkers = 0;
+                workersCompleted = 0;
 
                 for (int i = 0; i < workerCount; ++i)
                 {
                     if (workers[i]->writeComplete())
                     {
-                        ++completedWorkers;
+                        ++workersCompleted;
                     }
                 }
 
-                if (completedWorkers != lastCompleted)
+                if (lastCompleted != workersCompleted)
                 {
-                    std::cout << completedWorkers << " / " << workerCount << " workers completed with write" << std::endl;
+                    std::cout << "---" << std::endl;
+                    std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
                 }
 
-                lastCompleted = completedWorkers;
+                lastCompleted = workersCompleted;
             }
 
             // size_t currentSensor = 0;
@@ -624,55 +660,72 @@ int main(int argc, char** argv)
             //     // image->setPixel(photonHit.photon.x, photonHit.photon.y, workingPixel);
             // }
 
+            std::cout << "---" << std::endl;
             std::cout << "Finished" << std::endl;
+
+            size_t photonsProcessed = 0;
+            size_t hitsProcessed = 0;
+            size_t finalHitsProcessed = finalHits.size();
+
+            for (int i = 0; i < workerCount; ++i)
+            {
+                photonsProcessed += workers[i]->photonsProcessed;
+                hitsProcessed += workers[i]->hitsProcessed;
+                workers[i]->photonsProcessed = 0;
+                workers[i]->hitsProcessed = 0;
+            }
 
             std::chrono::time_point processHitsEnd = std::chrono::system_clock::now();
 
-            std::chrono::microseconds processHitsDuration = std::chrono::duration_cast<std::chrono::microseconds>(processHitsEnd - processHitsStart);
-            int processHitsAverage = 0;
+            // std::chrono::microseconds processHitsDuration = std::chrono::duration_cast<std::chrono::microseconds>(processHitsEnd - processHitsStart);
+            // int processHitsAverage = 0;
 
-            if (hitsGenerated > 0)
-            {
-                processHitsAverage = processHitsDuration.count() / hitsGenerated;
-            }
+            // if (hitsGenerated > 0)
+            // {
+            //     processHitsAverage = processHitsDuration.count() / hitsGenerated;
+            // }
 
             std::chrono::time_point renderEnd = std::chrono::system_clock::now();
             std::chrono::microseconds renderTime = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
 
-            size_t workDuration = 0;
-            size_t pushHitDuration = 0;
-            size_t castDuration = 0;
+            // size_t workDuration = 0;
+            // size_t pushHitDuration = 0;
+            // size_t castDuration = 0;
 
-            for (int i = 0; i < workerCount; ++i)
-            {
-                workDuration += workers[i]->workDuration;
-                workers[i]->workDuration = 0;
-                pushHitDuration += workers[i]->pushHitDuration;
-                workers[i]->pushHitDuration = 0;
-                castDuration += workers[i]->castDuration;
-                workers[i]->castDuration = 0;
-            }
+            // for (int i = 0; i < workerCount; ++i)
+            // {
+            //     workDuration += workers[i]->workDuration;
+            //     workers[i]->workDuration = 0;
+            //     pushHitDuration += workers[i]->pushHitDuration;
+            //     workers[i]->pushHitDuration = 0;
+            //     castDuration += workers[i]->castDuration;
+            //     workers[i]->castDuration = 0;
+            // }
 
+            std::cout << "---" << std::endl;
             std::cout << "Render time:" << std::endl;
             std::cout << "|- Total:        " << renderTime.count() / 1000 << " ms" << std::endl;
             std::cout << "|- Average / px: " << renderTime.count() / pixelCount << " us" << std::endl;
 
             std::cout << "Photons:" << std::endl;
-            std::cout << "|- generated:             " << photonsGenerated << std::endl;
-            std::cout << "|- generation total time: " << generatePhotonsDuration.count() / 1000.0f << " ms" << std::endl;
-            std::cout << "|- generation avg time:   " << generatePhotonsAverage << " us" << std::endl;
-            std::cout << "|- process total time:    " << processPhotonsDuration.count() / 1000.0f << " ms" << std::endl;
-            std::cout << "|- process avg time:      " << processPhotonsAverage << " us" << std::endl;
+            std::cout << "|- processed:             " << photonsProcessed << std::endl;
+            // std::cout << "|- generation total time: " << generatePhotonsDuration.count() / 1000.0f << " ms" << std::endl;
+            // std::cout << "|- generation avg time:   " << generatePhotonsAverage << " us" << std::endl;
+            // std::cout << "|- process total time:    " << processPhotonsDuration.count() / 1000.0f << " ms" << std::endl;
+            // std::cout << "|- process avg time:      " << processPhotonsAverage << " us" << std::endl;
 
             std::cout << "Hits:" << std::endl;
-            std::cout << "|- generated:             " << hitsGenerated << std::endl;
-            std::cout << "|- generation total time: " << processHitsDuration.count() << " us" << std::endl;
-            std::cout << "|- generation avg time:   " << processHitsAverage << " us" << std::endl;
+            std::cout << "|- processed:             " << hitsProcessed << std::endl;
+            // std::cout << "|- generation total time: " << processHitsDuration.count() << " us" << std::endl;
+            // std::cout << "|- generation avg time:   " << processHitsAverage << " us" << std::endl;
 
-            std::cout << "Workers:" << std::endl;
-            std::cout << "|- total duration:    " << workDuration << " us" << std::endl;
-            std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
-            std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
+            std::cout << "Final hits:" << std::endl;
+            std::cout << "|- processed:             " << finalHitsProcessed << std::endl;
+
+            // std::cout << "Workers:" << std::endl;
+            // std::cout << "|- total duration:    " << workDuration << " us" << std::endl;
+            // std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
+            // std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
 
             writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
         }

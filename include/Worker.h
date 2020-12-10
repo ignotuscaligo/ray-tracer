@@ -49,6 +49,7 @@ public:
     void startWrite(std::shared_ptr<Tree<PhotonHit>> tree);
     bool writeComplete() const;
 
+    std::shared_ptr<Object> camera;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
@@ -61,7 +62,14 @@ public:
     size_t pushHitDuration = 0;
     size_t castDuration = 0;
 
+    size_t photonsProcessed = 0;
+    size_t hitsProcessed = 0;
+
 private:
+    bool processPhotons();
+    bool processHits();
+    bool processWrite();
+
     size_t m_index = 0;
     size_t m_fetchSize = 0;
     size_t m_startPixel = 0;
