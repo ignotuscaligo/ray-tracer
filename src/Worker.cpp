@@ -1,61 +1,102 @@
 #include "Worker.h"
 
 #include "Color.h"
+#include "Pixel.h"
 
 #include <chrono>
 #include <iostream>
 #include <optional>
 #include <thread>
 
-Worker::Worker(const Worker& other)
+Worker::Worker(size_t index, size_t fetchSize, size_t startPixel, size_t endPixel)
+    : m_index(index)
+    , m_fetchSize(fetchSize)
+    , m_startPixel(startPixel)
+    , m_endPixel(endPixel)
+    , m_running(false)
+    , m_suspend(false)
+    , m_writePixels(false)
+    , m_writeComplete(false)
 {
-    index = other.index;
-    objects = other.objects;
-    photonQueue = other.photonQueue;
-    hitQueue = other.hitQueue;
-    fetchSize = other.fetchSize;
-    running = other.running.load();
-    writePixels = other.writePixels.load();
-    writeComplete = other.writeComplete.load();
-    suspend = other.suspend.load();
+}
+
+void Worker::start()
+{
+    // std::cout << m_index << ": start()" << std::endl;
+    m_running = true;
+    m_suspend = false;
+}
+
+void Worker::suspend()
+{
+    // std::cout << m_index << ": suspend()" << std::endl;
+    m_suspend = true;
+}
+
+void Worker::resume()
+{
+    // std::cout << m_index << ": resume()" << std::endl;
+    m_suspend = false;
+}
+
+void Worker::stop()
+{
+    // std::cout << m_index << ": stop()" << std::endl;
+    m_running = false;
 }
 
 void Worker::startWrite(std::shared_ptr<Tree<PhotonHit>> tree)
 {
+    // std::cout << m_index << ": startWrite(...)" << std::endl;
+
+    if (!tree)
+    {
+        std::cout << m_index << ": ERROR: tree missing when writePixels() was called" << std::endl;
+        return;
+    }
+
     finalTree = tree;
-    writeComplete = false;
-    writePixels = true;
+    m_writeComplete = false;
+    m_writePixels = true;
 }
 
-void Worker::run()
+bool Worker::writeComplete() const
 {
-    // std::cout << index << ": start thread" << std::endl;
+    return m_writeComplete.load();
+}
+
+void Worker::exec()
+{
+    // std::cout << m_index << ": start thread" << std::endl;
 
     std::vector<PhotonHit> hits;
+    Pixel workingPixel;
 
     if (!photonQueue || !hitQueue || !pixelSensors || !image)
     {
-        std::cout << index << ": abort thread, missing required references" << std::endl;
-        running = false;
+        std::cout << m_index << ": ABORT: missing required references!" << std::endl;
+        m_running = false;
     }
 
-    while (running)
+    while (m_running)
     {
-        if (suspend)
+        if (m_suspend)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
-        if (writePixels && !writeComplete)
+        if (m_writePixels && !m_writeComplete)
         {
+            // std::cout << m_index << ": writing pixels " << m_startPixel << " to " << m_endPixel << std::endl;
+
             if (!finalTree)
             {
-                std::cout << index << ": abort thread, finalTree missing when writePixels was enabled" << std::endl;
+                std::cout << m_index << ": ABORT: finalTree missing!" << std::endl;
                 break;
             }
 
-            for (size_t i = startPixel; i < endPixel; ++i)
+            for (size_t i = m_startPixel; i < m_endPixel; ++i)
             {
                 PixelSensor& sensor = pixelSensors->at(i);
 
@@ -79,17 +120,17 @@ void Worker::run()
                 image->setPixel(sensor.x, sensor.y, workingPixel);
             }
 
-            writeComplete = true;
-            writePixels = false;
+            m_writePixels = false;
             finalTree = nullptr;
+            m_writeComplete = true;
         }
         else if (photonQueue->available() > 0)
         {
             auto workStart = std::chrono::system_clock::now();
-            // std::cout << index << ": fetching " << fetchSize << " photons" << std::endl;
-            auto photons = photonQueue->fetch(fetchSize);
+            // std::cout << m_index << ": fetching " << m_fetchSize << " photons" << std::endl;
+            auto photons = photonQueue->fetch(m_fetchSize);
 
-            // std::cout << index << ": processing " << photons.size() << " photons" << std::endl;
+            // std::cout << m_index << ": processing " << photons.size() << " photons" << std::endl;
 
             size_t hitsGenerated = 0;
 
@@ -157,7 +198,7 @@ void Worker::run()
 
             workDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
 
-            // std::cout << index << ": finished processing, generated " << hitsGenerated << " hits" << std::endl;
+            // std::cout << m_index << ": finished processing, generated " << hitsGenerated << " hits" << std::endl;
         }
         else
         {
@@ -165,5 +206,5 @@ void Worker::run()
         }
     }
 
-    // std::cout << index << ": end thread" << std::endl;
+    // std::cout << m_index << ": end thread" << std::endl;
 }

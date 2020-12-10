@@ -291,37 +291,42 @@ int main(int argc, char** argv)
         // 32: 12538 ms, 98.8%, 549.6MB
         const size_t workerCount = 32;
 
-        Worker workers[workerCount];
+        std::shared_ptr<Worker> workers[workerCount];
 
         size_t pixelStep = pixelSensors->size() / workerCount;
 
+        size_t fetchSize = 10000;
+
         for (int i = 0; i < workerCount; ++i)
         {
-            workers[i].index = i;
-            workers[i].objects = objects;
-            workers[i].photonQueue = photonQueue;
-            workers[i].hitQueue = hitQueue;
-            workers[i].pixelSensors = pixelSensors;
-            workers[i].finalTree = nullptr;
-            workers[i].image = image;
-            workers[i].fetchSize = 10000;
-            workers[i].startPixel = i * pixelStep;
-            workers[i].endPixel = workers[i].startPixel + pixelStep;
-            workers[i].running = true;
-            workers[i].writePixels = false;
-            workers[i].writeComplete = false;
-            workers[i].suspend = false;
-        }
+            size_t index = i;
+            size_t startPixel = i * pixelStep;
+            size_t endPixel = startPixel + pixelStep;
 
-        workers[workerCount - 1].endPixel = pixelSensors->size() - 1;
+            if (i == workerCount - 1)
+            {
+                endPixel = pixelSensors->size() - 1;
+            }
+
+            workers[i] = std::make_shared<Worker>(index, fetchSize, startPixel, endPixel);
+            workers[i]->objects = objects;
+            workers[i]->photonQueue = photonQueue;
+            workers[i]->hitQueue = hitQueue;
+            workers[i]->pixelSensors = pixelSensors;
+            workers[i]->finalTree = nullptr;
+            workers[i]->image = image;
+        }
 
         std::thread threads[workerCount];
 
         for (int i = 0; i < workerCount; ++i)
         {
+            workers[i]->start();
+
+            // TODO: move to Worker
             threads[i] = std::thread([&workers, i]() {
                 // std::cout << "running thread" << std::endl;
-                workers[i].run();
+                workers[i]->exec();
             });
         }
 
@@ -346,7 +351,7 @@ int main(int argc, char** argv)
 
             // for (int i = 0; i < workerCount; ++i)
             // {
-            //     workers[i].suspend = true;
+            //     workers[i]->suspend();
             // }
 
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
@@ -402,7 +407,7 @@ int main(int argc, char** argv)
 
             // for (int i = 0; i < workerCount; ++i)
             // {
-            //     workers[i].suspend = false;
+            //     workers[i]->resume();
             // }
 
             size_t currPhotons = photonQueue->allocated();
@@ -454,7 +459,7 @@ int main(int argc, char** argv)
 
             for (int i = 0; i < workerCount; ++i)
             {
-                workers[i].startWrite(finalTree);
+                workers[i]->startWrite(finalTree);
             }
 
             size_t completedWorkers = 0;
@@ -468,7 +473,7 @@ int main(int argc, char** argv)
 
                 for (int i = 0; i < workerCount; ++i)
                 {
-                    if (workers[i].writeComplete.load())
+                    if (workers[i]->writeComplete())
                     {
                         ++completedWorkers;
                     }
@@ -640,12 +645,12 @@ int main(int argc, char** argv)
 
             for (int i = 0; i < workerCount; ++i)
             {
-                workDuration += workers[i].workDuration;
-                workers[i].workDuration = 0;
-                pushHitDuration += workers[i].pushHitDuration;
-                workers[i].pushHitDuration = 0;
-                castDuration += workers[i].castDuration;
-                workers[i].castDuration = 0;
+                workDuration += workers[i]->workDuration;
+                workers[i]->workDuration = 0;
+                pushHitDuration += workers[i]->pushHitDuration;
+                workers[i]->pushHitDuration = 0;
+                castDuration += workers[i]->castDuration;
+                workers[i]->castDuration = 0;
             }
 
             std::cout << "Render time:" << std::endl;
@@ -674,7 +679,7 @@ int main(int argc, char** argv)
 
         for (int i = 0; i < workerCount; ++i)
         {
-            workers[i].running = false;
+            workers[i]->stop();
         }
 
         for (int i = 0; i < workerCount; ++i)
