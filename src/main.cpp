@@ -34,7 +34,13 @@ constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 72;
+constexpr size_t frameCount = 1;
+
+constexpr size_t imageWidth = 512;
+constexpr size_t imageHeight = 512;
+constexpr float aspectRatio = static_cast<float>(imageWidth) / static_cast<float>(imageHeight);
+constexpr float verticalFov = 80.0f;
+constexpr float horizontalFov = verticalFov * aspectRatio;
 
 }
 
@@ -163,13 +169,10 @@ int main(int argc, char** argv)
 
         size_t photonsPerLight = photonCount / lightCount;
 
-        std::shared_ptr<Image> image = std::make_shared<Image>(512, 512);
+        std::shared_ptr<Image> image = std::make_shared<Image>(imageWidth, imageHeight);
         Pixel workingPixel;
 
         const size_t pixelCount = image->width() * image->height();
-
-        float horizontalFov = 80.0f;
-        float verticalFov = 80.0f;
 
         float pitchStep = verticalFov / static_cast<float>(image->height());
         float yawStep = horizontalFov / static_cast<float>(image->width());
@@ -245,7 +248,7 @@ int main(int argc, char** argv)
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
             std::chrono::time_point generatePhotonsStart = std::chrono::system_clock::now();
 
-            std::cout << "Casting " << lightCount * photonsPerLight << " photons from " << lightCount << " lights" << std::endl;
+            std::cout << "Emitting " << lightCount * photonsPerLight << " photons from " << lightCount << " lights" << std::endl;
             for (const auto& object : objects)
             {
                 if (object->hasType<Light>())
@@ -258,6 +261,7 @@ int main(int argc, char** argv)
                 }
             }
 
+            std::cout << "---" << std::endl;
             std::cout << "Generate sensors" << std::endl;
             for (int y = 0; y < image->height(); ++y)
             {
@@ -277,12 +281,15 @@ int main(int argc, char** argv)
             std::chrono::time_point generatePhotonsEnd = std::chrono::system_clock::now();
             std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
 
+            std::cout << "---" << std::endl;
+            std::cout << "Cast photons into scene" << std::endl;
+
             size_t photonsAllocated = photonQueue->allocated();
             size_t hitsAllocated = hitQueue->allocated();
 
-            std::cout << "---" << std::endl;
-            std::cout << "remaining photons:    " << photonsAllocated << std::endl;
-            std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+            // std::cout << "---" << std::endl;
+            // std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+            // std::cout << "remaining hits:       " << hitsAllocated << std::endl;
 
             size_t lastPhotons = photonsAllocated;
             size_t lastHits = hitsAllocated;
@@ -294,12 +301,12 @@ int main(int argc, char** argv)
                 photonsAllocated = photonQueue->allocated();
                 hitsAllocated = hitQueue->allocated();
 
-                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits)
-                {
-                    std::cout << "---" << std::endl;
-                    std::cout << "remaining photons:    " << photonsAllocated << std::endl;
-                    std::cout << "remaining hits:       " << hitsAllocated << std::endl;
-                }
+                // if (photonsAllocated != lastPhotons || hitsAllocated != lastHits)
+                // {
+                //     std::cout << "---" << std::endl;
+                //     std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+                //     std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+                // }
 
                 lastPhotons = photonsAllocated;
                 lastHits = hitsAllocated;
@@ -324,8 +331,8 @@ int main(int argc, char** argv)
             size_t workersCompleted = 0;
             size_t lastCompleted = workersCompleted;
 
-            std::cout << "---" << std::endl;
-            std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+            // std::cout << "---" << std::endl;
+            // std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
 
             while (workersCompleted < workerCount)
             {
@@ -341,11 +348,11 @@ int main(int argc, char** argv)
                     }
                 }
 
-                if (lastCompleted != workersCompleted)
-                {
-                    std::cout << "---" << std::endl;
-                    std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
-                }
+                // if (lastCompleted != workersCompleted)
+                // {
+                //     std::cout << "---" << std::endl;
+                //     std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+                // }
 
                 lastCompleted = workersCompleted;
             }
@@ -410,7 +417,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_1." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\transform_ray_test_0." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (size_t i = 0; i < workerCount; ++i)
