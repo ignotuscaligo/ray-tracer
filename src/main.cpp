@@ -706,23 +706,23 @@ int main(int argc, char** argv)
 
             std::cout << "---" << std::endl;
             std::cout << "Render time:" << std::endl;
-            std::cout << "|- Total:        " << renderTime.count() / 1000 << " ms" << std::endl;
-            std::cout << "|- Average / px: " << renderTime.count() / pixelCount << " us" << std::endl;
+            std::cout << "|- total:        " << renderTime.count() / 1000 << " ms" << std::endl;
+            std::cout << "|- average / px: " << renderTime.count() / pixelCount << " us" << std::endl;
 
             std::cout << "Photons:" << std::endl;
-            std::cout << "|- processed:             " << photonsProcessed << std::endl;
+            std::cout << "|- processed: " << photonsProcessed << std::endl;
             // std::cout << "|- generation total time: " << generatePhotonsDuration.count() / 1000.0f << " ms" << std::endl;
             // std::cout << "|- generation avg time:   " << generatePhotonsAverage << " us" << std::endl;
             // std::cout << "|- process total time:    " << processPhotonsDuration.count() / 1000.0f << " ms" << std::endl;
             // std::cout << "|- process avg time:      " << processPhotonsAverage << " us" << std::endl;
 
             std::cout << "Hits:" << std::endl;
-            std::cout << "|- processed:             " << hitsProcessed << std::endl;
+            std::cout << "|- processed: " << hitsProcessed << std::endl;
             // std::cout << "|- generation total time: " << processHitsDuration.count() << " us" << std::endl;
             // std::cout << "|- generation avg time:   " << processHitsAverage << " us" << std::endl;
 
             std::cout << "Final hits:" << std::endl;
-            std::cout << "|- processed:             " << finalHitsProcessed << std::endl;
+            std::cout << "|- processed: " << finalHitsProcessed << std::endl;
 
             std::cout << "Workers:" << std::endl;
             std::cout << "|- total duration:  " << totalDuration << " us" << std::endl;
