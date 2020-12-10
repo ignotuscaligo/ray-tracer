@@ -58,9 +58,9 @@ public:
     std::shared_ptr<Tree<PhotonHit>> finalTree;
     std::shared_ptr<Image> image;
 
-    size_t workDuration = 0;
-    size_t pushHitDuration = 0;
-    size_t castDuration = 0;
+    size_t photonDuration = 0;
+    size_t hitDuration = 0;
+    size_t writeDuration = 0;
 
     size_t photonsProcessed = 0;
     size_t hitsProcessed = 0;

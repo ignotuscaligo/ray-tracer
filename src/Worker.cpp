@@ -181,6 +181,10 @@ bool Worker::processPhotons()
 
     photonQueue->release(photonsBlock);
 
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    photonDuration += workDuration.count();
+
     // std::cout << m_index << ": finished processing photons, generated " << hits.size() << " hits" << std::endl;
 
     return true;
@@ -189,6 +193,7 @@ bool Worker::processPhotons()
 bool Worker::processHits()
 {
     // std::cout << m_index << ": processing hits" << std::endl;
+    auto workStart = std::chrono::system_clock::now();
 
     auto hitsBlock = hitQueue->fetch(m_fetchSize);
 
@@ -251,12 +256,17 @@ bool Worker::processHits()
 
     hitQueue->release(hitsBlock);
 
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    hitDuration += workDuration.count();
+
     return true;
 }
 
 bool Worker::processWrite()
 {
     // std::cout << m_index << ": writing pixels " << m_startPixel << " to " << m_endPixel << std::endl;
+    auto workStart = std::chrono::system_clock::now();
 
     if (!finalTree)
     {
@@ -295,6 +305,10 @@ bool Worker::processWrite()
     m_writePixels = false;
     finalTree = nullptr;
     m_writeComplete = true;
+
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    writeDuration += workDuration.count();
 
     return true;
 }

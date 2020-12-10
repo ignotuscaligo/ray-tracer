@@ -688,19 +688,21 @@ int main(int argc, char** argv)
             std::chrono::time_point renderEnd = std::chrono::system_clock::now();
             std::chrono::microseconds renderTime = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
 
-            // size_t workDuration = 0;
-            // size_t pushHitDuration = 0;
-            // size_t castDuration = 0;
+            size_t photonDuration = 0;
+            size_t hitDuration = 0;
+            size_t writeDuration = 0;
 
-            // for (int i = 0; i < workerCount; ++i)
-            // {
-            //     workDuration += workers[i]->workDuration;
-            //     workers[i]->workDuration = 0;
-            //     pushHitDuration += workers[i]->pushHitDuration;
-            //     workers[i]->pushHitDuration = 0;
-            //     castDuration += workers[i]->castDuration;
-            //     workers[i]->castDuration = 0;
-            // }
+            for (int i = 0; i < workerCount; ++i)
+            {
+                photonDuration += workers[i]->photonDuration;
+                workers[i]->photonDuration = 0;
+                hitDuration += workers[i]->hitDuration;
+                workers[i]->hitDuration = 0;
+                writeDuration += workers[i]->writeDuration;
+                workers[i]->writeDuration = 0;
+            }
+
+            size_t totalDuration = photonDuration + hitDuration + writeDuration;
 
             std::cout << "---" << std::endl;
             std::cout << "Render time:" << std::endl;
@@ -722,10 +724,11 @@ int main(int argc, char** argv)
             std::cout << "Final hits:" << std::endl;
             std::cout << "|- processed:             " << finalHitsProcessed << std::endl;
 
-            // std::cout << "Workers:" << std::endl;
-            // std::cout << "|- total duration:    " << workDuration << " us" << std::endl;
-            // std::cout << "|- push hit duration: " << pushHitDuration << " us" << std::endl;
-            // std::cout << "|- cast duration:     " << castDuration << " us" << std::endl;
+            std::cout << "Workers:" << std::endl;
+            std::cout << "|- total duration:  " << totalDuration << " us" << std::endl;
+            std::cout << "|- photon duration: " << photonDuration << " us" << std::endl;
+            std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
+            std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
             writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\pipeline_0." + std::to_string(frame) + ".png", *image, "test");
         }
