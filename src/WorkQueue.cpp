@@ -104,24 +104,11 @@ typename WorkQueue<T>::Block WorkQueue<T>::initialize(size_t count)
 
         if (remaining > 0)
         {
-            // std::cout << "memoryHead " << m_memoryHead;
-
             start = m_memoryHead;
             end = m_memoryHead + std::min(count, remaining);
 
-            // if (m_memoryHead >= m_memoryTail)
-            // {
-            //     end = std::min(end, m_memoryTail + m_size);
-            // }
-            // else
-            // {
-            //     end = std::min(end, m_memoryTail);
-            // }
-
             m_memoryHead = end % m_size;
             m_allocated.fetch_add(end - start);
-
-            // std::cout << " -> " << m_memoryHead << std::endl;
 
             m_initializing.insert(end);
         }
@@ -153,21 +140,10 @@ void WorkQueue<T>::ready(Block block)
 
             m_initializing.erase(it);
 
-            // std::cout << "readyHead " << m_readyHead;
-
             size_t prev = m_readyHead;
             m_readyHead = head % m_size;
 
-            if (head > prev)
-            {
-                m_available.fetch_add(head - prev);
-            }
-            else if (head < prev)
-            {
-                m_available.fetch_add((m_readyHead + m_size) - prev);
-            }
-
-            // std::cout << " -> " << m_readyHead << std::endl;
+            m_available.fetch_add(block.endIndex - block.startIndex);
         }
     }
 }
@@ -184,28 +160,11 @@ typename WorkQueue<T>::Block WorkQueue<T>::fetch(size_t count)
 
         if (m_available.load() > 0)
         {
-            // std::cout << "fetch(" << count << ")" << std::endl;
-
             start = m_readyTail;
             end = m_readyTail + std::min(count, m_available.load());
 
-            // std::cout << "start: " << start << std::endl;
-            // std::cout << "end:   " << end << std::endl;
-
-            // if (m_readyHead >= m_readyTail)
-            // {
-            //     end = std::min(end, m_readyHead);
-            // }
-            // else
-            // {
-            //     end = std::min(end, m_readyHead + m_size);
-            // }
-
             m_readyTail = end % m_size;
             m_available.fetch_sub(end - start);
-
-            // std::cout << "readyTail " << start;
-            // std::cout << " -> " << m_readyTail << std::endl;
 
             m_processing.insert(start);
         }
@@ -236,29 +195,10 @@ void WorkQueue<T>::release(Block block)
                 tail = *m_processing.begin();
             }
 
-            // std::cout << "memoryTail " << m_memoryTail;
-
             size_t prev = m_memoryTail;
             m_memoryTail = tail % m_size;
 
-            // std::cout << "release : block.startIndex: " << block.startIndex << std::endl;
-            // std::cout << "release : block.endIndex:   " << block.endIndex << std::endl;
-            // std::cout << "release : m_readyTail:      " << m_readyTail << std::endl;
-            // std::cout << "release : tail:             " << tail << std::endl;
-            // std::cout << "release : prev:             " << prev << std::endl;
-
             m_allocated.fetch_sub(block.endIndex - block.startIndex);
-
-            // if (tail > prev)
-            // {
-            //     m_allocated.fetch_sub(tail - prev);
-            // }
-            // else if (tail < prev)
-            // {
-            //     m_allocated.fetch_sub((m_memoryTail + m_size) - prev);
-            // }
-
-            // std::cout << " -> " << m_memoryTail << std::endl;
         }
     }
 }
