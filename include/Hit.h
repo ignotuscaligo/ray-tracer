@@ -6,7 +6,7 @@ struct Hit
 {
     Vector position;
     Vector normal;
-    float distance; // Distance from ray origin to hit position
+    float distance = 0; // Distance from ray origin to hit position
 
     Hit() = default;
 };

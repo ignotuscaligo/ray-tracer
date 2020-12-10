@@ -17,6 +17,6 @@ struct Pyramid
     Vector direction;
     Vector vertical;
     Vector horizontal;
-    float verticalDot;
-    float horizontalDot;
+    float verticalDot = 0;
+    float horizontalDot = 0;
 };

@@ -2,34 +2,34 @@
 
 #include <cstring>
 
-Image::Image(int width, int height)
+Image::Image(size_t width, size_t height)
     : m_width(width)
     , m_height(height)
     , m_pixels(new Pixel[m_width * m_height])
 {
 }
 
-int Image::width() const
+size_t Image::width() const
 {
     return m_width;
 }
 
-int Image::height() const
+size_t Image::height() const
 {
     return m_height;
 }
 
-Pixel* Image::getRow(int row)
+Pixel* Image::getRow(size_t row)
 {
     return &(m_pixels.get()[row * m_width]);
 }
 
-void Image::setPixel(int x, int y, Pixel pixel)
+void Image::setPixel(size_t x, size_t y, Pixel pixel)
 {
     m_pixels.get()[(y * m_width) + x] = pixel;
 }
 
-Pixel Image::getPixel(int x, int y)
+Pixel Image::getPixel(size_t x, size_t y)
 {
     return m_pixels.get()[(y * m_width) + x];
 }

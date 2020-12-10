@@ -7,18 +7,18 @@
 class Image
 {
 public:
-    Image(int width, int height);
+    Image(size_t width, size_t height);
 
-    int width() const;
-    int height() const;
+    size_t width() const;
+    size_t height() const;
 
-    Pixel* getRow(int row);
-    void setPixel(int x, int y, Pixel pixel);
-    Pixel getPixel(int x, int y);
+    Pixel* getRow(size_t row);
+    void setPixel(size_t x, size_t y, Pixel pixel);
+    Pixel getPixel(size_t x, size_t y);
     void clear();
 
 private:
-    int m_width;
-    int m_height;
+    size_t m_width;
+    size_t m_height;
     std::unique_ptr<Pixel> m_pixels;
 };

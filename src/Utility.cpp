@@ -23,10 +23,10 @@ void printTriangle(const Triangle& triangle)
 
 float radians(float degrees)
 {
-    return M_PI * (degrees / 180.0f);
+    return static_cast<float>(M_PI) * (degrees / 180.0f);
 }
 
 float degrees(float radians)
 {
-    return (radians * 180.0f) / M_PI;
+    return (radians * 180.0f) / static_cast<float>(M_PI);
 }

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <string>
 
 template<typename T>
@@ -108,7 +109,7 @@ std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
 
     Tree<T>::castRayIntoNode(ray, m_root, hits);
 
-    float minDistance;
+    float minDistance = std::numeric_limits<float>::max();
     std::optional<Hit> result;
 
     for (const auto& hit : hits)

@@ -18,8 +18,8 @@ struct PixelSensor
         return pyramid.containsPoint(point);
     }
 
-    int x;
-    int y;
+    int x = 0;
+    int y = 0;
 
     Pyramid pyramid;
 };

@@ -20,5 +20,5 @@ public:
 
 protected:
     Color m_color;
-    float m_brightness;
+    float m_brightness = 0;
 };

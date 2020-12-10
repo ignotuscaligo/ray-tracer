@@ -8,12 +8,10 @@
 
 struct Photon
 {
+    Photon() = default;
+
     Ray ray;
     Color color;
-    int x;
-    int y;
-
-    Photon() = default;
 };
 
 struct PhotonHit

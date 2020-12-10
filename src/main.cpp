@@ -78,15 +78,15 @@ std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
 
         for (const auto& shape : shapes)
         {
-            int indexOffset = 0;
+            size_t indexOffset = 0;
 
-            for (const int vertexCount : shape.mesh.num_face_vertices)
+            for (const size_t vertexCount : shape.mesh.num_face_vertices)
             {
-                for (int v = 0; v < vertexCount; ++v)
+                for (size_t v = 0; v < vertexCount; ++v)
                 {
                     tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-                    int vertexIndex = 3 * idx.vertex_index;
-                    int normalIndex = 3 * idx.normal_index;
+                    size_t vertexIndex = 3 * idx.vertex_index;
+                    size_t normalIndex = 3 * idx.normal_index;
                     points[v].x = attrib.vertices[vertexIndex + 0];
                     points[v].y = attrib.vertices[vertexIndex + 1];
                     points[v].z = attrib.vertices[vertexIndex + 2];
@@ -381,16 +381,6 @@ int main(int argc, char** argv)
                     pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
                     pixelSensors->at(index).x = x;
                     pixelSensors->at(index).y = y;
-
-                    // photons[x].ray = {cameraPosition, direction};
-                    // photons[x].x = x;
-                    // photons[x].y = y;
-
-                    if (x == 256 && y == 256)
-                    {
-                        PixelSensor& sensor = pixelSensors->at(index);
-                        std::cout << sensor.x << ", " << sensor.y << std::endl;
-                    }
                 }
 
                 // photonQueue->ready(photons);

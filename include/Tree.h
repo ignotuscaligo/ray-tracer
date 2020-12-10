@@ -26,10 +26,10 @@ public:
         size_t nodeCount() const;
         size_t nodeDepth() const;
 
-        Axis axis;
-        float pivot;
+        Axis axis = Axis::X;
+        float pivot = 0;
         Bounds bounds;
-        int depth;
+        int depth = 0;
         std::shared_ptr<Node> left;
         std::shared_ptr<Node> right;
         std::unique_ptr<Page> page;
