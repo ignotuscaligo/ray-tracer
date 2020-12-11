@@ -2,7 +2,11 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
+
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 Axis nextAxis(Axis axis)
 {
@@ -97,10 +101,10 @@ float Vector::magnitude() const
 
 Vector Vector::normalize()
 {
-    __m128 input = _mm_set_ps(0, 0, 0, magnitudeSquared());
+    __m128 input = _mm_set1_ps(magnitudeSquared());
     __m128 invroot = _mm_rsqrt_ps(input);
 
-    *this *= invroot.m128_f32[0];
+    data = _mm_mul_ps(data, invroot);
 
     return *this;
 }
@@ -170,6 +174,23 @@ Vector Vector::reflected(const Vector& incident, const Vector& normal)
     __m128 dot2 = _mm_set1_ps(2 * (mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]));
 
     return _mm_sub_ps(incident.data, _mm_mul_ps(dot2, normal.data));
+}
+
+Vector Vector::random(float magnitude)
+{
+    return Vector::randomSphere() * ((static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * magnitude);
+}
+
+Vector Vector::randomSphere(float magnitude)
+{
+    float theta = 2 * M_PI * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+    float phi = std::acos(1.0f - 2.0f * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
+
+    return {
+        std::sin(phi) * std::cos(theta) * magnitude,
+        std::sin(phi) * std::sin(theta) * magnitude,
+        std::cos(phi) * magnitude
+    };
 }
 
 Vector operator+(const Vector& lhs, const Vector& rhs)

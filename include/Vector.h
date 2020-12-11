@@ -36,6 +36,8 @@ union Vector
     static float dot(const Vector& a, const Vector& b);
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs);
     static Vector reflected(const Vector& incident, const Vector& normal);
+    static Vector random(float magnitude = 1.0f);
+    static Vector randomSphere(float magnitude = 1.0f);
 
     __m128 data;
 
