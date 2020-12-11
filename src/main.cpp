@@ -34,7 +34,7 @@ constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 1;
+constexpr size_t frameCount = 72;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
@@ -242,7 +242,7 @@ int main(int argc, char** argv)
             image->clear();
 
             objectPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * rotationStep), 0);
-            knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(0, 0, radians(frame * rotationStep * 2));
+            // knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(0, 0, radians(frame * rotationStep * 2));
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
@@ -421,7 +421,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\material_test_0." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\material_test_1." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (size_t i = 0; i < workerCount; ++i)
