@@ -29,12 +29,12 @@
 namespace
 {
 
-constexpr size_t photonCount = 1000000;
+constexpr size_t photonCount = 4000000;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 72;
+constexpr size_t frameCount = 36 * 4;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
@@ -153,11 +153,13 @@ int main(int argc, char** argv)
 
         omniLight0->transform.position = {40, 40, 40};
         omniLight0->color({1.0f, 0.95f, 0.87f});
-        omniLight0->brightness(200000);
+        omniLight0->brightness(500000);
+        omniLight0->innerRadius(10.0f);
 
         omniLight1->transform.position = {-40, -40, -40};
         omniLight1->color({0.7f, 0.7f, 1.0f});
-        omniLight1->brightness(200000);
+        omniLight1->brightness(400000);
+        omniLight1->innerRadius(10.0f);
 
         size_t lightCount = 0;
 
@@ -421,7 +423,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\material_test_1." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\light_test_0." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (size_t i = 0; i < workerCount; ++i)
