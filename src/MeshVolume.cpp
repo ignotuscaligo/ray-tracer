@@ -9,5 +9,5 @@ MeshVolume::MeshVolume(const std::vector<Triangle>& triangles)
 
 std::optional<Hit> MeshVolume::castRay(const Ray& ray) const
 {
-    return m_tree.castRay(ray);
+    return transformHit(m_tree.castRay(transformRay(ray)));
 }

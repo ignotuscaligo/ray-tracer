@@ -137,6 +137,7 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> cameraPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> camera = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
@@ -145,15 +146,16 @@ int main(int argc, char** argv)
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
         Object::setParent(sun, cameraPivot);
-        Object::setParent(knotMesh, root);
-        Object::setParent(omniLight0, root);
-        Object::setParent(omniLight1, root);
+        Object::setParent(objectPivot, root);
+        Object::setParent(knotMesh, objectPivot);
+        Object::setParent(omniLight0, objectPivot);
+        Object::setParent(omniLight1, objectPivot);
 
-        omniLight0->transform.position = {40, 40, -40};
+        omniLight0->transform.position = {40, 40, 40};
         omniLight0->color({1.0f, 0.95f, 0.87f});
         omniLight0->brightness(200000);
 
-        omniLight1->transform.position = {-40, -40, 40};
+        omniLight1->transform.position = {-40, -40, -40};
         omniLight1->color({0.7f, 0.7f, 1.0f});
         omniLight1->brightness(200000);
 
@@ -182,7 +184,8 @@ int main(int argc, char** argv)
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
-        camera->transform.position = {0.0f, 0.0f, -55.0f};
+        camera->transform.position = {0.0f, 0.0f, 55.0f};
+        camera->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(180), 0);
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
@@ -238,7 +241,7 @@ int main(int argc, char** argv)
 
             image->clear();
 
-            cameraPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * rotationStep), 0);
+            objectPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * rotationStep), 0);
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
@@ -270,7 +273,7 @@ int main(int argc, char** argv)
                 for (int x = 0; x < image->width(); ++x)
                 {
                     size_t index = x + (y * image->width());
-                    float yaw = -((horizontalFov / 2.0f) - ((x / (image->width() - 1.0f)) * horizontalFov));
+                    float yaw = ((horizontalFov / 2.0f) - ((x / (image->width() - 1.0f)) * horizontalFov));
 
                     pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
                     pixelSensors->at(index).x = x;

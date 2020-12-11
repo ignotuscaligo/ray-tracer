@@ -88,10 +88,10 @@ Quaternion Quaternion::fromAxisAngle(Vector axis, float angle)
 Quaternion operator*(const Quaternion& lhs, const Quaternion& rhs)
 {
     return {
-        lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y + lhs.w * rhs.x,
-        -lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x + lhs.w * rhs.y,
-        lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w + lhs.w * rhs.z,
-        -lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z + lhs.w * rhs.w
+        lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.w * rhs.y + lhs.y * rhs.w + lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.w * rhs.z + lhs.z * rhs.w + lhs.x * rhs.y - lhs.y * rhs.x,
+        lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z
     };
 }
 
@@ -99,7 +99,7 @@ Vector operator*(const Quaternion& lhs, const Vector& rhs)
 {
     Quaternion v{rhs};
 
-    v = lhs * v * lhs.conjugate();
+    v = (lhs * v) * lhs.conjugate();
 
     return {
         v.x,
