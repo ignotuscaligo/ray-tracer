@@ -162,6 +162,16 @@ Vector Vector::normalizedSub(const Vector& lhs, const Vector& rhs)
     return _mm_mul_ps(sub, invRoot);
 }
 
+// r = incident − 2 * (incident ⋅ normal) * normal
+Vector Vector::reflected(const Vector& incident, const Vector& normal)
+{
+    __m128 mul = _mm_mul_ps(incident.data, normal.data);
+
+    __m128 dot2 = _mm_set1_ps(2 * (mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]));
+
+    return _mm_sub_ps(incident.data, _mm_mul_ps(dot2, normal.data));
+}
+
 Vector operator+(const Vector& lhs, const Vector& rhs)
 {
     return _mm_add_ps(lhs.data, rhs.data);

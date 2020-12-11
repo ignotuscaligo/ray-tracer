@@ -421,7 +421,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\transform_ray_test_1." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\material_test_0." + std::to_string(frame) + ".png", *image, "test");
         }
 
         for (size_t i = 0; i < workerCount; ++i)

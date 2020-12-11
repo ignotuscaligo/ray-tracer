@@ -35,6 +35,7 @@ union Vector
     static Vector cross(const Vector& a, const Vector& b);
     static float dot(const Vector& a, const Vector& b);
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs);
+    static Vector reflected(const Vector& incident, const Vector& normal);
 
     __m128 data;
 

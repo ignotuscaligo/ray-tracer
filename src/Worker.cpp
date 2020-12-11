@@ -3,6 +3,7 @@
 #include "Color.h"
 #include "Pixel.h"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <optional>
@@ -292,7 +293,9 @@ bool Worker::processWrite()
 
             if (dot > 0)
             {
-                color += photonHit.photon.color;
+                Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
+                float reflectionDot = std::max(0.0f, Vector::dot(-sensor.pyramid.direction, reflection));
+                color += photonHit.photon.color * reflectionDot;
             }
         }
 
