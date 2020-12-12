@@ -223,6 +223,8 @@ bool Worker::processHits()
 
         Ray ray{photonHit.hit.position, path / cameraDistance};
 
+        std::optional<Hit> closestHit;
+
         // Do any objects obscure this hit?
         for (auto& object : objects)
         {
@@ -233,11 +235,19 @@ bool Worker::processHits()
 
             std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(ray);
 
-            // If no object was hit, or the object is behind the camera, the hit is valid
-            if (!hit || hit->distance > cameraDistance)
+            if (hit)
             {
-                validHits.push_back(photonHit);
+                if (!closestHit || hit->distance < closestHit->distance)
+                {
+                    closestHit = hit;
+                }
             }
+        }
+
+        // If no object was hit, or the closest hit object is behind the camera, the hit is valid
+        if (!closestHit || closestHit->distance > cameraDistance)
+        {
+            validHits.push_back(photonHit);
         }
     }
 
