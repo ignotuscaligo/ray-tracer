@@ -251,6 +251,27 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
     // }
 }
 
+// Find the next non-zero bound, if available
+Axis nextNonZeroAxis(const Bounds& bounds, Axis axis)
+{
+    Limits limits = bounds.getLimits(axis);
+    Axis validAxis = axis;
+
+    while (limits.max - limits.min <= std::numeric_limits<float>::epsilon())
+    {
+        validAxis = nextAxis(validAxis);
+
+        if (validAxis == axis)
+        {
+            break;
+        }
+
+        limits = bounds.getLimits(validAxis);
+    }
+
+    return validAxis;
+}
+
 template<typename T>
 std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<T>& objects, Axis axis)
 {
@@ -277,13 +298,14 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
     }
     else
     {
-        node->pivot = Tree<T>::axisMedian(objects, axis);
+        node->axis = nextNonZeroAxis(node->bounds, node->axis);
+        node->pivot = Tree<T>::axisMedian(objects, node->axis);
 
         std::vector<T> leftObjects, middleObjects, rightObjects;
 
         for (const auto& object : objects)
         {
-            float pivot = Tree<T>::getPivot(object, axis);
+            float pivot = Tree<T>::getPivot(object, node->axis);
             if (pivot < node->pivot)
             {
                 leftObjects.push_back(object);
@@ -301,13 +323,13 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
         if (!leftObjects.empty())
         {
             // std::cout << "generateTree : left" << std::endl;
-            node->left = generateTree(leftObjects, nextAxis(axis));
+            node->left = generateTree(leftObjects, nextAxis(node->axis));
         }
 
         if (!rightObjects.empty())
         {
             // std::cout << "generateTree : right" << std::endl;
-            node->right = generateTree(rightObjects, nextAxis(axis));
+            node->right = generateTree(rightObjects, nextAxis(node->axis));
         }
 
         if (!middleObjects.empty())
