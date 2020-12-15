@@ -284,6 +284,12 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 
     std::shared_ptr<Tree<T>::Node> node = std::make_shared<Tree<T>::Node>();
     node->axis = axis;
+
+    if (objects.empty())
+    {
+        return node;
+    }
+
     node->bounds = Tree<T>::getBounds(objects[0]);
 
     for (const auto& object : objects)
