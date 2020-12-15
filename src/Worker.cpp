@@ -237,7 +237,7 @@ bool Worker::processHits()
 
             if (hit)
             {
-                if (!closestHit || hit->distance < closestHit->distance)
+                if ((!closestHit || hit->distance < closestHit->distance) && hit->distance > std::numeric_limits<float>::epsilon())
                 {
                     closestHit = hit;
                 }
