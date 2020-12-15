@@ -107,3 +107,27 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
 
     return hit;
 }
+
+std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane)
+{
+    float dot = Vector::dot(plane.normal, ray.direction);
+
+    if (std::abs(dot) <= std::numeric_limits<float>::epsilon())
+    {
+        return std::nullopt;
+    }
+
+    float t = (plane.dot - Vector::dot(plane.normal, ray.origin)) / dot;
+
+    if (t < 0.0f)
+    {
+        return std::nullopt;
+    }
+
+    Hit hit;
+    hit.position = ray.origin + (t * ray.direction);
+    hit.normal = plane.normal;
+    hit.distance = (hit.position - ray.origin).magnitude();
+
+    return hit;
+}
