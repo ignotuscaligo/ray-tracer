@@ -93,7 +93,7 @@ Vector::operator const float*()
 
 float Vector::magnitudeSquared() const
 {
-    return Vector::dot(*this, *this);
+    return Vector::dot(data, data);
 }
 
 float Vector::magnitude() const
@@ -103,27 +103,14 @@ float Vector::magnitude() const
 
 Vector Vector::normalize()
 {
-    __m128 input = _mm_set1_ps(magnitudeSquared());
-    __m128 invroot = _mm_rsqrt_ps(input);
-
-    data = _mm_mul_ps(data, invroot);
+    data = Vector::normalized(data);
 
     return *this;
 }
 
 Vector Vector::normalized() const
 {
-    // mul = this * this
-    __m128 mul = _mm_mul_ps(data, data);
-
-    // magSqr =  mul.x + mul.y + mul.z
-    __m128 magSqr = _mm_set1_ps(mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]);
-
-    // invRoot = inverse_square(magSqr)
-    __m128 invRoot = _mm_rsqrt_ps(magSqr);
-
-    // result = this * invRoot
-    return _mm_mul_ps(data, invRoot);
+    return Vector::normalized(data);
 }
 
 Vector Vector::cross(const Vector& a, const Vector& b)
@@ -143,11 +130,32 @@ Vector Vector::cross(const Vector& a, const Vector& b)
     return _mm_sub_ps(_mm_mul_ps(aA, bB), _mm_mul_ps(aB, bA));
 }
 
-float Vector::dot(const Vector& a, const Vector& b)
+float Vector::dot(const __m128& a, const __m128& b)
 {
-    __m128 mul = _mm_mul_ps(a.data, b.data);
+    __m128 mul = _mm_mul_ps(a, b);
 
     return mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2];
+}
+
+float Vector::dot(const Vector& a, const Vector& b)
+{
+    return Vector::dot(a.data, b.data);
+}
+
+__m128 Vector::normalized(const __m128& a)
+{
+    __m128 dot = _mm_set1_ps(Vector::dot(a, a));
+
+    // invRoot = inverse_square(dot)
+    __m128 invRoot = _mm_rsqrt_ps(dot);
+
+    // result = a * invRoot
+    return _mm_mul_ps(a, invRoot);
+}
+
+Vector Vector::normalized(const Vector& a)
+{
+    return Vector::normalized(a.data);
 }
 
 Vector Vector::normalizedSub(const Vector& lhs, const Vector& rhs)
@@ -155,25 +163,14 @@ Vector Vector::normalizedSub(const Vector& lhs, const Vector& rhs)
     // sub = lhs - rhs
     __m128 sub = _mm_sub_ps(lhs.data, rhs.data);
 
-    // mul = sub * sub
-    __m128 mul = _mm_mul_ps(sub, sub);
-
-    // magSqr =  mul.x + mul.y + mul.z
-    __m128 magSqr = _mm_set1_ps(mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]);
-
-    // invRoot = inverse_square(magSqr)
-    __m128 invRoot = _mm_rsqrt_ps(magSqr);
-
     // result = sub * invRoot
-    return _mm_mul_ps(sub, invRoot);
+    return Vector::normalized(sub);
 }
 
 // r = incident − 2 * (incident ⋅ normal) * normal
 Vector Vector::reflected(const Vector& incident, const Vector& normal)
 {
-    __m128 mul = _mm_mul_ps(incident.data, normal.data);
-
-    __m128 dot2 = _mm_set1_ps(2 * (mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2]));
+    __m128 dot2 = _mm_set1_ps(2 * (Vector::dot(incident, normal)));
 
     return _mm_sub_ps(incident.data, _mm_mul_ps(dot2, normal.data));
 }

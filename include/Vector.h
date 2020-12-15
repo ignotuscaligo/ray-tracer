@@ -33,7 +33,10 @@ union Vector
     Vector normalized() const;
 
     static Vector cross(const Vector& a, const Vector& b);
+    static float dot(const __m128& a, const __m128& b);
     static float dot(const Vector& a, const Vector& b);
+    static __m128 normalized(const __m128& a);
+    static Vector normalized(const Vector& a);
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs);
     static Vector reflected(const Vector& incident, const Vector& normal);
     static Vector random(float magnitude = 1.0f);
