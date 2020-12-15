@@ -5,6 +5,9 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+namespace Utility
+{
+
 void printVector(const Vector& point)
 {
     std::cout << "(" << point.x << ", " << point.y << ", " << point.z << ")";
@@ -29,4 +32,6 @@ float radians(float degrees)
 float degrees(float radians)
 {
     return (radians * 180.0f) / static_cast<float>(M_PI);
+}
+
 }

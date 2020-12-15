@@ -164,6 +164,11 @@ int main(int argc, char** argv)
         omniLight1->brightness(400000);
         omniLight1->innerRadius(10.0f);
 
+        camera->transform.position = {0.0f, 0.0f, 150.0f};
+        camera->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(180), 0);
+
+        sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(45.0f), Utility::radians(45.0f), 0.0f);
+
         size_t lightCount = 0;
 
         for (const auto& object : objects)
@@ -188,11 +193,6 @@ int main(int argc, char** argv)
 
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
-
-        camera->transform.position = {0.0f, 0.0f, 55.0f};
-        camera->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(180), 0);
-
-        sun->transform.rotation = Quaternion::fromPitchYawRoll(radians(45.0f), radians(45.0f), 0.0f);
 
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
@@ -281,7 +281,7 @@ int main(int argc, char** argv)
                     size_t index = x + (y * image->width());
                     float yaw = ((horizontalFov / 2.0f) - ((x / (image->width() - 1.0f)) * horizontalFov));
 
-                    pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, radians(pitch), radians(yaw), radians(pitchStep), radians(yawStep));
+                    pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, Utility::radians(pitch), Utility::radians(yaw), Utility::radians(pitchStep), Utility::radians(yawStep));
                     pixelSensors->at(index).x = x;
                     pixelSensors->at(index).y = y;
                 }
