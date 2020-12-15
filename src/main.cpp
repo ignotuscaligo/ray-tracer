@@ -8,6 +8,7 @@
 #include "Pixel.h"
 #include "PixelSensor.h"
 #include "Plane.h"
+#include "PlaneVolume.h"
 #include "PngWriter.h"
 #include "Pyramid.h"
 #include "Quaternion.h"
@@ -143,6 +144,7 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
+        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>());
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
@@ -150,9 +152,12 @@ int main(int argc, char** argv)
         Object::setParent(camera, cameraPivot);
         Object::setParent(sun, cameraPivot);
         Object::setParent(objectPivot, root);
+        Object::setParent(ground, root);
         Object::setParent(knotMesh, objectPivot);
         Object::setParent(omniLight0, objectPivot);
         Object::setParent(omniLight1, objectPivot);
+
+        ground->transform.position = {0, -70, 0};
 
         omniLight0->transform.position = {40, 40, 40};
         omniLight0->color({1.0f, 0.95f, 0.87f});
