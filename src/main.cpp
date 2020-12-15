@@ -42,6 +42,9 @@ constexpr float aspectRatio = static_cast<float>(imageWidth) / static_cast<float
 constexpr float verticalFov = 80.0f;
 constexpr float horizontalFov = verticalFov * aspectRatio;
 
+const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
+const std::string outputName = "plane_test_0";
+
 }
 
 std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
@@ -423,7 +426,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage("C:\\Users\\ekleeman\\repos\\ray-tracer\\renders\\light_test_0." + std::to_string(frame) + ".png", *image, "test");
+            PngWriter::writeImage(renderPath + "\\" + outputName + std::to_string(frame) + ".png", *image, outputName);
         }
 
         for (size_t i = 0; i < workerCount; ++i)
