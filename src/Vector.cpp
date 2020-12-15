@@ -1,5 +1,7 @@
 #include "Vector.h"
 
+#include "Utility.h"
+
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -178,13 +180,13 @@ Vector Vector::reflected(const Vector& incident, const Vector& normal)
 
 Vector Vector::random(float magnitude)
 {
-    return Vector::randomSphere() * ((static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * magnitude);
+    return Vector::randomSphere() * Utility::random(magnitude);
 }
 
 Vector Vector::randomSphere(float magnitude)
 {
-    float theta = 2 * M_PI * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
-    float phi = std::acos(1.0f - 2.0f * (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
+    float theta = 2 * M_PI * Utility::random();
+    float phi = std::acos(1.0f - 2.0f * Utility::random());
 
     return {
         std::sin(phi) * std::cos(theta) * magnitude,
