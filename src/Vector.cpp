@@ -10,6 +10,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+#define USE_APPX_INV_SQR 0
+
 Axis nextAxis(Axis axis)
 {
     return static_cast<Axis>((static_cast<int>(axis) + 1) % 3);
@@ -146,11 +148,19 @@ __m128 Vector::normalized(const __m128& a)
 {
     __m128 dot = _mm_set1_ps(Vector::dot(a, a));
 
+#if USE_APPX_INV_SQR
     // invRoot = inverse_square(dot)
     __m128 invRoot = _mm_rsqrt_ps(dot);
 
     // result = a * invRoot
     return _mm_mul_ps(a, invRoot);
+#else
+    // root = sqrt(dot)
+    __m128 root = _mm_sqrt_ps(dot);
+
+    // result = a / root
+    return _mm_div_ps(a, root);
+#endif
 }
 
 Vector Vector::normalized(const Vector& a)
