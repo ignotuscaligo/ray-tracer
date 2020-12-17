@@ -6,6 +6,8 @@
 namespace Utility
 {
 
+extern const float pi;
+
 void printVector(const Vector& vector);
 void printTriangle(const Triangle& triangle);
 

@@ -10,6 +10,8 @@
 namespace Utility
 {
 
+const float pi = M_PI;
+
 void printVector(const Vector& point)
 {
     std::cout << "(" << point.x << ", " << point.y << ", " << point.z << ")";

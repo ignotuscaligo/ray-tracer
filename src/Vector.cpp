@@ -7,9 +7,6 @@
 #include <cstdlib>
 #include <limits>
 
-#define _USE_MATH_DEFINES
-#include <math.h>
-
 #define USE_APPX_INV_SQR 0
 
 Axis nextAxis(Axis axis)
@@ -192,7 +189,7 @@ Vector Vector::random(float magnitude)
 
 Vector Vector::randomSphere(float magnitude)
 {
-    float theta = 2 * M_PI * Utility::random();
+    float theta = 2 * Utility::pi * Utility::random();
     float phi = std::acos(1.0f - 2.0f * Utility::random());
 
     return {
