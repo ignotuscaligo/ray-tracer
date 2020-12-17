@@ -14,7 +14,7 @@ public:
 
     Pixel* getRow(size_t row);
     void setPixel(size_t x, size_t y, Pixel pixel);
-    Pixel getPixel(size_t x, size_t y);
+    Pixel& getPixel(size_t x, size_t y);
     void clear();
 
 private:

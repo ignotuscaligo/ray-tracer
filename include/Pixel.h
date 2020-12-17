@@ -4,7 +4,23 @@
 
 struct Pixel
 {
-    png_byte red = 0;
-    png_byte green = 0;
-    png_byte blue = 0;
+    png_uint_16 red = 0;
+    png_uint_16 green = 0;
+    png_uint_16 blue = 0;
+
+    png_uint_16 operator[](size_t index) const
+    {
+        if (index == 0)
+        {
+            return red;
+        }
+        else if (index == 1)
+        {
+            return green;
+        }
+        else
+        {
+            return blue;
+        }
+    }
 };

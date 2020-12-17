@@ -85,16 +85,27 @@ void PngWriter::writeImage(Image& image)
 
     // Write header (8 bit colour depth)
     png_set_IHDR(m_structPtr, m_infoPtr, image.width(), image.height(),
-        8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+        16, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
         PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
     png_write_info(m_structPtr, m_infoPtr);
 
-    // Write image data
-    for (int y = 0; y < image.height(); y++)
+    // Copy image data
+    png_bytepp rowPointers = (png_bytepp)new png_bytep[sizeof(png_bytep) * image.height()];
+    for (size_t y = 0; y < image.height(); ++y)
     {
-        png_write_row(m_structPtr, (png_bytep)image.getRow(y));
+        rowPointers[y] = (png_bytep)new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)];
+        for (size_t x = 0; x < image.width(); ++x)
+        {
+            for (size_t k = 0; k < 3; ++k)
+            {
+                png_save_uint_16(&rowPointers[y][(x * 6) + (k * 2)], image.getPixel(x, y)[k]);
+            }
+        }
     }
+
+    // Write image data
+    png_write_image(m_structPtr, rowPointers);
 
     // End write
     png_write_end(m_structPtr, nullptr);

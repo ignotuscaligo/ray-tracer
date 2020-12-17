@@ -29,7 +29,7 @@ void Image::setPixel(size_t x, size_t y, Pixel pixel)
     m_pixels.get()[(y * m_width) + x] = pixel;
 }
 
-Pixel Image::getPixel(size_t x, size_t y)
+Pixel& Image::getPixel(size_t x, size_t y)
 {
     return m_pixels.get()[(y * m_width) + x];
 }
