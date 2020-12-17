@@ -2,12 +2,7 @@
 
 #include <cmath>
 
-namespace
-{
-
-constexpr float gamma = 2.2f;
-
-}
+const float Color::gamma = 2.2f;
 
 Color::Color()
     : Color(0.0f)
@@ -31,9 +26,9 @@ Color::Color(float ired, float igreen, float iblue)
 Color Color::fromRGB(float red, float green, float blue)
 {
     return {
-        std::pow(red / 255.0f, gamma),
-        std::pow(green / 255.0f, gamma),
-        std::pow(blue / 255.0f, gamma)
+        std::pow(red / 255.0f, Color::gamma),
+        std::pow(green / 255.0f, Color::gamma),
+        std::pow(blue / 255.0f, Color::gamma)
     };
 }
 
