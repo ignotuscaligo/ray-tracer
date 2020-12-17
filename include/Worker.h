@@ -5,8 +5,6 @@
 #include "Image.h"
 #include "Object.h"
 #include "Photon.h"
-#include "PixelSensor.h"
-#include "Tree.h"
 #include "Volume.h"
 #include "WorkQueue.h"
 
@@ -48,16 +46,12 @@ public:
     void resume();
     void stop();
     void exec();
-    void startWrite(std::shared_ptr<Tree<PhotonHit>> tree);
-    bool writeComplete() const;
 
     std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
-    std::shared_ptr<std::vector<PixelSensor>> pixelSensors;
-    std::shared_ptr<Tree<PhotonHit>> finalTree;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
 
@@ -77,11 +71,7 @@ private:
 
     size_t m_index = 0;
     size_t m_fetchSize = 0;
-    size_t m_startPixel = 0;
-    size_t m_endPixel = 0;
 
     std::atomic_bool m_running;
     std::atomic_bool m_suspend;
-    std::atomic_bool m_writePixels;
-    std::atomic_bool m_writeComplete;
 };

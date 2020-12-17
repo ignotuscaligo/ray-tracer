@@ -9,15 +9,11 @@
 #include <optional>
 #include <thread>
 
-Worker::Worker(size_t index, size_t fetchSize, size_t startPixel, size_t endPixel)
+Worker::Worker(size_t index, size_t fetchSize)
     : m_index(index)
     , m_fetchSize(fetchSize)
-    , m_startPixel(startPixel)
-    , m_endPixel(endPixel)
     , m_running(false)
     , m_suspend(false)
-    , m_writePixels(false)
-    , m_writeComplete(false)
 {
 }
 
@@ -44,26 +40,6 @@ void Worker::stop()
 {
     // std::cout << m_index << ": stop()" << std::endl;
     m_running = false;
-}
-
-void Worker::startWrite(std::shared_ptr<Tree<PhotonHit>> tree)
-{
-    // std::cout << m_index << ": startWrite(...)" << std::endl;
-
-    if (!tree)
-    {
-        std::cout << m_index << ": ERROR: tree missing when writePixels() was called" << std::endl;
-        return;
-    }
-
-    finalTree = tree;
-    m_writeComplete = false;
-    m_writePixels = true;
-}
-
-bool Worker::writeComplete() const
-{
-    return m_writeComplete.load();
 }
 
 void Worker::exec()
@@ -303,58 +279,6 @@ bool Worker::processFinalHits()
     finalHitsProcessed += hitsBlock.size();
 
     finalHitQueue->release(hitsBlock);
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    writeDuration += workDuration.count();
-
-    return true;
-}
-
-bool Worker::processWrite()
-{
-    // std::cout << m_index << ": writing pixels " << m_startPixel << " to " << m_endPixel << std::endl;
-    auto workStart = std::chrono::system_clock::now();
-
-    if (!finalTree)
-    {
-        std::cout << m_index << ": ABORT: finalTree missing!" << std::endl;
-        m_writePixels = false;
-        m_writeComplete = true;
-        return false;
-    }
-
-    Pixel workingPixel;
-
-    for (size_t i = m_startPixel; i < m_endPixel; ++i)
-    {
-        PixelSensor& sensor = pixelSensors->at(i);
-
-        Color color{};
-
-        std::vector<PhotonHit> hits = finalTree->fetchWithinPyramid(sensor.pyramid);
-
-        for (auto& photonHit : hits)
-        {
-            float dot = Vector::dot(-sensor.pyramid.direction, photonHit.hit.normal);
-
-            if (dot > 0)
-            {
-                Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
-                float reflectionDot = std::max(0.0f, Vector::dot(-sensor.pyramid.direction, reflection));
-                color += photonHit.photon.color * reflectionDot;
-            }
-        }
-
-        workingPixel.red = std::min(static_cast<int>(color.red * 255), 255);
-        workingPixel.green = std::min(static_cast<int>(color.green * 255), 255);
-        workingPixel.blue = std::min(static_cast<int>(color.blue * 255), 255);
-        image->setPixel(sensor.x, sensor.y, workingPixel);
-    }
-
-    m_writePixels = false;
-    finalTree = nullptr;
-    m_writeComplete = true;
 
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);

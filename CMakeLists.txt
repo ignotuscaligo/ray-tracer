@@ -92,8 +92,6 @@ target_sources(ray-tracer
         include/Worker.h
         src/Worker.cpp
 
-        include/PixelSensor.h
-
         include/PlaneVolume.h
         src/PlaneVolume.cpp
 
