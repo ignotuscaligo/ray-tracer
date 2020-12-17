@@ -49,7 +49,7 @@ void Worker::exec()
     // std::vector<PhotonHit> hits;
     // Pixel workingPixel;
 
-    if (!photonQueue || !hitQueue || !finalHitQueue || !pixelSensors || !image || !camera || !buffer)
+    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer)
     {
         std::cout << m_index << ": ABORT: missing required references!" << std::endl;
         m_running = false;

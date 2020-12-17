@@ -39,7 +39,7 @@ Else, sleep
 class Worker
 {
 public:
-    Worker(size_t index, size_t fetchSize, size_t startPixel, size_t endPixel);
+    Worker(size_t index, size_t fetchSize);
 
     void start();
     void suspend();
