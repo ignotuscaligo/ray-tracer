@@ -73,7 +73,7 @@ void Worker::exec()
     // std::vector<PhotonHit> hits;
     // Pixel workingPixel;
 
-    if (!photonQueue || !hitQueue || !finalHitQueue || !pixelSensors || !image || !camera)
+    if (!photonQueue || !hitQueue || !finalHitQueue || !pixelSensors || !image || !camera || !buffer)
     {
         std::cout << m_index << ": ABORT: missing required references!" << std::endl;
         m_running = false;
@@ -101,9 +101,9 @@ void Worker::exec()
                 break;
             }
         }
-        else if (m_writePixels)
+        else if (finalHitQueue->available() > 0)
         {
-            if (!processWrite())
+            if (!processFinalHits())
             {
                 break;
             }
@@ -270,6 +270,43 @@ bool Worker::processHits()
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
     hitDuration += workDuration.count();
+
+    return true;
+}
+
+bool Worker::processFinalHits()
+{
+    auto workStart = std::chrono::system_clock::now();
+    auto hitsBlock = finalHitQueue->fetch(m_fetchSize);
+
+    for (auto& photonHit : hitsBlock)
+    {
+        std::optional<PixelCoords> coord = camera->coordForPoint(photonHit.hit.position);
+
+        if (!coord)
+        {
+            continue;
+        }
+
+        Vector pixelDirection = camera->pixelDirection(*coord);
+
+        float dot = Vector::dot(-pixelDirection, photonHit.hit.normal);
+
+        if (dot > 0)
+        {
+            Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
+            float reflectionDot = std::max(0.0f, Vector::dot(-pixelDirection, reflection));
+            buffer->addColor(*coord, photonHit.photon.color * reflectionDot);
+        }
+    }
+
+    finalHitsProcessed += hitsBlock.size();
+
+    finalHitQueue->release(hitsBlock);
+
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    writeDuration += workDuration.count();
 
     return true;
 }

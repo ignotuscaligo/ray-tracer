@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Buffer.h"
+#include "Camera.h"
 #include "Image.h"
 #include "Object.h"
 #include "Photon.h"
@@ -49,13 +51,14 @@ public:
     void startWrite(std::shared_ptr<Tree<PhotonHit>> tree);
     bool writeComplete() const;
 
-    std::shared_ptr<Object> camera;
+    std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
     std::shared_ptr<std::vector<PixelSensor>> pixelSensors;
     std::shared_ptr<Tree<PhotonHit>> finalTree;
+    std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
 
     size_t photonDuration = 0;
@@ -64,10 +67,12 @@ public:
 
     size_t photonsProcessed = 0;
     size_t hitsProcessed = 0;
+    size_t finalHitsProcessed = 0;
 
 private:
     bool processPhotons();
     bool processHits();
+    bool processFinalHits();
     bool processWrite();
 
     size_t m_index = 0;
