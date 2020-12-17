@@ -96,6 +96,14 @@ target_sources(ray-tracer
 
         include/PlaneVolume.h
         src/PlaneVolume.cpp
+
+        include/Camera.h
+        src/Camera.cpp
+
+        include/PixelCoords.h
+
+        include/Buffer.h
+        src/Buffer.cpp
 )
 
 target_include_directories(ray-tracer
