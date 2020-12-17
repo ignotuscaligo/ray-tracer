@@ -1,5 +1,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 
+#include "Buffer.h"
+#include "Camera.h"
 #include "Image.h"
 #include "MeshVolume.h"
 #include "Object.h"
@@ -30,21 +32,19 @@
 namespace
 {
 
-constexpr size_t photonCount = 4000000;
+constexpr size_t photonCount = 1000000;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 36 * 4;
+constexpr size_t frameCount = 24 * 10;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
-constexpr float aspectRatio = static_cast<float>(imageWidth) / static_cast<float>(imageHeight);
-constexpr float verticalFov = 80.0f;
-constexpr float horizontalFov = verticalFov * aspectRatio;
+constexpr float verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "plane_test_0";
+const std::string outputName = "plane_test_1";
 
 }
 
@@ -140,12 +140,12 @@ int main(int argc, char** argv)
 
         std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> cameraPivot = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> camera = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
         std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>());
-        std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        // std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);
@@ -154,23 +154,23 @@ int main(int argc, char** argv)
         Object::setParent(objectPivot, root);
         Object::setParent(ground, root);
         Object::setParent(knotMesh, objectPivot);
-        Object::setParent(omniLight0, objectPivot);
+        // Object::setParent(omniLight0, root);
         Object::setParent(omniLight1, objectPivot);
 
         ground->transform.position = {0, -70, 0};
 
-        omniLight0->transform.position = {40, 40, 40};
-        omniLight0->color({1.0f, 0.95f, 0.87f});
-        omniLight0->brightness(500000);
-        omniLight0->innerRadius(10.0f);
+        // omniLight0->transform.position = {0, 50, 0};
+        // omniLight0->color(Color::fromRGB(255, 241, 224));
+        // omniLight0->brightness(70000);
+        // omniLight0->innerRadius(5.0f);
 
-        omniLight1->transform.position = {-40, -40, -40};
-        omniLight1->color({0.7f, 0.7f, 1.0f});
-        omniLight1->brightness(400000);
-        omniLight1->innerRadius(10.0f);
+        omniLight1->transform.position = {0, 0, 0};
+        omniLight1->color(Color::fromRGB(201, 226, 255));
+        omniLight1->brightness(80000);
+        omniLight1->innerRadius(5.0f);
 
-        camera->transform.position = {0.0f, 0.0f, 150.0f};
-        camera->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(180), 0);
+        camera->transform.position = {0.0f, 0.0f, 100.0f};
+        camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(45.0f), Utility::radians(45.0f), 0.0f);
 
@@ -186,13 +186,15 @@ int main(int argc, char** argv)
 
         size_t photonsPerLight = photonCount / lightCount;
 
+        std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(imageWidth, imageHeight);
+
         std::shared_ptr<Image> image = std::make_shared<Image>(imageWidth, imageHeight);
         Pixel workingPixel;
 
         const size_t pixelCount = image->width() * image->height();
 
-        float pitchStep = verticalFov / static_cast<float>(image->height());
-        float yawStep = horizontalFov / static_cast<float>(image->width());
+        float pitchStep = camera->verticalFieldOfView() / static_cast<float>(image->height());
+        float yawStep = camera->horizontalFieldOfView() / static_cast<float>(image->width());
 
         std::shared_ptr<std::vector<PixelSensor>> pixelSensors = std::make_shared<std::vector<PixelSensor>>(pixelCount);
 
@@ -226,6 +228,7 @@ int main(int argc, char** argv)
             workers[i]->finalHitQueue = finalHitQueue;
             workers[i]->pixelSensors = pixelSensors;
             workers[i]->finalTree = nullptr;
+            workers[i]->buffer = buffer;
             workers[i]->image = image;
         }
 
@@ -244,15 +247,23 @@ int main(int argc, char** argv)
 
         float rotationStep = 360.0f / static_cast<float>(frameCount);
 
-        for (size_t frame = startFrame; frame < startFrame + frameCount; ++frame)
+        for (size_t frame = startFrame; frame < frameCount; ++frame)
         {
             std::cout << "---" << std::endl;
             std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
 
+            std::cout << "---" << std::endl;
+            std::cout << "Clearing buffer and image" << std::endl;
+
+            buffer->clear();
             image->clear();
 
-            objectPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, radians(frame * rotationStep), 0);
-            // knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(0, 0, radians(frame * rotationStep * 2));
+            // objectPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(frame * rotationStep), 0);
+
+            knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(frame * -rotationStep), Utility::radians(frame * rotationStep), Utility::radians(frame * rotationStep * 2));
+            // knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(0, 0, Utility::radians(frame * rotationStep * 2));
+
+            // omniLight1->transform.position = {-40, frame * (-18.0f / static_cast<float>(frameCount)), -40};
 
             Vector cameraPosition = camera->position();
             Quaternion cameraRotation = camera->rotation();
@@ -279,12 +290,12 @@ int main(int argc, char** argv)
             std::cout << "Generate sensors" << std::endl;
             for (int y = 0; y < image->height(); ++y)
             {
-                float pitch = -((verticalFov / 2.0f) - ((y / (image->height() - 1.0f)) * verticalFov));
+                float pitch = -((camera->verticalFieldOfView() / 2.0f) - ((y / (image->height() - 1.0f)) * camera->verticalFieldOfView()));
 
                 for (int x = 0; x < image->width(); ++x)
                 {
                     size_t index = x + (y * image->width());
-                    float yaw = ((horizontalFov / 2.0f) - ((x / (image->width() - 1.0f)) * horizontalFov));
+                    float yaw = ((camera->horizontalFieldOfView() / 2.0f) - ((x / (image->width() - 1.0f)) * camera->horizontalFieldOfView()));
 
                     pixelSensors->at(index) = PixelSensor(cameraPosition, cameraRotation, Utility::radians(pitch), Utility::radians(yaw), Utility::radians(pitchStep), Utility::radians(yawStep));
                     pixelSensors->at(index).x = x;
@@ -300,75 +311,108 @@ int main(int argc, char** argv)
 
             size_t photonsAllocated = photonQueue->allocated();
             size_t hitsAllocated = hitQueue->allocated();
+            size_t finalHitsAllocated = finalHitQueue->allocated();
 
-            // std::cout << "---" << std::endl;
-            // std::cout << "remaining photons:    " << photonsAllocated << std::endl;
-            // std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+            std::cout << "---" << std::endl;
+            std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+            std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+            std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
 
             size_t lastPhotons = photonsAllocated;
             size_t lastHits = hitsAllocated;
+            size_t lastFinalHits = finalHitsAllocated;
 
             while (photonsAllocated > 0 || hitsAllocated > 0)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
                 photonsAllocated = photonQueue->allocated();
                 hitsAllocated = hitQueue->allocated();
+                finalHitsAllocated = finalHitQueue->allocated();
 
-                // if (photonsAllocated != lastPhotons || hitsAllocated != lastHits)
-                // {
-                //     std::cout << "---" << std::endl;
-                //     std::cout << "remaining photons:    " << photonsAllocated << std::endl;
-                //     std::cout << "remaining hits:       " << hitsAllocated << std::endl;
-                // }
+                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits || finalHitsAllocated != lastFinalHits)
+                {
+                    std::cout << "---" << std::endl;
+                    std::cout << "remaining photons:    " << photonsAllocated << std::endl;
+                    std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+                    std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
+                }
 
                 lastPhotons = photonsAllocated;
                 lastHits = hitsAllocated;
+                lastFinalHits = finalHitsAllocated;
             }
-
-            std::cout << "---" << std::endl;
-            std::cout << "Collecting photons into pixels" << std::endl;
-
-            auto hitsBlock = finalHitQueue->fetch(finalHitQueue->available());
-
-            std::vector<PhotonHit> finalHits{hitsBlock.toVector()};
-
-            std::shared_ptr<Tree<PhotonHit>> finalTree = std::make_shared<Tree<PhotonHit>>(finalHits, 100);
-
-            finalHitQueue->release(hitsBlock);
-
-            for (size_t i = 0; i < workerCount; ++i)
-            {
-                workers[i]->startWrite(finalTree);
-            }
-
-            size_t workersCompleted = 0;
-            size_t lastCompleted = workersCompleted;
 
             // std::cout << "---" << std::endl;
-            // std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+            // std::cout << "Collecting photons into pixels" << std::endl;
 
-            while (workersCompleted < workerCount)
+            // // auto hitsBlock = finalHitQueue->fetch(finalHitQueue->available());
+
+            // // std::vector<PhotonHit> finalHits{hitsBlock.toVector()};
+
+            // // std::cout << "finalHits.size(): " << finalHits.size() << std::endl;
+
+            // // std::shared_ptr<Tree<PhotonHit>> finalTree = std::make_shared<Tree<PhotonHit>>(finalHits, 20);
+
+            // // std::cout << "finalTree->size(): " << finalTree->size() << std::endl;
+            // // std::cout << "finalTree->nodeCount(): " << finalTree->nodeCount() << std::endl;
+            // // std::cout << "finalTree->nodeDepth(): " << finalTree->nodeDepth() << std::endl;
+
+            // // finalHitQueue->release(hitsBlock);
+
+            // for (size_t i = 0; i < workerCount; ++i)
+            // {
+            //     workers[i]->startWrite(finalTree);
+            // }
+
+            // size_t workersCompleted = 0;
+            // size_t lastCompleted = workersCompleted;
+
+            // // std::cout << "---" << std::endl;
+            // // std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+
+            // while (workersCompleted < workerCount)
+            // {
+            //     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+            //     workersCompleted = 0;
+
+            //     for (size_t i = 0; i < workerCount; ++i)
+            //     {
+            //         if (workers[i]->writeComplete())
+            //         {
+            //             ++workersCompleted;
+            //         }
+            //     }
+
+            //     // if (lastCompleted != workersCompleted)
+            //     // {
+            //     //     std::cout << "---" << std::endl;
+            //     //     std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
+            //     // }
+
+            //     lastCompleted = workersCompleted;
+            // }
+
+            std::cout << "---" << std::endl;
+            std::cout << "Writing buffer to image" << std::endl;
+
+            for (size_t y = 0; y < imageHeight; ++y)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                workersCompleted = 0;
-
-                for (size_t i = 0; i < workerCount; ++i)
+                for (size_t x = 0; x < imageWidth; ++x)
                 {
-                    if (workers[i]->writeComplete())
-                    {
-                        ++workersCompleted;
-                    }
+                    Color color = buffer->fetchColor({x, y});
+
+                    float gammaRed = std::pow(color.red, 1.0f / Color::gamma);
+                    float gammaGreen = std::pow(color.green, 1.0f / Color::gamma);
+                    float gammaBlue = std::pow(color.blue, 1.0f / Color::gamma);
+
+                    workingPixel.red = std::min(static_cast<int>(gammaRed * 65535), 65535);
+                    workingPixel.green = std::min(static_cast<int>(gammaGreen * 65535), 65535);
+                    workingPixel.blue = std::min(static_cast<int>(gammaBlue * 65535), 65535);
+
+                    image->setPixel((imageWidth - 1) - x, (imageHeight - 1) - y, workingPixel);
                 }
-
-                // if (lastCompleted != workersCompleted)
-                // {
-                //     std::cout << "---" << std::endl;
-                //     std::cout << "workers finished with write: " << workersCompleted << " / " << workerCount << std::endl;
-                // }
-
-                lastCompleted = workersCompleted;
             }
 
             std::cout << "---" << std::endl;
@@ -376,14 +420,16 @@ int main(int argc, char** argv)
 
             size_t photonsProcessed = 0;
             size_t hitsProcessed = 0;
-            size_t finalHitsProcessed = finalHits.size();
+            size_t finalHitsProcessed = 0;
 
             for (size_t i = 0; i < workerCount; ++i)
             {
                 photonsProcessed += workers[i]->photonsProcessed;
                 hitsProcessed += workers[i]->hitsProcessed;
+                finalHitsProcessed += workers[i]->finalHitsProcessed;
                 workers[i]->photonsProcessed = 0;
                 workers[i]->hitsProcessed = 0;
+                workers[i]->finalHitsProcessed = 0;
             }
 
             std::chrono::time_point renderEnd = std::chrono::system_clock::now();
@@ -431,7 +477,7 @@ int main(int argc, char** argv)
             std::cout << "|- hit duration:    " << hitDuration << " us" << std::endl;
             std::cout << "|- write duration:  " << writeDuration << " us" << std::endl;
 
-            PngWriter::writeImage(renderPath + "\\" + outputName + std::to_string(frame) + ".png", *image, outputName);
+            PngWriter::writeImage(renderPath + "\\" + outputName + "." + std::to_string(frame) + ".png", *image, outputName);
         }
 
         for (size_t i = 0; i < workerCount; ++i)
