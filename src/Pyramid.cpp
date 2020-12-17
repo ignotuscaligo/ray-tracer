@@ -3,8 +3,20 @@
 #include "Bounds.h"
 #include "Vector.h"
 #include "Quaternion.h"
+#include "Utility.h"
 
 #include <cmath>
+
+Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, float verticalFieldOfView, float horizontalFieldOfView)
+{
+    origin = position;
+    direction = rotation * Vector(0, 0, 1);
+    vertical = rotation * Vector(0, std::sin(Utility::radians(verticalFieldOfView) / 2.0f), 0);
+    horizontal = rotation * Vector(std::sin(Utility::radians(horizontalFieldOfView) / 2.0f), 0, 0);
+
+    verticalDot = vertical.magnitudeSquared();
+    horizontalDot = horizontal.magnitudeSquared();
+}
 
 Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, float pitch, float yaw, float pitchStep, float yawStep)
 {
@@ -70,4 +82,15 @@ bool Pyramid::intersectsBounds(const Bounds& bounds) const
     }
 
     return true;
+}
+
+Vector Pyramid::relativePositionInFrustum(const Vector& point) const
+{
+    Vector test = Vector::normalizedSub(point, origin);
+
+    return {
+        ((Vector::dot(test, horizontal) / horizontalDot) + 1.0f) / 2.0f,
+        ((Vector::dot(test, vertical) / verticalDot) + 1.0f) / 2.0f,
+        Vector::dot(test, direction)
+    };
 }
