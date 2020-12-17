@@ -1,5 +1,7 @@
 #include "OmniLight.h"
 
+#include "Utility.h"
+
 OmniLight::OmniLight()
     : Light()
 {
@@ -18,6 +20,8 @@ float OmniLight::innerRadius() const
 
 void OmniLight::emit(WorkQueue<Photon>::Block photonBlock) const
 {
+    float candela = m_brightness / (Utility::pi * 4.0f);
+
     for (auto& photon : photonBlock)
     {
         Vector direction = Vector::randomSphere();
@@ -28,6 +32,6 @@ void OmniLight::emit(WorkQueue<Photon>::Block photonBlock) const
             offset = Vector::random(m_innerRadius);
         }
         photon.ray = {position() + offset, direction};
-        photon.color = m_color * (m_brightness / photonBlock.size());
+        photon.color = m_color * (candela / photonBlock.size());
     }
 }
