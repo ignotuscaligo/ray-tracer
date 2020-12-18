@@ -7,6 +7,7 @@
 #include "Material.h"
 #include "MeshVolume.h"
 #include "Object.h"
+#include "ObjReader.h"
 #include "OmniLight.h"
 #include "Photon.h"
 #include "Pixel.h"
@@ -28,7 +29,6 @@
 #include <limits>
 #include <string>
 #include <thread>
-#include <tiny_obj_loader.h>
 
 namespace
 {
@@ -47,83 +47,6 @@ constexpr float verticalFieldOfView = 80.0f;
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
 const std::string outputName = "plane_test_1";
 
-}
-
-std::shared_ptr<Object> loadMeshAsObject(const std::string& filename)
-{
-    std::cout << "---" << std::endl;
-    std::cout << "Loading OBJ " << filename << std::endl;
-
-    tinyobj::attrib_t attrib;
-
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-
-    std::string warn;
-    std::string err;
-
-    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str());
-
-    if (!warn.empty())
-    {
-        std::cout << "warn: " << warn << std::endl;
-    }
-
-    if (!err.empty())
-    {
-        std::cout << "err: " << err << std::endl;
-    }
-
-    std::vector<Triangle> objTriangles;
-    std::array<Vector, 3> points;
-    std::array<Vector, 3> normals;
-
-    if (result)
-    {
-        std::cout << "Loaded obj successfully" << std::endl;
-
-        std::cout << "Found " << shapes.size() << " shapes" << std::endl;
-
-        for (const auto& shape : shapes)
-        {
-            size_t indexOffset = 0;
-
-            for (const size_t vertexCount : shape.mesh.num_face_vertices)
-            {
-                for (size_t v = 0; v < vertexCount; ++v)
-                {
-                    tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-                    size_t vertexIndex = 3 * idx.vertex_index;
-                    size_t normalIndex = 3 * idx.normal_index;
-                    points[v].x = attrib.vertices[vertexIndex + 0];
-                    points[v].y = attrib.vertices[vertexIndex + 1];
-                    points[v].z = attrib.vertices[vertexIndex + 2];
-
-                    normals[v].x = attrib.normals[normalIndex + 0];
-                    normals[v].y = attrib.normals[normalIndex + 1];
-                    normals[v].z = attrib.normals[normalIndex + 2];
-                }
-
-                Triangle triangle{points[0], points[1], points[2]};
-                triangle.aNormal = normals[0];
-                triangle.bNormal = normals[1];
-                triangle.cNormal = normals[2];
-
-                objTriangles.push_back(triangle);
-
-                indexOffset += vertexCount;
-            }
-        }
-    }
-    else
-    {
-        std::cout << "Failed to load obj" << std::endl;
-    }
-
-    std::cout << "Loaded " << objTriangles.size() << " triangles" << std::endl;
-
-    std::cout << "Generating mesh from OBJ" << std::endl;
-    return std::make_shared<MeshVolume>(objTriangles);
 }
 
 int main(int argc, char** argv)
@@ -150,9 +73,9 @@ int main(int argc, char** argv)
         std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> knotMesh = objects.emplace_back(loadMeshAsObject(inputFile));
-        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>());
-        // std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("DiffuseRed"), ObjReader::loadMesh(inputFile)));
+        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("DiffuseBlue")));
+        std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);

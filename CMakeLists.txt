@@ -108,6 +108,9 @@ target_sources(ray-tracer
 
         include/DiffuseMaterial.h
         src/DiffuseMaterial.cpp
+
+        include/ObjReader.h
+        src/ObjReader.cpp
 )
 
 target_include_directories(ray-tracer
