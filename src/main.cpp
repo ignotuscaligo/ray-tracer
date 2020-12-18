@@ -2,7 +2,9 @@
 
 #include "Buffer.h"
 #include "Camera.h"
+#include "DiffuseMaterial.h"
 #include "Image.h"
+#include "Material.h"
 #include "MeshVolume.h"
 #include "Object.h"
 #include "OmniLight.h"
@@ -135,6 +137,12 @@ int main(int argc, char** argv)
 
         std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
 
+        std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
+
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Default"));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("DiffuseRed", Color(1.0f, 0.0f, 0.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("DiffuseBlue", Color(0.0f, 0.0f, 1.0f)));
+
         std::vector<std::shared_ptr<Object>> objects;
 
         std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
@@ -153,17 +161,17 @@ int main(int argc, char** argv)
         Object::setParent(objectPivot, root);
         Object::setParent(ground, root);
         Object::setParent(knotMesh, objectPivot);
-        // Object::setParent(omniLight0, root);
-        Object::setParent(omniLight1, objectPivot);
+        Object::setParent(omniLight0, root);
+        Object::setParent(omniLight1, root);
 
         ground->transform.position = {0, -70, 0};
 
-        // omniLight0->transform.position = {0, 50, 0};
-        // omniLight0->color(Color::fromRGB(255, 241, 224));
-        // omniLight0->brightness(70000);
-        // omniLight0->innerRadius(5.0f);
+        omniLight0->transform.position = {0, 50, 0};
+        omniLight0->color(Color::fromRGB(255, 241, 224));
+        omniLight0->brightness(500000);
+        omniLight0->innerRadius(5.0f);
 
-        omniLight1->transform.position = {0, 0, 0};
+        omniLight1->transform.position = {0, 0, -50};
         omniLight1->color(Color::fromRGB(201, 226, 255));
         omniLight1->brightness(80000);
         omniLight1->innerRadius(5.0f);

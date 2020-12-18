@@ -102,6 +102,12 @@ target_sources(ray-tracer
 
         include/Buffer.h
         src/Buffer.cpp
+
+        include/Material.h
+        src/Material.cpp
+
+        include/DiffuseMaterial.h
+        src/DiffuseMaterial.cpp
 )
 
 target_include_directories(ray-tracer

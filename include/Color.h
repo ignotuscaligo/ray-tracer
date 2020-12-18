@@ -18,4 +18,5 @@ struct Color
 
 Color operator*(const Color& lhs, float rhs);
 Color operator*(float lhs, const Color& rhs);
+Color operator*(const Color& lhs, const Color& rhs);
 Color operator/(const Color& lhs, float rhs);

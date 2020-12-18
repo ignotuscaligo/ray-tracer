@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "Camera.h"
 #include "Image.h"
+#include "Material.h"
 #include "Object.h"
 #include "Photon.h"
 #include "Volume.h"
@@ -52,6 +53,7 @@ public:
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
+    std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
 

@@ -11,9 +11,10 @@
 class MeshVolume : public Volume
 {
 public:
-    MeshVolume(const std::vector<Triangle>& triangles);
+    MeshVolume(size_t materialIndex, const std::vector<Triangle>& triangles);
 
-    std::optional<Hit> castRay(const Ray& ray) const override;
+protected:
+    std::optional<Hit> castTransformedRay(const Ray& ray) const override;
 
 private:
     Tree<Triangle> m_tree;

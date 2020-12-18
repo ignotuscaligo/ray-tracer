@@ -10,9 +10,10 @@
 class PlaneVolume : public Volume
 {
 public:
-    PlaneVolume();
+    PlaneVolume(size_t materialIndex);
 
-    std::optional<Hit> castRay(const Ray& ray) const override;
+protected:
+    std::optional<Hit> castTransformedRay(const Ray& ray) const override;
 
 private:
     Plane m_plane;

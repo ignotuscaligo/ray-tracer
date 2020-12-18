@@ -10,11 +10,15 @@
 class Volume : public Object
 {
 public:
-    Volume();
+    Volume(size_t materialIndex);
 
-    virtual std::optional<Hit> castRay(const Ray& ray) const;
+    std::optional<Hit> castRay(const Ray& ray) const;
 
 protected:
+    virtual std::optional<Hit> castTransformedRay(const Ray& ray) const;
+
+private:
     Ray transformRay(const Ray& ray) const;
-    std::optional<Hit> transformHit(const std::optional<Hit>& hit) const;
+
+    size_t m_materialIndex;
 };
