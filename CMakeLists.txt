@@ -111,6 +111,12 @@ target_sources(ray-tracer
 
         include/ObjReader.h
         src/ObjReader.cpp
+
+        include/LightQueue.h
+        src/LightQueue.cpp
+
+        include/RandomGenerator.h
+        src/RandomGenerator.cpp
 )
 
 target_include_directories(ray-tracer
