@@ -26,6 +26,6 @@ float Light::brightness() const
     return m_brightness;
 }
 
-void Light::emit(WorkQueue<Photon>::Block photonBlock) const
+void Light::emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const
 {
 }

@@ -3,6 +3,7 @@
 #include "Color.h"
 #include "Object.h"
 #include "Photon.h"
+#include "RandomGenerator.h"
 #include "WorkQueue.h"
 
 class Light : public Object
@@ -16,7 +17,7 @@ public:
     void brightness(float brightness);
     float brightness() const;
 
-    virtual void emit(WorkQueue<Photon>::Block photonBlock) const;
+    virtual void emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const;
 
 protected:
     Color m_color;

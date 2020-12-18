@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RandomGenerator.h"
+
 #include <xmmintrin.h>
 
 enum class Axis
@@ -39,8 +41,8 @@ union Vector
     static Vector normalized(const Vector& a);
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs);
     static Vector reflected(const Vector& incident, const Vector& normal);
-    static Vector random(float magnitude = 1.0f);
-    static Vector randomSphere(float magnitude = 1.0f);
+    static Vector random(RandomGenerator& generator, float magnitude = 1.0f);
+    static Vector randomSphere(RandomGenerator& generator, float magnitude = 1.0f);
 
     __m128 data;
 

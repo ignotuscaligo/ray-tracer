@@ -1,8 +1,7 @@
 #include "Utility.h"
 
-#include <iostream>
-
 #include <cstdlib>
+#include <iostream>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -36,11 +35,6 @@ float radians(float degrees)
 float degrees(float radians)
 {
     return (radians * 180.0f) / static_cast<float>(M_PI);
-}
-
-float random(float value)
-{
-    return (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * value;
 }
 
 }

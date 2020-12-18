@@ -182,15 +182,15 @@ Vector Vector::reflected(const Vector& incident, const Vector& normal)
     return _mm_sub_ps(incident.data, _mm_mul_ps(dot2, normal.data));
 }
 
-Vector Vector::random(float magnitude)
+Vector Vector::random(RandomGenerator& generator, float magnitude)
 {
-    return Vector::randomSphere() * Utility::random(magnitude);
+    return Vector::randomSphere(generator) * generator.value(magnitude);
 }
 
-Vector Vector::randomSphere(float magnitude)
+Vector Vector::randomSphere(RandomGenerator& generator, float magnitude)
 {
-    float theta = 2 * Utility::pi * Utility::random();
-    float phi = std::acos(1.0f - 2.0f * Utility::random());
+    float theta = 2 * Utility::pi * generator.value();
+    float phi = std::acos(1.0f - 2.0f * generator.value());
 
     return {
         std::sin(phi) * std::cos(theta) * magnitude,
