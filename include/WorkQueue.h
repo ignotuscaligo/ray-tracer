@@ -49,6 +49,7 @@ public:
     void release(Block block);
 
     size_t capacity() const;
+    size_t freeSpace() const;
     size_t allocated() const;
     size_t available() const;
 

@@ -210,6 +210,12 @@ size_t WorkQueue<T>::capacity() const
 }
 
 template<typename T>
+size_t WorkQueue<T>::freeSpace() const
+{
+    return m_size - allocated();
+}
+
+template<typename T>
 size_t WorkQueue<T>::allocated() const
 {
     return m_allocated.load();
@@ -237,6 +243,7 @@ template void WorkQueue<Photon>::ready(Block block);
 template typename WorkQueue<Photon>::Block WorkQueue<Photon>::fetch(size_t count);
 template void WorkQueue<Photon>::release(Block block);
 template size_t WorkQueue<Photon>::capacity() const;
+template size_t WorkQueue<Photon>::freeSpace() const;
 template size_t WorkQueue<Photon>::allocated() const;
 template size_t WorkQueue<Photon>::available() const;
 
@@ -256,5 +263,6 @@ template void WorkQueue<PhotonHit>::ready(Block block);
 template typename WorkQueue<PhotonHit>::Block WorkQueue<PhotonHit>::fetch(size_t count);
 template void WorkQueue<PhotonHit>::release(Block block);
 template size_t WorkQueue<PhotonHit>::capacity() const;
+template size_t WorkQueue<PhotonHit>::freeSpace() const;
 template size_t WorkQueue<PhotonHit>::allocated() const;
 template size_t WorkQueue<PhotonHit>::available() const;
