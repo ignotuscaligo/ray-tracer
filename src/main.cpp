@@ -145,6 +145,7 @@ int main(int argc, char** argv)
             workers[i]->finalHitQueue = finalHitQueue;
             workers[i]->buffer = buffer;
             workers[i]->image = image;
+            workers[i]->materialLibrary = materialLibrary;
         }
 
         std::thread threads[workerCount];

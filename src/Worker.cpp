@@ -49,7 +49,7 @@ void Worker::exec()
     // std::vector<PhotonHit> hits;
     // Pixel workingPixel;
 
-    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer)
+    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary)
     {
         std::cout << m_index << ": ABORT: missing required references!" << std::endl;
         m_running = false;
@@ -266,13 +266,11 @@ bool Worker::processFinalHits()
 
         Vector pixelDirection = camera->pixelDirection(*coord);
 
-        float dot = Vector::dot(-pixelDirection, photonHit.hit.normal);
+        std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
 
-        if (dot > 0)
+        if (material)
         {
-            Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
-            float reflectionDot = std::max(0.0f, Vector::dot(-pixelDirection, reflection));
-            buffer->addColor(*coord, photonHit.photon.color * reflectionDot);
+            buffer->addColor(*coord, material->colorForHit(pixelDirection, photonHit));
         }
     }
 
