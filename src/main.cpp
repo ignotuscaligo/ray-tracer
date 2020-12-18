@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "DiffuseMaterial.h"
 #include "Image.h"
+#include "LightQueue.h"
 #include "Material.h"
 #include "MeshVolume.h"
 #include "Object.h"
@@ -33,9 +34,12 @@
 namespace
 {
 
-constexpr size_t photonCount = 10000000;
+constexpr size_t million = 1000000;
+
+constexpr size_t queueSize = 5 * million;
+constexpr size_t photonsPerLight = 1 * million;
 constexpr size_t workerCount = 32;
-constexpr size_t fetchSize = 10000;
+constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
@@ -112,18 +116,6 @@ int main(int argc, char** argv)
 
         sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(45.0f), Utility::radians(45.0f), 0.0f);
 
-        size_t lightCount = 0;
-
-        for (const auto& object : objects)
-        {
-            if (object->hasType<Light>())
-            {
-                ++lightCount;
-            }
-        }
-
-        size_t photonsPerLight = photonCount / lightCount;
-
         std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(imageWidth, imageHeight);
 
         std::shared_ptr<Image> image = std::make_shared<Image>(imageWidth, imageHeight);
@@ -137,9 +129,10 @@ int main(int argc, char** argv)
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
-        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonCount);
-        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
-        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(photonCount);
+        std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
+        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(queueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
 
         std::shared_ptr<Worker> workers[workerCount];
 
@@ -154,6 +147,7 @@ int main(int argc, char** argv)
             workers[i]->buffer = buffer;
             workers[i]->image = image;
             workers[i]->materialLibrary = materialLibrary;
+            workers[i]->lightQueue = lightQueue;
         }
 
         std::thread threads[workerCount];
@@ -195,57 +189,57 @@ int main(int argc, char** argv)
             // omniLight1->transform.position = {-40, frame * (-18.0f / static_cast<float>(frameCount)), -40};
 
             std::cout << "---" << std::endl;
-            std::cout << "Emitting " << lightCount * photonsPerLight << " photons from " << lightCount << " lights" << std::endl;
+            std::cout << "Initializing lights" << std::endl;
 
-            std::chrono::time_point generatePhotonsStart = std::chrono::system_clock::now();
+            size_t lightCount = 0;
 
             for (const auto& object : objects)
             {
                 if (object->hasType<Light>())
                 {
-                    auto photons = photonQueue->initialize(photonsPerLight);
-
-                    std::static_pointer_cast<Light>(object)->emit(photons);
-
-                    photonQueue->ready(photons);
+                    lightQueue->setPhotonCount(object->name(), photonsPerLight);
+                    ++lightCount;
                 }
             }
-
-            std::chrono::time_point generatePhotonsEnd = std::chrono::system_clock::now();
-            std::chrono::microseconds generatePhotonsDuration = std::chrono::duration_cast<std::chrono::microseconds>(generatePhotonsEnd - generatePhotonsStart);
 
             std::cout << "---" << std::endl;
             std::cout << "Processing photons" << std::endl;
 
+            size_t photonsToEmit = lightQueue->remainingPhotons();
             size_t photonsAllocated = photonQueue->allocated();
             size_t hitsAllocated = hitQueue->allocated();
             size_t finalHitsAllocated = finalHitQueue->allocated();
 
             std::cout << "---" << std::endl;
+            std::cout << "remaining emissions:  " << photonsToEmit << std::endl;
             std::cout << "remaining photons:    " << photonsAllocated << std::endl;
             std::cout << "remaining hits:       " << hitsAllocated << std::endl;
             std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
 
+            size_t lastEmit = photonsToEmit;
             size_t lastPhotons = photonsAllocated;
             size_t lastHits = hitsAllocated;
             size_t lastFinalHits = finalHitsAllocated;
 
-            while (photonsAllocated > 0 || hitsAllocated > 0)
+            while (photonsAllocated > 0 || hitsAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
+                photonsToEmit = lightQueue->remainingPhotons();
                 photonsAllocated = photonQueue->allocated();
                 hitsAllocated = hitQueue->allocated();
                 finalHitsAllocated = finalHitQueue->allocated();
 
-                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits || finalHitsAllocated != lastFinalHits)
+                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits || finalHitsAllocated != lastFinalHits || photonsToEmit != lastEmit)
                 {
                     std::cout << "---" << std::endl;
+                    std::cout << "remaining emissions:  " << photonsToEmit << std::endl;
                     std::cout << "remaining photons:    " << photonsAllocated << std::endl;
                     std::cout << "remaining hits:       " << hitsAllocated << std::endl;
                     std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
                 }
 
+                lastEmit = photonsToEmit;
                 lastPhotons = photonsAllocated;
                 lastHits = hitsAllocated;
                 lastFinalHits = finalHitsAllocated;
@@ -282,26 +276,32 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Collecting metrics" << std::endl;
 
+            size_t emitProcessed = 0;
             size_t photonsProcessed = 0;
             size_t hitsProcessed = 0;
             size_t finalHitsProcessed = 0;
 
+            size_t emitDuration = 0;
             size_t photonDuration = 0;
             size_t hitDuration = 0;
             size_t writeDuration = 0;
 
             for (size_t i = 0; i < workerCount; ++i)
             {
+                emitProcessed += workers[i]->emitProcessed;
                 photonsProcessed += workers[i]->photonsProcessed;
                 hitsProcessed += workers[i]->hitsProcessed;
                 finalHitsProcessed += workers[i]->finalHitsProcessed;
+                workers[i]->emitProcessed = 0;
                 workers[i]->photonsProcessed = 0;
                 workers[i]->hitsProcessed = 0;
                 workers[i]->finalHitsProcessed = 0;
 
+                emitDuration += workers[i]->emitDuration;
                 photonDuration += workers[i]->photonDuration;
                 hitDuration += workers[i]->hitDuration;
                 writeDuration += workers[i]->writeDuration;
+                workers[i]->emitDuration = 0;
                 workers[i]->photonDuration = 0;
                 workers[i]->hitDuration = 0;
                 workers[i]->writeDuration = 0;
@@ -321,8 +321,9 @@ int main(int argc, char** argv)
             std::cout << "|- average / px: " << renderDuration.count() / pixelCount << " us" << std::endl;
 
             std::cout << "Lights:" << std::endl;
-            std::cout << "|- emitted:       " << photonCount << std::endl;
-            std::cout << "|- emission time: " << generatePhotonsDuration.count() << " us" << std::endl;
+            std::cout << "|- processed:             " << emitProcessed << std::endl;
+            std::cout << "|- process total time:    " << emitDuration << " us" << std::endl;
+            std::cout << "|- process time / worker: " << emitDuration / workerCount << " us" << std::endl;
 
             std::cout << "Photons:" << std::endl;
             std::cout << "|- processed:             " << photonsProcessed << std::endl;

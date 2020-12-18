@@ -1,7 +1,9 @@
 #include "Worker.h"
 
 #include "Color.h"
+#include "Light.h"
 #include "Pixel.h"
+#include "Utility.h"
 
 #include <algorithm>
 #include <chrono>
@@ -49,7 +51,7 @@ void Worker::exec()
     // std::vector<PhotonHit> hits;
     // Pixel workingPixel;
 
-    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary)
+    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
     {
         std::cout << m_index << ": ABORT: missing required references!" << std::endl;
         m_running = false;
@@ -63,6 +65,14 @@ void Worker::exec()
             continue;
         }
 
+        if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize)
+        {
+            if (!processLights())
+            {
+                break;
+            }
+        }
+
         if (photonQueue->available() > 0)
         {
             if (!processPhotons())
@@ -70,27 +80,65 @@ void Worker::exec()
                 break;
             }
         }
-        else if (hitQueue->available() > 0)
+
+        if (hitQueue->available() > 0)
         {
             if (!processHits())
             {
                 break;
             }
         }
-        else if (finalHitQueue->available() > 0)
+
+        if (finalHitQueue->available() > 0)
         {
             if (!processFinalHits())
             {
                 break;
             }
         }
-        else
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+
+        std::this_thread::yield();
     }
 
     // std::cout << m_index << ": end thread" << std::endl;
+}
+
+bool Worker::processLights()
+{
+    auto workStart = std::chrono::system_clock::now();
+
+    for (auto& object : objects)
+    {
+        if (!object->hasType<Light>())
+        {
+            continue;
+        }
+
+        size_t photonCount = lightQueue->fetchPhotons(object->name(), m_fetchSize);
+
+        if (photonCount == 0)
+        {
+            continue;
+        }
+
+        float photonBrightness = lightQueue->getPhotonBrightness(object->name());
+
+        auto photons = photonQueue->initialize(photonCount);
+
+        std::static_pointer_cast<Light>(object)->emit(photons, photonBrightness, m_generator);
+
+        emitProcessed += photons.size();
+
+        photonQueue->ready(photons);
+
+        break;
+    }
+
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    emitDuration += workDuration.count();
+
+    return true;
 }
 
 bool Worker::processPhotons()

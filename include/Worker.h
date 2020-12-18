@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "Camera.h"
 #include "Image.h"
+#include "LightQueue.h"
 #include "Material.h"
 #include "Object.h"
 #include "Photon.h"
@@ -51,6 +52,7 @@ public:
 
     std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
+    std::shared_ptr<LightQueue> lightQueue;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
@@ -58,19 +60,21 @@ public:
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
 
+    size_t emitDuration = 0;
     size_t photonDuration = 0;
     size_t hitDuration = 0;
     size_t writeDuration = 0;
 
+    size_t emitProcessed = 0;
     size_t photonsProcessed = 0;
     size_t hitsProcessed = 0;
     size_t finalHitsProcessed = 0;
 
 private:
+    bool processLights();
     bool processPhotons();
     bool processHits();
     bool processFinalHits();
-    bool processWrite();
 
     size_t m_index = 0;
     size_t m_fetchSize = 0;
