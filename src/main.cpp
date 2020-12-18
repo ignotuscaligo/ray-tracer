@@ -38,14 +38,14 @@ constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 24 * 10;
+constexpr size_t frameCount = 1;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
 constexpr float verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "plane_test_1";
+const std::string outputName = "cleanup_0";
 
 }
 
