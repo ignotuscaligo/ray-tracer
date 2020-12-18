@@ -38,7 +38,8 @@ constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
 constexpr size_t startFrame = 0;
-constexpr size_t frameCount = 1;
+constexpr size_t frameCount = 24 * 10;
+constexpr size_t renderFrameCount = 1;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
@@ -163,10 +164,10 @@ int main(int argc, char** argv)
 
         float rotationStep = 360.0f / static_cast<float>(frameCount);
 
-        for (size_t frame = startFrame; frame < frameCount; ++frame)
+        for (size_t frame = startFrame; frame < startFrame + renderFrameCount; ++frame)
         {
             std::cout << "---" << std::endl;
-            std::cout << "Rendering frame " << frame + 1 << " / " << frameCount << std::endl;
+            std::cout << "Rendering frame " << frame + 1 << " / " << startFrame + renderFrameCount << std::endl;
 
             std::chrono::time_point renderStart = std::chrono::system_clock::now();
 
