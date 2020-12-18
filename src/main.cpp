@@ -33,7 +33,7 @@
 namespace
 {
 
-constexpr size_t photonCount = 1000000;
+constexpr size_t photonCount = 10000000;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 10000;
 
@@ -64,8 +64,8 @@ int main(int argc, char** argv)
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Default"));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("DiffuseRed", Color(1.0f, 0.0f, 0.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("DiffuseBlue", Color(0.0f, 0.0f, 1.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Ground", Color(1.0f, 1.0f, 1.0f)));
 
         std::vector<std::shared_ptr<Object>> objects;
 
@@ -74,10 +74,11 @@ int main(int argc, char** argv)
         std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("DiffuseRed"), ObjReader::loadMesh(inputFile)));
-        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("DiffuseBlue")));
+        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), ObjReader::loadMesh(inputFile)));
+        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("Ground")));
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
@@ -87,18 +88,24 @@ int main(int argc, char** argv)
         Object::setParent(knotMesh, objectPivot);
         Object::setParent(omniLight0, root);
         Object::setParent(omniLight1, root);
+        Object::setParent(omniLight2, root);
 
         ground->transform.position = {0, -70, 0};
 
-        omniLight0->transform.position = {0, 50, 0};
-        omniLight0->color(Color::fromRGB(255, 241, 224));
-        omniLight0->brightness(500000);
+        omniLight0->transform.position = {0, 70, 50};
+        omniLight0->color(Color::fromRGB(255, 0, 0));
+        omniLight0->brightness(300000);
         omniLight0->innerRadius(5.0f);
 
-        omniLight1->transform.position = {0, 0, -50};
-        omniLight1->color(Color::fromRGB(201, 226, 255));
-        omniLight1->brightness(80000);
+        omniLight1->transform.position = {43.3f, 70, -25};
+        omniLight1->color(Color::fromRGB(0, 255, 0));
+        omniLight1->brightness(300000);
         omniLight1->innerRadius(5.0f);
+
+        omniLight2->transform.position = {-43.3f, 70, -25};
+        omniLight2->color(Color::fromRGB(0, 0, 255));
+        omniLight2->brightness(300000);
+        omniLight2->innerRadius(5.0f);
 
         camera->transform.position = {0.0f, 0.0f, 100.0f};
         camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
