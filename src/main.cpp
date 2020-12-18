@@ -43,14 +43,14 @@ constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = 1;
+constexpr size_t renderFrameCount = frameCount;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
 constexpr float verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "cleanup_0";
+const std::string outputName = "light_threading_0";
 
 }
 
@@ -83,6 +83,7 @@ int main(int argc, char** argv)
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        // std::shared_ptr<OmniLight> omniLight3 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
@@ -93,23 +94,33 @@ int main(int argc, char** argv)
         Object::setParent(omniLight0, root);
         Object::setParent(omniLight1, root);
         Object::setParent(omniLight2, root);
+        // Object::setParent(omniLight3, root);
 
         ground->transform.position = {0, -70, 0};
 
-        omniLight0->transform.position = {0, 70, 50};
+        omniLight0->name("OmniLight0");
+        omniLight0->transform.position = {0, 50, 50};
         omniLight0->color(Color::fromRGB(255, 0, 0));
-        omniLight0->brightness(300000);
+        omniLight0->brightness(1000000);
         omniLight0->innerRadius(5.0f);
 
-        omniLight1->transform.position = {43.3f, 70, -25};
+        omniLight1->name("OmniLight1");
+        omniLight1->transform.position = {43.3f, 50, -25};
         omniLight1->color(Color::fromRGB(0, 255, 0));
-        omniLight1->brightness(300000);
+        omniLight1->brightness(1000000);
         omniLight1->innerRadius(5.0f);
 
-        omniLight2->transform.position = {-43.3f, 70, -25};
+        omniLight2->name("OmniLight2");
+        omniLight2->transform.position = {-43.3f, 50, -25};
         omniLight2->color(Color::fromRGB(0, 0, 255));
-        omniLight2->brightness(300000);
+        omniLight2->brightness(1000000);
         omniLight2->innerRadius(5.0f);
+
+        // omniLight3->name("OmniLight3");
+        // omniLight3->transform.position = {0, 0, 0};
+        // omniLight3->color(Color::fromRGB(255, 255, 255));
+        // omniLight3->brightness(80000);
+        // omniLight3->innerRadius(5.0f);
 
         camera->transform.position = {0.0f, 0.0f, 100.0f};
         camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
