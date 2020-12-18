@@ -6,6 +6,7 @@
 #include "Material.h"
 #include "Object.h"
 #include "Photon.h"
+#include "RandomGenerator.h"
 #include "Volume.h"
 #include "WorkQueue.h"
 
@@ -76,4 +77,6 @@ private:
 
     std::atomic_bool m_running;
     std::atomic_bool m_suspend;
+
+    RandomGenerator m_generator;
 };
