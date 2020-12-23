@@ -205,6 +205,40 @@ bool Worker::processPhotons()
         }
 
         hitQueue->ready(hitsBlock);
+
+        size_t bounceThreshold = 1;
+        size_t bouncedPhotonCount = 0;
+
+        for (auto& photonHit : hits)
+        {
+            if (photonHit.photon.bounces < bounceThreshold)
+            {
+                ++bouncedPhotonCount;
+            }
+        }
+
+        if (bouncedPhotonCount > 0)
+        {
+            size_t bounceCount = 1;
+            auto bouncedPhotonsBlock = photonQueue->initialize(bouncedPhotonCount * bounceCount);
+            size_t photonIndex = 0;
+
+            for (auto& photonHit : hits)
+            {
+                if (photonHit.photon.bounces < bounceThreshold)
+                {
+                    std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
+
+                    size_t startIndex = photonIndex;
+                    size_t endIndex = startIndex + bounceCount;
+                    material->bounce(bouncedPhotonsBlock, startIndex, endIndex, photonHit, m_generator);
+
+                    photonIndex += bounceCount;
+                }
+            }
+
+            photonQueue->ready(bouncedPhotonsBlock);
+        }
     }
 
     photonsProcessed += photonsBlock.size();
@@ -234,19 +268,6 @@ bool Worker::processHits()
 
     for (auto& photonHit : hitsBlock)
     {
-        if (photonHit.photon.bounces < 1)
-        {
-            std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
-
-            auto photons = photonQueue->initialize(5);
-
-            material->bounce(photons, photonHit, m_generator);
-
-            emitProcessed += photons.size();
-
-            photonQueue->ready(photons);
-        }
-
         float dot = Vector::dot(-cameraNormal, photonHit.hit.normal);
 
         // Is the hit facing the camera?
