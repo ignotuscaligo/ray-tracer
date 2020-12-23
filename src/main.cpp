@@ -37,13 +37,13 @@ namespace
 constexpr size_t million = 1000000;
 
 constexpr size_t queueSize = 5 * million;
-constexpr size_t photonsPerLight = 1 * million;
+constexpr size_t photonsPerLight = 2 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = 1;
+constexpr size_t renderFrameCount = frameCount;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
@@ -63,13 +63,17 @@ int main(int argc, char** argv)
         std::cout << "---" << std::endl;
         std::cout << "Setting up scene for render" << std::endl;
 
-        std::string inputFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
+        std::string knotMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
+        std::string cubeMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\cube.obj)";
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Default"));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Ground", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("White", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Red", Color(1.0f, 0.0f, 0.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Green", Color(0.0f, 1.0f, 0.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Blue", Color(0.0f, 0.0f, 1.0f)));
 
         std::vector<std::shared_ptr<Object>> objects;
 
@@ -78,8 +82,9 @@ int main(int argc, char** argv)
         std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), ObjReader::loadMesh(inputFile)));
-        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("Ground")));
+        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), ObjReader::loadMesh(knotMeshFile)));
+        std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Red"), ObjReader::loadMesh(cubeMeshFile)));
+        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("White")));
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
@@ -95,8 +100,11 @@ int main(int argc, char** argv)
         // Object::setParent(omniLight1, root);
         // Object::setParent(omniLight2, root);
         // Object::setParent(omniLight3, root);
+        Object::setParent(cubeMesh, root);
 
         ground->transform.position = {0, -70, 0};
+
+        cubeMesh->transform.position = {0, -70, 0};
 
         omniLight0->name("OmniLight0");
         omniLight0->transform.position = {0, 50, 50};
