@@ -101,7 +101,7 @@ int main(int argc, char** argv)
         omniLight0->name("OmniLight0");
         omniLight0->transform.position = {0, 50, 50};
         omniLight0->color(Color::fromRGB(255, 255, 255));
-        omniLight0->brightness(1000000);
+        omniLight0->brightness(4000000);
         omniLight0->innerRadius(5.0f);
 
         // omniLight1->name("OmniLight1");

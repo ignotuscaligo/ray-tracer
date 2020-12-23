@@ -234,7 +234,7 @@ bool Worker::processHits()
 
     for (auto& photonHit : hitsBlock)
     {
-        if (photonHit.photon.bounces < 0)
+        if (photonHit.photon.bounces < 1)
         {
             std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
 
