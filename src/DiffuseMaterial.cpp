@@ -15,6 +15,7 @@ DiffuseMaterial::DiffuseMaterial(const std::string& name, const Color& color)
 Color DiffuseMaterial::colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const
 {
     Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
-    float reflectionDot = std::max(0.0f, Vector::dot(-pixelDirection, reflection));
-    return m_color * photonHit.photon.color * reflectionDot;
+    float reflectionDot = Vector::dot(-pixelDirection, reflection);
+    float brightess = std::max(0.0f, ((reflectionDot + 1.0f) / 2.0f));
+    return m_color * photonHit.photon.color * brightess;
 }
