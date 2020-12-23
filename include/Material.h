@@ -17,7 +17,7 @@ public:
 
     std::string name() const;
 
-    virtual Color colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const;
+    virtual Color colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const = 0;
 
 private:
     std::string m_name;

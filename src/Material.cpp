@@ -12,11 +12,6 @@ std::string Material::name() const
     return m_name;
 }
 
-Color Material::colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const
-{
-    return photonHit.photon.color;
-}
-
 void MaterialLibrary::addMaterial(std::shared_ptr<Material> material)
 {
     if (m_indexMap.count(material->name()) > 0)
