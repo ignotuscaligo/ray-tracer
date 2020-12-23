@@ -176,17 +176,22 @@ bool Worker::processPhotons()
         {
             float minDistance = std::numeric_limits<float>::max();
             size_t minIndex = 0;
+            bool validHit = false;
 
             for (int i = 0; i < hitResults.size(); ++i)
             {
-                if (hitResults[i].hit.distance < minDistance)
+                if (hitResults[i].hit.distance < minDistance && hitResults[i].hit.distance > std::numeric_limits<float>::epsilon())
                 {
+                    validHit = true;
                     minIndex = i;
                     minDistance = hitResults[i].hit.distance;
                 }
             }
 
-            hits.push_back(hitResults[minIndex]);
+            if (validHit)
+            {
+                hits.push_back(hitResults[minIndex]);
+            }
         }
     }
 
