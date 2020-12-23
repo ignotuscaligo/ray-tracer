@@ -12,6 +12,7 @@ struct Photon
 
     Ray ray;
     Color color;
+    int bounces = 0;
 };
 
 struct PhotonHit

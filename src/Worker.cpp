@@ -229,6 +229,19 @@ bool Worker::processHits()
 
     for (auto& photonHit : hitsBlock)
     {
+        if (photonHit.photon.bounces < 0)
+        {
+            std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
+
+            auto photons = photonQueue->initialize(5);
+
+            material->bounce(photons, photonHit, m_generator);
+
+            emitProcessed += photons.size();
+
+            photonQueue->ready(photons);
+        }
+
         float dot = Vector::dot(-cameraNormal, photonHit.hit.normal);
 
         // Is the hit facing the camera?
