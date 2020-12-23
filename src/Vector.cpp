@@ -14,6 +14,10 @@ Axis nextAxis(Axis axis)
     return static_cast<Axis>((static_cast<int>(axis) + 1) % 3);
 }
 
+const Vector Vector::unitX{1, 0, 0};
+const Vector Vector::unitY{0, 1, 0};
+const Vector Vector::unitZ{0, 0, 1};
+
 Vector::Vector()
     : x(0)
     , y(0)

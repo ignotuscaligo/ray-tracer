@@ -44,6 +44,10 @@ union Vector
     static Vector random(RandomGenerator& generator, float magnitude = 1.0f);
     static Vector randomSphere(RandomGenerator& generator, float magnitude = 1.0f);
 
+    static const Vector unitX;
+    static const Vector unitY;
+    static const Vector unitZ;
+
     __m128 data;
 
     struct alignas(float)
