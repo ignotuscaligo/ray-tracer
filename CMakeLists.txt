@@ -117,6 +117,9 @@ target_sources(ray-tracer
 
         include/RandomGenerator.h
         src/RandomGenerator.cpp
+
+        include/AngleGenerator.h
+        src/AngleGenerator.cpp
 )
 
 target_include_directories(ray-tracer
