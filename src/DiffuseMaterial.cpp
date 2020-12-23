@@ -22,22 +22,23 @@ Color DiffuseMaterial::colorForHit(const Vector& pixelDirection, const PhotonHit
     return m_color * photonHit.photon.color * brightess;
 }
 
-void DiffuseMaterial::bounce(WorkQueue<Photon>::Block photonBlock, const PhotonHit& photonHit, RandomGenerator& generator) const
+void DiffuseMaterial::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, size_t endIndex, const PhotonHit& photonHit, RandomGenerator& generator) const
 {
-    if (photonBlock.size() == 0)
+    size_t count = endIndex - startIndex;
+    if (count == 0)
     {
         return;
     }
 
     Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
 
-    float brightness = 1.0f / static_cast<float>(photonBlock.size());
+    float brightness = (1.0f / static_cast<float>(count)) / (Utility::pi * 2.0f);
 
-    for (auto& photon : photonBlock)
+    for (size_t i = startIndex; i < endIndex; ++i)
     {
         Vector offsetReflection = m_angleGenerator.generateOffsetVector(reflection, generator);
-        photon.ray = {photonHit.hit.position, offsetReflection};
-        photon.color = photonHit.photon.color * brightness / (Utility::pi * 2.0f);
-        photon.bounces = photonHit.photon.bounces + 1;
+        photonBlock[i].ray = {photonHit.hit.position, offsetReflection};
+        photonBlock[i].color = m_color * photonHit.photon.color * brightness;
+        photonBlock[i].bounces = photonHit.photon.bounces + 1;
     }
 }

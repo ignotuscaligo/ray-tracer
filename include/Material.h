@@ -20,7 +20,7 @@ public:
     std::string name() const;
 
     virtual Color colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const = 0;
-    virtual void bounce(WorkQueue<Photon>::Block photonBlock, const PhotonHit& photonHit, RandomGenerator& generator) const = 0;
+    virtual void bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, size_t endIndex, const PhotonHit& photonHit, RandomGenerator& generator) const = 0;
 
 private:
     std::string m_name;

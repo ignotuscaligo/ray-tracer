@@ -15,7 +15,7 @@ public:
     DiffuseMaterial(const std::string& name, const Color& color = {1.0f, 1.0f, 1.0f});
 
     Color colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const override;
-    void bounce(WorkQueue<Photon>::Block photonBlock, const PhotonHit& photonHit, RandomGenerator& generator) const override;
+    void bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, size_t endIndex, const PhotonHit& photonHit, RandomGenerator& generator) const override;
 
 private:
     Color m_color;
