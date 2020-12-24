@@ -23,6 +23,11 @@ Color::Color(float ired, float igreen, float iblue)
 {
 }
 
+float Color::brightness() const
+{
+    return red + green + blue;
+}
+
 Color Color::fromRGB(float red, float green, float blue)
 {
     return {

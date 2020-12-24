@@ -10,6 +10,8 @@ struct Color
     Color(float grey);
     Color(float ired, float igreen, float iblue);
 
+    float brightness() const;
+
     static const float gamma;
     static Color fromRGB(float red, float green, float blue);
 

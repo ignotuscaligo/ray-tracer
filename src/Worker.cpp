@@ -155,6 +155,11 @@ bool Worker::processPhotons()
 
     for (auto& photon : photonsBlock)
     {
+        if (photon.color.brightness() < std::numeric_limits<float>::epsilon())
+        {
+            continue;
+        }
+
         std::vector<PhotonHit> hitResults;
 
         for (auto& object : objects)
