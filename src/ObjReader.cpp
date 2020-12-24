@@ -53,8 +53,8 @@ std::vector<Triangle> loadMesh(const std::string& filename)
                 for (size_t v = 0; v < vertexCount; ++v)
                 {
                     tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-                    size_t vertexIndex = 3 * idx.vertex_index;
-                    size_t normalIndex = 3 * idx.normal_index;
+                    size_t vertexIndex = 3 * static_cast<size_t>(idx.vertex_index);
+                    size_t normalIndex = 3 * static_cast<size_t>(idx.normal_index);
                     points[v].x = attrib.vertices[vertexIndex + 0];
                     points[v].y = attrib.vertices[vertexIndex + 1];
                     points[v].z = attrib.vertices[vertexIndex + 2];
