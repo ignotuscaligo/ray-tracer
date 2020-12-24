@@ -4,9 +4,19 @@
 
 struct Pixel
 {
-    png_uint_16 red = 0;
-    png_uint_16 green = 0;
-    png_uint_16 blue = 0;
+    Pixel(png_uint_16 value = 0)
+        : red(value)
+        , green(value)
+        , blue(value)
+    {
+    }
+
+    Pixel(png_uint_16 ired, png_uint_16 igreen, png_uint_16 iblue)
+        : red(ired)
+        , green(igreen)
+        , blue(iblue)
+    {
+    }
 
     png_uint_16 operator[](size_t index) const noexcept
     {
@@ -23,4 +33,8 @@ struct Pixel
             return blue;
         }
     }
+
+    png_uint_16 red = 0;
+    png_uint_16 green = 0;
+    png_uint_16 blue = 0;
 };
