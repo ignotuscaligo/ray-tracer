@@ -13,7 +13,7 @@ public:
     size_t width() const noexcept;
     size_t height() const noexcept;
 
-    void setPixel(size_t x, size_t y, Pixel pixel) noexcept;
+    void setPixel(size_t x, size_t y, Pixel pixel);
     Pixel& getPixel(size_t x, size_t y);
     void clear();
 

@@ -11,7 +11,11 @@ class PngWriter
 public:
     PngWriter(const std::string& filename);
     PngWriter(const PngWriter& other) = delete;
+    PngWriter(PngWriter&& other) noexcept;
     ~PngWriter();
+
+    PngWriter& operator=(const PngWriter& other) = delete;
+    PngWriter& operator=(PngWriter&& other) noexcept;
 
     bool valid() const noexcept;
 
@@ -20,8 +24,6 @@ public:
 
     void setTitle(const std::string& title);
     void writeImage(Image& image);
-
-    PngWriter& operator=(const PngWriter& other) = delete;
 
     static void writeImage(const std::string& filename, Image& image, const std::string& title);
 

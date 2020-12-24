@@ -27,6 +27,13 @@ PngWriter::PngWriter(const std::string& filename)
     png_init_io(m_structPtr, m_file);
 }
 
+PngWriter::PngWriter(PngWriter&& other) noexcept
+    : m_file(std::move(other.m_file))
+    , m_structPtr(std::move(other.m_structPtr))
+    , m_infoPtr(std::move(other.m_infoPtr))
+{
+}
+
 PngWriter::~PngWriter()
 {
     if (m_infoPtr != nullptr)
@@ -43,6 +50,14 @@ PngWriter::~PngWriter()
     {
         fclose(m_file);
     }
+}
+
+PngWriter& PngWriter::operator=(PngWriter&& other) noexcept
+{
+    m_file = std::move(other.m_file);
+    m_structPtr = std::move(other.m_structPtr);
+    m_infoPtr = std::move(other.m_infoPtr);
+    return *this;
 }
 
 bool PngWriter::valid() const noexcept
@@ -69,14 +84,14 @@ void PngWriter::setTitle(const std::string& title)
         return;
     }
 
-    png_text title_text;
-    png_charp titleString = new char[title.size() + 1];
-    strcpy(titleString, title.c_str());
+    png_text title_text{};
+    std::vector<char> titleString;
+    titleString.reserve(title.size() + 1);
+    strcpy(titleString.data(), title.c_str());
     title_text.compression = PNG_TEXT_COMPRESSION_NONE;
     title_text.key = "Title";
-    title_text.text = titleString;
+    title_text.text = titleString.data();
     png_set_text(m_structPtr, m_infoPtr, &title_text, 1);
-    delete[] titleString;
 }
 
 void PngWriter::writeImage(Image& image)
