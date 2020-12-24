@@ -7,25 +7,25 @@
 
 #include <cmath>
 
-Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, float verticalFieldOfView, float horizontalFieldOfView)
+Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, double verticalFieldOfView, double horizontalFieldOfView)
 {
     origin = position;
     direction = rotation * Vector(0, 0, 1);
-    vertical = rotation * Vector(0, std::sin(Utility::radians(verticalFieldOfView) / 2.0f), 0);
-    horizontal = rotation * Vector(std::sin(Utility::radians(horizontalFieldOfView) / 2.0f), 0, 0);
+    vertical = rotation * Vector(0, std::sin(Utility::radians(verticalFieldOfView) / 2.0), 0);
+    horizontal = rotation * Vector(std::sin(Utility::radians(horizontalFieldOfView) / 2.0), 0, 0);
 
     verticalDot = vertical.magnitudeSquared();
     horizontalDot = horizontal.magnitudeSquared();
 }
 
-Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, float pitch, float yaw, float pitchStep, float yawStep)
+Pyramid::Pyramid(const Vector& position, const Quaternion& rotation, double pitch, double yaw, double pitchStep, double yawStep)
 {
     origin = position;
 
     Quaternion centerRotation = Quaternion::fromPitchYawRoll(pitch, yaw, 0);
 
-    vertical = {0, std::sin(pitchStep / 2.0f), 0};
-    horizontal = {std::sin(yawStep / 2.0f), 0, 0};
+    vertical = {0, std::sin(pitchStep / 2.0), 0};
+    horizontal = {std::sin(yawStep / 2.0), 0, 0};
 
     direction = (rotation * (centerRotation * Vector(0, 0, 1)));
 
@@ -52,11 +52,11 @@ bool Pyramid::intersectsBounds(const Bounds& bounds) const
     Vector minTest = Vector::normalizedSub(bounds.minimum(), origin);
     Vector maxTest = Vector::normalizedSub(bounds.maximum(), origin);
 
-    float vertMag = vertical.magnitude();
-    float horizMag = horizontal.magnitude();
+    double vertMag = vertical.magnitude();
+    double horizMag = horizontal.magnitude();
 
-    float minVert = Vector::dot(minTest * vertMag, vertical);
-    float maxVert = Vector::dot(maxTest * vertMag, vertical);
+    double minVert = Vector::dot(minTest * vertMag, vertical);
+    double maxVert = Vector::dot(maxTest * vertMag, vertical);
 
     if (minVert > verticalDot && maxVert > verticalDot)
     {
@@ -68,8 +68,8 @@ bool Pyramid::intersectsBounds(const Bounds& bounds) const
         return false;
     }
 
-    float minHoriz = Vector::dot(minTest * horizMag, horizontal);
-    float maxHoriz = Vector::dot(maxTest * horizMag, horizontal);
+    double minHoriz = Vector::dot(minTest * horizMag, horizontal);
+    double maxHoriz = Vector::dot(maxTest * horizMag, horizontal);
 
     if (minHoriz > horizontalDot && maxHoriz > horizontalDot)
     {
@@ -89,8 +89,8 @@ Vector Pyramid::relativePositionInFrustum(const Vector& point) const
     Vector test = Vector::normalizedSub(point, origin);
 
     return {
-        ((Vector::dot(test, horizontal) / horizontalDot) + 1.0f) / 2.0f,
-        ((Vector::dot(test, vertical) / verticalDot) + 1.0f) / 2.0f,
+        ((Vector::dot(test, horizontal) / horizontalDot) + 1.0) / 2.0,
+        ((Vector::dot(test, vertical) / verticalDot) + 1.0) / 2.0,
         Vector::dot(test, direction)
     };
 }

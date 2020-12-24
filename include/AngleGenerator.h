@@ -5,10 +5,10 @@
 
 struct AngleGenerator
 {
-    float map(float value) const;
-    float generate(RandomGenerator& randomGenerator) const;
+    double map(double value) const;
+    double generate(RandomGenerator& randomGenerator) const;
     Vector generateOffsetVector(const Vector& center, RandomGenerator& randomGenerator) const;
 
-    float maxAngle = 90.0f;
-    float linearity = 1.0f;
+    double maxAngle = 90.0;
+    double linearity = 1.0;
 };

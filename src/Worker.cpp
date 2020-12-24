@@ -14,7 +14,7 @@
 namespace
 {
 
-constexpr float selfHitThreshold = std::numeric_limits<float>::epsilon();
+constexpr double selfHitThreshold = std::numeric_limits<double>::epsilon();
 
 }
 
@@ -128,7 +128,7 @@ bool Worker::processLights()
             continue;
         }
 
-        float photonBrightness = lightQueue->getPhotonBrightness(object->name());
+        double photonBrightness = lightQueue->getPhotonBrightness(object->name());
 
         auto photons = photonQueue->initialize(photonCount);
 
@@ -163,7 +163,7 @@ bool Worker::processPhotons()
     for (auto& photon : photonsBlock)
     {
         // Skip photons with no brightness left, will drop them from the queue
-        if (photon.color.brightness() < std::numeric_limits<float>::epsilon())
+        if (photon.color.brightness() < std::numeric_limits<double>::epsilon())
         {
             continue;
         }
@@ -187,7 +187,7 @@ bool Worker::processPhotons()
 
         if (!hitResults.empty())
         {
-            float minDistance = std::numeric_limits<float>::max();
+            double minDistance = std::numeric_limits<double>::max();
             size_t minIndex = 0;
             bool validHit = false;
 
@@ -290,16 +290,16 @@ bool Worker::processHits()
         }
 
         Vector pixelDirection = camera->pixelDirection(*coord);
-        float dot = Vector::dot(pixelDirection, photonHit.hit.normal);
+        double dot = Vector::dot(pixelDirection, photonHit.hit.normal);
 
         // Not facing the pixel, skip
-        if (dot >= 0.0f)
+        if (dot >= 0.0)
         {
             continue;
         }
 
         Vector path = cameraPosition - photonHit.hit.position;
-        float cameraDistance = path.magnitude();
+        double cameraDistance = path.magnitude();
 
         if (cameraDistance < selfHitThreshold)
         {

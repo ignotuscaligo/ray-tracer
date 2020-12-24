@@ -16,16 +16,16 @@ Color Light::color() const
     return m_color;
 }
 
-void Light::brightness(float brightness)
+void Light::brightness(double brightness)
 {
     m_brightness = brightness;
 }
 
-float Light::brightness() const
+double Light::brightness() const
 {
     return m_brightness;
 }
 
-void Light::emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const
+void Light::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
 {
 }

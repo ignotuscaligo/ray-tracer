@@ -5,11 +5,11 @@
 
 #include <cmath>
 
-Camera::Camera(size_t width, size_t height, float verticalFieldOfView)
+Camera::Camera(size_t width, size_t height, double verticalFieldOfView)
     : Object()
     , m_width(width)
     , m_height(height)
-    , m_aspectRatio(static_cast<float>(m_width) / static_cast<float>(m_height))
+    , m_aspectRatio(static_cast<double>(m_width) / static_cast<double>(m_height))
     , m_verticalFieldOfView(verticalFieldOfView)
     , m_horizontalFieldOfView(m_verticalFieldOfView * m_aspectRatio)
 {
@@ -26,17 +26,17 @@ size_t Camera::height() const
     return m_height;
 }
 
-float Camera::aspectRatio() const
+double Camera::aspectRatio() const
 {
     return m_aspectRatio;
 }
 
-float Camera::horizontalFieldOfView() const
+double Camera::horizontalFieldOfView() const
 {
     return m_horizontalFieldOfView;
 }
 
-float Camera::verticalFieldOfView() const
+double Camera::verticalFieldOfView() const
 {
     return m_verticalFieldOfView;
 }
@@ -46,7 +46,7 @@ std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
     Pyramid frustum = Pyramid(position(), rotation(), m_verticalFieldOfView, m_horizontalFieldOfView);
     Vector position = frustum.relativePositionInFrustum(point);
 
-    if (position.z <= 0.0f || position.x < 0.0f || position.x > 1.0f || position.y < 0.0f || position.y > 1.0f)
+    if (position.z <= 0.0 || position.x < 0.0 || position.x > 1.0 || position.y < 0.0 || position.y > 1.0)
     {
         return std::nullopt;
     }
@@ -59,10 +59,10 @@ std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
 
 Vector Camera::pixelDirection(const PixelCoords& coord) const
 {
-    float horizontal = static_cast<float>(coord.x) / static_cast<float>(m_width);
-    float vertical = static_cast<float>(coord.y) / static_cast<float>(m_height);
-    float horizontalAngle = (-m_horizontalFieldOfView / 2.0f) + (horizontal * m_horizontalFieldOfView);
-    float verticalAngle = (-m_verticalFieldOfView / 2.0f) + (vertical * m_verticalFieldOfView);
+    double horizontal = static_cast<double>(coord.x) / static_cast<double>(m_width);
+    double vertical = static_cast<double>(coord.y) / static_cast<double>(m_height);
+    double horizontalAngle = (-m_horizontalFieldOfView / 2.0) + (horizontal * m_horizontalFieldOfView);
+    double verticalAngle = (-m_verticalFieldOfView / 2.0) + (vertical * m_verticalFieldOfView);
 
     Vector direction{
         std::sin(Utility::radians(horizontalAngle)),

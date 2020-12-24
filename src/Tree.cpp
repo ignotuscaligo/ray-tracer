@@ -109,7 +109,7 @@ std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
 
     Tree<T>::castRayIntoNode(ray, m_root, hits);
 
-    float minDistance = std::numeric_limits<float>::max();
+    double minDistance = std::numeric_limits<double>::max();
     std::optional<Hit> result;
 
     for (const auto& hit : hits)
@@ -136,20 +136,20 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const
 }
 
 template<typename T>
-float Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
+double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
 {
     size_t size = objects.size();
 
     if (size == 0)
     {
-        return 0.0f;
+        return 0.0;
     }
     else if (size == 1)
     {
         return Tree<T>::getPivot(objects[0], axis);
     }
 
-    std::vector<float> pivots;
+    std::vector<double> pivots;
 
     for (const auto& object : objects)
     {
@@ -159,12 +159,12 @@ float Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
     std::sort(pivots.begin(), pivots.end());
 
     size_t middle = size / 2;
-    float median = pivots[middle];
+    double median = pivots[middle];
 
     if (size % 2 == 0)
     {
         median += pivots[middle - 1];
-        median /= 2.0f;
+        median /= 2.0;
     }
 
     return median;
@@ -257,7 +257,7 @@ Axis nextNonZeroAxis(const Bounds& bounds, Axis axis)
     Limits limits = bounds.getLimits(axis);
     Axis validAxis = axis;
 
-    while (limits.max - limits.min <= std::numeric_limits<float>::epsilon())
+    while (limits.max - limits.min <= std::numeric_limits<double>::epsilon())
     {
         validAxis = nextAxis(validAxis);
 
@@ -311,7 +311,7 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 
         for (const auto& object : objects)
         {
-            float pivot = Tree<T>::getPivot(object, node->axis);
+            double pivot = Tree<T>::getPivot(object, node->axis);
             if (pivot < node->pivot)
             {
                 leftObjects.push_back(object);
@@ -355,7 +355,7 @@ const Vector& Tree<Triangle>::getPivot(const Triangle& object)
 }
 
 template<>
-float Tree<Triangle>::getPivot(const Triangle& object, Axis axis)
+double Tree<Triangle>::getPivot(const Triangle& object, Axis axis)
 {
     return object.center.getAxis(axis);
 }
@@ -382,7 +382,7 @@ template size_t Tree<Triangle>::nodeCount() const;
 template size_t Tree<Triangle>::nodeDepth() const;
 template std::optional<Hit> Tree<Triangle>::castRay(const Ray& ray) const;
 template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid& pyramid) const;
-template float Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
+template double Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
 template void Tree<Triangle>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<Triangle>::Node> node, std::vector<Hit>& hits);
 template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::generateTree(const std::vector<Triangle>& objects, Axis axis);
 
@@ -393,7 +393,7 @@ const Vector& Tree<PhotonHit>::getPivot(const PhotonHit& object)
 }
 
 template<>
-float Tree<PhotonHit>::getPivot(const PhotonHit& object, Axis axis)
+double Tree<PhotonHit>::getPivot(const PhotonHit& object, Axis axis)
 {
     return object.hit.position.getAxis(axis);
 }
@@ -420,6 +420,6 @@ template size_t Tree<PhotonHit>::nodeCount() const;
 template size_t Tree<PhotonHit>::nodeDepth() const;
 template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray) const;
 template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const;
-template float Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);
+template double Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);
 template void Tree<PhotonHit>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<PhotonHit>::Node> node, std::vector<Hit>& hits);
 template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::generateTree(const std::vector<PhotonHit>& objects, Axis axis);

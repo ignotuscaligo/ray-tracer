@@ -8,11 +8,11 @@ class OmniLight : public Light
 public:
     OmniLight();
 
-    void innerRadius(float innerRadius);
-    float innerRadius() const;
+    void innerRadius(double innerRadius);
+    double innerRadius() const;
 
-    void emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const override;
+    void emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const override;
 
 private:
-    float m_innerRadius = 0;
+    double m_innerRadius = 0;
 };

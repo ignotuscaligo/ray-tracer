@@ -17,8 +17,8 @@ DiffuseMaterial::DiffuseMaterial(const std::string& name, const Color& color)
 Color DiffuseMaterial::colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const
 {
     Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
-    float reflectionDot = Vector::dot(-pixelDirection, reflection);
-    float brightess = std::max(0.0f, ((reflectionDot + 1.0f) / 2.0f));
+    double reflectionDot = Vector::dot(-pixelDirection, reflection);
+    double brightess = std::max(0.0, ((reflectionDot + 1.0) / 2.0));
     return m_color * photonHit.photon.color * brightess;
 }
 
@@ -32,16 +32,16 @@ void DiffuseMaterial::bounce(WorkQueue<Photon>::Block photonBlock, size_t startI
 
     Vector reflection = Vector::reflected(photonHit.photon.ray.direction, photonHit.hit.normal);
 
-    float brightness = (1.0f / static_cast<float>(count)) / (Utility::pi * 2.0f);
+    double brightness = (1.0 / static_cast<double>(count)) / (Utility::pi * 2.0);
 
     for (size_t i = startIndex; i < endIndex; ++i)
     {
         Vector offsetReflection = m_angleGenerator.generateOffsetVector(reflection, generator);
 
-        float normalDot = Vector::dot(offsetReflection, photonHit.hit.normal);
-        if (normalDot <= 0.0f)
+        double normalDot = Vector::dot(offsetReflection, photonHit.hit.normal);
+        if (normalDot <= 0.0)
         {
-            brightness = 0.0f;
+            brightness = 0.0;
         }
 
         photonBlock[i].ray = {photonHit.hit.position, offsetReflection};

@@ -6,7 +6,7 @@ RandomGenerator::RandomGenerator()
     m_generator = std::mt19937(device());
 }
 
-float RandomGenerator::value(float scale)
+double RandomGenerator::value(double scale)
 {
     return m_distribution(m_generator) * scale;
 }

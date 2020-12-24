@@ -8,19 +8,19 @@ OmniLight::OmniLight()
     registerType<OmniLight>();
 }
 
-void OmniLight::innerRadius(float innerRadius)
+void OmniLight::innerRadius(double innerRadius)
 {
     m_innerRadius = innerRadius;
 }
 
-float OmniLight::innerRadius() const
+double OmniLight::innerRadius() const
 {
     return m_innerRadius;
 }
 
-void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const
+void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
 {
-    float candela = m_brightness / (Utility::pi * 4.0f);
+    double candela = m_brightness / (Utility::pi * 4.0);
 
     for (auto& photon : photonBlock)
     {

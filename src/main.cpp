@@ -6,12 +6,12 @@
 #include "Image.h"
 #include "LightQueue.h"
 #include "Material.h"
+#include "MaterialLibrary.h"
 #include "MeshVolume.h"
 #include "Object.h"
 #include "ObjReader.h"
 #include "OmniLight.h"
 #include "Photon.h"
-#include "MaterialLibrary.h"
 #include "Pixel.h"
 #include "Plane.h"
 #include "PlaneVolume.h"
@@ -48,7 +48,7 @@ constexpr size_t renderFrameCount = frameCount;
 
 constexpr size_t imageWidth = 512;
 constexpr size_t imageHeight = 512;
-constexpr float verticalFieldOfView = 80.0f;
+constexpr double verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
 const std::string outputName = "bounce_test_0";
@@ -138,8 +138,8 @@ int main(int argc, char** argv)
 
         const size_t pixelCount = image->width() * image->height();
 
-        float pitchStep = camera->verticalFieldOfView() / static_cast<float>(image->height());
-        float yawStep = camera->horizontalFieldOfView() / static_cast<float>(image->width());
+        double pitchStep = camera->verticalFieldOfView() / static_cast<double>(image->height());
+        double yawStep = camera->horizontalFieldOfView() / static_cast<double>(image->width());
 
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
@@ -178,7 +178,7 @@ int main(int argc, char** argv)
             });
         }
 
-        float rotationStep = 360.0f / static_cast<float>(frameCount);
+        double rotationStep = 360.0f / static_cast<double>(frameCount);
 
         for (size_t frame = startFrame; frame < startFrame + renderFrameCount; ++frame)
         {

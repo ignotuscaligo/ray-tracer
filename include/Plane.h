@@ -11,5 +11,5 @@ struct Plane
     bool pointAbovePlane(const Vector& point) const;
 
     Vector normal;
-    float dot;
+    double dot;
 };

@@ -14,12 +14,12 @@ public:
     void color(const Color& color);
     Color color() const;
 
-    void brightness(float brightness);
-    float brightness() const;
+    void brightness(double brightness);
+    double brightness() const;
 
-    virtual void emit(WorkQueue<Photon>::Block photonBlock, float photonBrightness, RandomGenerator& generator) const;
+    virtual void emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const;
 
 protected:
     Color m_color;
-    float m_brightness = 0;
+    double m_brightness = 0;
 };

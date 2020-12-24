@@ -8,8 +8,8 @@ struct Quaternion;
 struct Pyramid
 {
     Pyramid() = default;
-    Pyramid(const Vector& position, const Quaternion& rotation, float verticalFieldOfView, float horizontalFieldOfView);
-    Pyramid(const Vector& position, const Quaternion& rotation, float pitch, float yaw, float pitchStep, float yawStep);
+    Pyramid(const Vector& position, const Quaternion& rotation, double verticalFieldOfView, double horizontalFieldOfView);
+    Pyramid(const Vector& position, const Quaternion& rotation, double pitch, double yaw, double pitchStep, double yawStep);
 
     bool containsPoint(const Vector& point) const;
     bool intersectsBounds(const Bounds& bounds) const;
@@ -19,6 +19,6 @@ struct Pyramid
     Vector direction;
     Vector vertical;
     Vector horizontal;
-    float verticalDot = 0;
-    float horizontalDot = 0;
+    double verticalDot = 0;
+    double horizontalDot = 0;
 };

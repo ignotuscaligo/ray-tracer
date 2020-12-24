@@ -4,14 +4,14 @@
 
 struct Limits
 {
-    float min;
-    float max;
+    double min;
+    double max;
 
     Limits();
-    Limits(float imin, float imax);
-    Limits(float value);
+    Limits(double imin, double imax);
+    Limits(double value);
 
-    bool contains(float value) const;
+    bool contains(double value) const;
     bool intersects(const Limits& other) const;
 
     Limits operator=(const Limits& rhs);

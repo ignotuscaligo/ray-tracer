@@ -27,7 +27,7 @@ public:
         size_t nodeDepth() const;
 
         Axis axis = Axis::X;
-        float pivot = 0;
+        double pivot = 0;
         Bounds bounds;
         int depth = 0;
         std::shared_ptr<Node> left;
@@ -48,9 +48,9 @@ public:
 
 private:
     static const Vector& getPivot(const T& object);
-    static float getPivot(const T& object, Axis axis);
+    static double getPivot(const T& object, Axis axis);
     static Bounds getBounds(const T& object);
-    static float axisMedian(const std::vector<T>& objects, Axis axis);
+    static double axisMedian(const std::vector<T>& objects, Axis axis);
     static void castRayIntoNode(const Ray& ray, std::shared_ptr<Node> node, std::vector<Hit>& hits);
     static void fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr<Node> node, std::vector<T>& objects);
     static std::optional<Hit> rayIntersectsObject(const Ray& ray, const T& object);
