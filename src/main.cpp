@@ -37,21 +37,21 @@ namespace
 
 constexpr size_t million = 1000000;
 
-constexpr size_t queueSize = 5 * million;
-constexpr size_t photonsPerLight = 2 * million;
+constexpr size_t queueSize = 10 * million;
+constexpr size_t photonsPerLight = 100 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
-constexpr size_t startFrame = 0;
+constexpr size_t startFrame = 88;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = frameCount;
+constexpr size_t renderFrameCount = 1;
 
-constexpr size_t imageWidth = 512;
-constexpr size_t imageHeight = 512;
+constexpr size_t imageWidth = 1080;
+constexpr size_t imageHeight = 1080;
 constexpr double verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "bounce_test_0";
+const std::string outputName = "ray_debugging_0";
 
 }
 
@@ -79,7 +79,7 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), ObjReader::loadMesh(knotMeshFile)));
-        std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Red"), ObjReader::loadMesh(cubeMeshFile)));
+        std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Cyan"), ObjReader::loadMesh(cubeMeshFile)));
         std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("White")));
         std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
