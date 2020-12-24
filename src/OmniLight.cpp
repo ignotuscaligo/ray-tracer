@@ -31,7 +31,9 @@ void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, float photonBrightnes
         {
             offset = Vector::random(generator, m_innerRadius);
         }
+
         photon.ray = {position() + offset, direction};
         photon.color = m_color * (candela * photonBrightness);
+        photon.bounces = 0;
     }
 }
