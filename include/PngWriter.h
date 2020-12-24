@@ -10,15 +10,18 @@ class PngWriter
 {
 public:
     PngWriter(const std::string& filename);
+    PngWriter(const PngWriter& other) = delete;
     ~PngWriter();
 
-    bool valid();
+    bool valid() const noexcept;
 
-    png_structp structPtr();
-    png_infop infoPtr();
+    png_structp structPtr() noexcept;
+    png_infop infoPtr() noexcept;
 
     void setTitle(const std::string& title);
     void writeImage(Image& image);
+
+    PngWriter& operator=(const PngWriter& other) = delete;
 
     static void writeImage(const std::string& filename, Image& image, const std::string& title);
 

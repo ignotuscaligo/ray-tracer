@@ -36,7 +36,7 @@ PngWriter::~PngWriter()
 
     if (m_structPtr != nullptr)
     {
-        png_destroy_write_struct(&m_structPtr, (png_infopp)nullptr);
+        png_destroy_write_struct(&m_structPtr, static_cast<png_infopp>(nullptr));
     }
 
     if (m_file != nullptr)
@@ -45,19 +45,19 @@ PngWriter::~PngWriter()
     }
 }
 
-bool PngWriter::valid()
+bool PngWriter::valid() const noexcept
 {
     return m_file != nullptr &&
         m_structPtr != nullptr &&
         m_infoPtr != nullptr;
 }
 
-png_structp PngWriter::structPtr()
+png_structp PngWriter::structPtr() noexcept
 {
     return m_structPtr;
 }
 
-png_infop PngWriter::infoPtr()
+png_infop PngWriter::infoPtr() noexcept
 {
     return m_infoPtr;
 }
@@ -70,10 +70,13 @@ void PngWriter::setTitle(const std::string& title)
     }
 
     png_text title_text;
+    png_charp titleString = new char[title.size() + 1];
+    strcpy(titleString, title.c_str());
     title_text.compression = PNG_TEXT_COMPRESSION_NONE;
     title_text.key = "Title";
-    title_text.text = (png_charp)title.c_str();
+    title_text.text = titleString;
     png_set_text(m_structPtr, m_infoPtr, &title_text, 1);
+    delete[] titleString;
 }
 
 void PngWriter::writeImage(Image& image)
@@ -91,10 +94,10 @@ void PngWriter::writeImage(Image& image)
     png_write_info(m_structPtr, m_infoPtr);
 
     // Copy image data
-    png_bytepp rowPointers = (png_bytepp)new png_bytep[sizeof(png_bytep) * image.height()];
+    png_bytepp rowPointers = static_cast<png_bytepp>(new png_bytep[sizeof(png_bytep) * image.height()]);
     for (size_t y = 0; y < image.height(); ++y)
     {
-        rowPointers[y] = (png_bytep)new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)];
+        rowPointers[y] = static_cast<png_bytep>(new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)]);
         for (size_t x = 0; x < image.width(); ++x)
         {
             for (size_t k = 0; k < 3; ++k)
@@ -109,6 +112,13 @@ void PngWriter::writeImage(Image& image)
 
     // End write
     png_write_end(m_structPtr, nullptr);
+
+    for (size_t y = 0; y < image.height(); ++y)
+    {
+        delete[] rowPointers[y];
+    }
+
+    delete[] rowPointers;
 }
 
 void PngWriter::writeImage(const std::string& filename, Image& image, const std::string& title)

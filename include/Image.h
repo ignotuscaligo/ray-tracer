@@ -3,22 +3,22 @@
 #include "Pixel.h"
 
 #include <memory>
+#include <vector>
 
 class Image
 {
 public:
     Image(size_t width, size_t height);
 
-    size_t width() const;
-    size_t height() const;
+    size_t width() const noexcept;
+    size_t height() const noexcept;
 
-    Pixel* getRow(size_t row);
-    void setPixel(size_t x, size_t y, Pixel pixel);
+    void setPixel(size_t x, size_t y, Pixel pixel) noexcept;
     Pixel& getPixel(size_t x, size_t y);
     void clear();
 
 private:
     size_t m_width;
     size_t m_height;
-    std::unique_ptr<Pixel> m_pixels;
+    std::vector<Pixel> m_pixels;
 };
