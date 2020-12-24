@@ -109,15 +109,15 @@ void PngWriter::writeImage(Image& image)
     png_write_info(m_structPtr, m_infoPtr);
 
     // Copy image data
-    png_bytepp rowPointers = static_cast<png_bytepp>(new png_bytep[sizeof(png_bytep) * image.height()]);
+    png_bytepp rowPointers = new png_bytep[sizeof(png_bytep) * image.height()];
     for (size_t y = 0; y < image.height(); ++y)
     {
-        rowPointers[y] = static_cast<png_bytep>(new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)]);
+        rowPointers[y] = new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)];
         for (size_t x = 0; x < image.width(); ++x)
         {
             for (size_t k = 0; k < 3; ++k)
             {
-                png_save_uint_16(&rowPointers[y][(x * 6) + (k * 2)], image.getPixel(x, y)[k]);
+                png_save_uint_16(&(rowPointers[y][(x * 6) + (k * 2)]), image.getPixel(x, y)[k]);
             }
         }
     }

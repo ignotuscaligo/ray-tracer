@@ -12,8 +12,34 @@
 #include <limits>
 #include <string>
 
+namespace
+{
+
+// Find the next non-zero bound, if available
+Axis nextNonZeroAxis(const Bounds& bounds, Axis axis) noexcept
+{
+    Limits limits = bounds.getLimits(axis);
+    Axis validAxis = axis;
+
+    while (limits.max - limits.min <= std::numeric_limits<double>::epsilon())
+    {
+        validAxis = nextAxis(validAxis);
+
+        if (validAxis == axis)
+        {
+            break;
+        }
+
+        limits = bounds.getLimits(validAxis);
+    }
+
+    return validAxis;
+}
+
+}
+
 template<typename T>
-size_t Tree<T>::Node::size() const
+size_t Tree<T>::Node::size() const noexcept
 {
     size_t count = 0;
 
@@ -36,7 +62,7 @@ size_t Tree<T>::Node::size() const
 }
 
 template<typename T>
-size_t Tree<T>::Node::nodeCount() const
+size_t Tree<T>::Node::nodeCount() const noexcept
 {
     size_t count = 1;
 
@@ -54,7 +80,7 @@ size_t Tree<T>::Node::nodeCount() const
 }
 
 template<typename T>
-size_t Tree<T>::Node::nodeDepth() const
+size_t Tree<T>::Node::nodeDepth() const noexcept
 {
     size_t depth = 1;
 
@@ -79,25 +105,25 @@ Tree<T>::Tree(const std::vector<T>& objects, size_t pageSize)
 }
 
 template<typename T>
-std::shared_ptr<typename Tree<T>::Node> Tree<T>::root()
+std::shared_ptr<typename Tree<T>::Node> Tree<T>::root() noexcept
 {
     return m_root;
 }
 
 template<typename T>
-size_t Tree<T>::size() const
+size_t Tree<T>::size() const noexcept
 {
     return m_root->size();
 }
 
 template<typename T>
-size_t Tree<T>::nodeCount() const
+size_t Tree<T>::nodeCount() const noexcept
 {
     return m_root->nodeCount();
 }
 
 template<typename T>
-size_t Tree<T>::nodeDepth() const
+size_t Tree<T>::nodeDepth() const noexcept
 {
     return m_root->nodeDepth();
 }
@@ -107,7 +133,7 @@ std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
 {
     std::vector<Hit> hits;
 
-    Tree<T>::castRayIntoNode(ray, m_root, hits);
+    Tree<T>::castRayIntoNode(ray, *m_root, hits);
 
     double minDistance = std::numeric_limits<double>::max();
     std::optional<Hit> result;
@@ -125,7 +151,7 @@ std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
 }
 
 template<typename T>
-std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const
+std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept
 {
     // std::cout << "--- fetchWithinPyramid ---" << std::endl;
     std::vector<T> objects;
@@ -136,19 +162,19 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const
 }
 
 template<typename T>
-const Vector& Tree<T>::getPivot(const T& object)
+const Vector& Tree<T>::getPivot(const T& object) noexcept
 {
     return {};
 }
 
 template<typename T>
-double Tree<T>::getPivot(const T& object, Axis axis)
+double Tree<T>::getPivot(const T& object, Axis axis) noexcept
 {
     return 0.0;
 }
 
 template<typename T>
-Bounds Tree<T>::getBounds(const T& object)
+Bounds Tree<T>::getBounds(const T& object) noexcept
 {
     return {};
 }
@@ -156,7 +182,7 @@ Bounds Tree<T>::getBounds(const T& object)
 template<typename T>
 double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
 {
-    size_t size = objects.size();
+    const size_t size = objects.size();
 
     if (size == 0)
     {
@@ -176,7 +202,7 @@ double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
 
     std::sort(pivots.begin(), pivots.end());
 
-    size_t middle = size / 2;
+    const size_t middle = size / 2;
     double median = pivots[middle];
 
     if (size % 2 == 0)
@@ -189,15 +215,15 @@ double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
 }
 
 template<typename T>
-void Tree<T>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<T>::Node> node, std::vector<Hit>& hits)
+void Tree<T>::castRayIntoNode(const Ray& ray, Tree<T>::Node& node, std::vector<Hit>& hits)
 {
     std::optional<Hit> hit;
 
-    if (rayIntersectsBounds(ray, node->bounds))
+    if (rayIntersectsBounds(ray, node.bounds))
     {
-        if (node->page)
+        if (node.page)
         {
-            for (const auto& object : node->page->contents)
+            for (const auto& object : node.page->contents)
             {
                 hit = Tree<T>::rayIntersectsObject(ray, object);
 
@@ -208,20 +234,20 @@ void Tree<T>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<T>::Node> nod
             }
         }
 
-        if (node->left)
+        if (node.left)
         {
-            castRayIntoNode(ray, node->left, hits);
+            castRayIntoNode(ray, *node.left, hits);
         }
 
-        if (node->right)
+        if (node.right)
         {
-            castRayIntoNode(ray, node->right, hits);
+            castRayIntoNode(ray, *node.right, hits);
         }
     }
 }
 
 template<typename T>
-void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr<Node> node, std::vector<T>& objects)
+void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr<Node> node, std::vector<T>& objects) noexcept
 {
     if (pyramid.intersectsBounds(node->bounds))
     {
@@ -270,30 +296,9 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
 }
 
 template<typename T>
-std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& ray, const T& object)
+std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& ray, const T& object) noexcept
 {
     return std::nullopt;
-}
-
-// Find the next non-zero bound, if available
-Axis nextNonZeroAxis(const Bounds& bounds, Axis axis)
-{
-    Limits limits = bounds.getLimits(axis);
-    Axis validAxis = axis;
-
-    while (limits.max - limits.min <= std::numeric_limits<double>::epsilon())
-    {
-        validAxis = nextAxis(validAxis);
-
-        if (validAxis == axis)
-        {
-            break;
-        }
-
-        limits = bounds.getLimits(validAxis);
-    }
-
-    return validAxis;
 }
 
 template<typename T>
@@ -335,7 +340,7 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 
         for (const auto& object : objects)
         {
-            double pivot = Tree<T>::getPivot(object, node->axis);
+            const double pivot = Tree<T>::getPivot(object, node->axis);
             if (pivot < node->pivot)
             {
                 leftObjects.push_back(object);
@@ -373,77 +378,77 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 }
 
 template<>
-const Vector& Tree<Triangle>::getPivot(const Triangle& object)
+const Vector& Tree<Triangle>::getPivot(const Triangle& object) noexcept
 {
     return object.center;
 }
 
 template<>
-double Tree<Triangle>::getPivot(const Triangle& object, Axis axis)
+double Tree<Triangle>::getPivot(const Triangle& object, Axis axis) noexcept
 {
     return object.center.getAxis(axis);
 }
 
 template<>
-Bounds Tree<Triangle>::getBounds(const Triangle& object)
+Bounds Tree<Triangle>::getBounds(const Triangle& object) noexcept
 {
     return object.getBounds();
 }
 
 template<>
-std::optional<Hit> Tree<Triangle>::rayIntersectsObject(const Ray& ray, const Triangle& object)
+std::optional<Hit> Tree<Triangle>::rayIntersectsObject(const Ray& ray, const Triangle& object) noexcept
 {
     return rayIntersectsTriangle(ray, object);
 }
 
-template size_t Tree<Triangle>::Node::size() const;
-template size_t Tree<Triangle>::Node::nodeCount() const;
-template size_t Tree<Triangle>::Node::nodeDepth() const;
+template size_t Tree<Triangle>::Node::size() const noexcept;
+template size_t Tree<Triangle>::Node::nodeCount() const noexcept;
+template size_t Tree<Triangle>::Node::nodeDepth() const noexcept;
 template Tree<Triangle>::Tree(const std::vector<Triangle>& objects, size_t pageSize);
-template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::root();
-template size_t Tree<Triangle>::size() const;
-template size_t Tree<Triangle>::nodeCount() const;
-template size_t Tree<Triangle>::nodeDepth() const;
+template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::root() noexcept;
+template size_t Tree<Triangle>::size() const noexcept;
+template size_t Tree<Triangle>::nodeCount() const noexcept;
+template size_t Tree<Triangle>::nodeDepth() const noexcept;
 template std::optional<Hit> Tree<Triangle>::castRay(const Ray& ray) const;
-template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid& pyramid) const;
+template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
 template double Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
-template void Tree<Triangle>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<Triangle>::Node> node, std::vector<Hit>& hits);
+template void Tree<Triangle>::castRayIntoNode(const Ray& ray, Tree<Triangle>::Node& node, std::vector<Hit>& hits);
 template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::generateTree(const std::vector<Triangle>& objects, Axis axis);
 
 template<>
-const Vector& Tree<PhotonHit>::getPivot(const PhotonHit& object)
+const Vector& Tree<PhotonHit>::getPivot(const PhotonHit& object) noexcept
 {
     return object.hit.position;
 }
 
 template<>
-double Tree<PhotonHit>::getPivot(const PhotonHit& object, Axis axis)
+double Tree<PhotonHit>::getPivot(const PhotonHit& object, Axis axis) noexcept
 {
     return object.hit.position.getAxis(axis);
 }
 
 template<>
-Bounds Tree<PhotonHit>::getBounds(const PhotonHit& object)
+Bounds Tree<PhotonHit>::getBounds(const PhotonHit& object) noexcept
 {
     return {object.hit.position};
 }
 
 template<>
-std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& ray, const PhotonHit& object)
+std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& ray, const PhotonHit& object) noexcept
 {
     return std::nullopt;
 }
 
-template size_t Tree<PhotonHit>::Node::size() const;
-template size_t Tree<PhotonHit>::Node::nodeCount() const;
-template size_t Tree<PhotonHit>::Node::nodeDepth() const;
+template size_t Tree<PhotonHit>::Node::size() const noexcept;
+template size_t Tree<PhotonHit>::Node::nodeCount() const noexcept;
+template size_t Tree<PhotonHit>::Node::nodeDepth() const noexcept;
 template Tree<PhotonHit>::Tree(const std::vector<PhotonHit>& objects, size_t pageSize);
-template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::root();
-template size_t Tree<PhotonHit>::size() const;
-template size_t Tree<PhotonHit>::nodeCount() const;
-template size_t Tree<PhotonHit>::nodeDepth() const;
+template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::root() noexcept;
+template size_t Tree<PhotonHit>::size() const noexcept;
+template size_t Tree<PhotonHit>::nodeCount() const noexcept;
+template size_t Tree<PhotonHit>::nodeDepth() const noexcept;
 template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray) const;
-template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const;
+template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
 template double Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);
-template void Tree<PhotonHit>::castRayIntoNode(const Ray& ray, std::shared_ptr<Tree<PhotonHit>::Node> node, std::vector<Hit>& hits);
+template void Tree<PhotonHit>::castRayIntoNode(const Ray& ray, Tree<PhotonHit>::Node& node, std::vector<Hit>& hits);
 template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::generateTree(const std::vector<PhotonHit>& objects, Axis axis);

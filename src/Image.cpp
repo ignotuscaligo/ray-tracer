@@ -21,20 +21,20 @@ size_t Image::height() const noexcept
     return m_height;
 }
 
-void Image::setPixel(size_t x, size_t y, Pixel pixel)
+void Image::setPixel(size_t x, size_t y, Pixel pixel) noexcept
 {
     if (x >= m_width || y >= m_height)
     {
         return;
     }
 
-    m_pixels.at((y * m_width) + x) = pixel;
+    m_pixels[(y * m_width) + x] = pixel;
 }
 
-Pixel& Image::getPixel(size_t x, size_t y)
+Pixel& Image::getPixel(size_t x, size_t y) noexcept
 {
     assert(x < m_width && y < m_height);
-    return m_pixels.at((y * m_width) + x);
+    return m_pixels[(y * m_width) + x];
 }
 
 void Image::clear()

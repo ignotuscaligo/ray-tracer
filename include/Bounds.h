@@ -4,39 +4,39 @@
 
 struct Limits
 {
-    double min;
-    double max;
+    Limits() = default;
+    Limits(double min, double max) noexcept;
+    Limits(double value) noexcept;
 
-    Limits();
-    Limits(double imin, double imax);
-    Limits(double value);
+    bool contains(double value) const noexcept;
+    bool intersects(const Limits& other) const noexcept;
 
-    bool contains(double value) const;
-    bool intersects(const Limits& other) const;
+    Limits operator=(const Limits& rhs) noexcept;
+    Limits operator+=(const Limits& rhs) noexcept;
 
-    Limits operator=(const Limits& rhs);
-    Limits operator+=(const Limits& rhs);
+    double min = 0.0;
+    double max = 0.0;
 };
 
 struct Bounds
 {
+    Bounds() = default;
+    Bounds(Limits x, Limits y, Limits z) noexcept;
+    Bounds(Vector vector) noexcept;
+    Bounds(Vector min, Vector max) noexcept;
+
+    void extend(Limits limits, Axis axis) noexcept;
+    Limits getLimits(Axis axis) const noexcept;
+    Limits operator[](Axis axis) const noexcept;
+    bool contains(const Vector& vector) const noexcept;
+    bool intersects(const Bounds& other) const noexcept;
+    Vector minimum() const noexcept;
+    Vector maximum() const noexcept;
+
+    Bounds operator=(const Bounds& rhs) noexcept;
+    Bounds operator+=(const Bounds& rhs) noexcept;
+
     Limits x;
     Limits y;
     Limits z;
-
-    Bounds();
-    Bounds(Limits ix, Limits iy, Limits iz);
-    Bounds(Vector vector);
-    Bounds(Vector min, Vector max);
-
-    void extend(Limits limits, Axis axis);
-    Limits getLimits(Axis axis) const;
-    Limits operator[](Axis axis) const;
-    bool contains(const Vector& vector) const;
-    bool intersects(const Bounds& other) const;
-    Vector minimum() const;
-    Vector maximum() const;
-
-    Bounds operator=(const Bounds& rhs);
-    Bounds operator+=(const Bounds& rhs);
 };

@@ -16,19 +16,12 @@ struct Triangle
     Vector cNormal;
 
     Triangle() = default;
-    Triangle(Vector ia, Vector ib, Vector ic);
+    Triangle(Vector ia, Vector ib, Vector ic) noexcept;
 
-    Limits getLimits(Axis axis) const;
-    Bounds getBounds() const;
-    Vector getPosition(const Vector& coords) const;
-    Vector getNormal(const Vector& coords) const;
+    Limits getLimits(Axis axis) const noexcept;
+    Bounds getBounds() const noexcept;
+    Vector getPosition(const Vector& coords) const noexcept;
+    Vector getNormal(const Vector& coords) const noexcept;
 };
 
-static Triangle operator+(const Triangle& lhs, const Vector& rhs)
-{
-	return Triangle(
-		lhs.a + rhs,
-		lhs.b + rhs,
-		lhs.c + rhs
-	);
-}
+static Triangle operator+(const Triangle& lhs, const Vector& rhs) noexcept;

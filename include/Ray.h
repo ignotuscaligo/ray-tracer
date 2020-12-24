@@ -14,10 +14,10 @@ struct Ray
     Vector direction;
 
     Ray() = default;
-    Ray(Vector iorigin, Vector idirection);
+    Ray(Vector iorigin, Vector idirection) noexcept;
 };
 
-bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds);
+bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds) noexcept;
 
-std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle);
-std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane);
+std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle) noexcept;
+std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane) noexcept;

@@ -7,13 +7,13 @@
 #include <limits>
 #include <iostream>
 
-Ray::Ray(Vector iorigin, Vector idirection)
+Ray::Ray(Vector iorigin, Vector idirection) noexcept
     : origin(iorigin)
     , direction(idirection)
 {
 }
 
-bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds)
+bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds) noexcept
 {
     double tmin = 0.0;
     double tmax = std::numeric_limits<double>::max();
@@ -34,7 +34,7 @@ bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds)
         }
         else
         {
-            double ood = 1.0 / direction;
+            const double ood = 1.0 / direction;
             double t1 = (limits.min - origin) * ood;
             double t2 = (limits.max - origin) * ood;
 
@@ -56,32 +56,32 @@ bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds)
     return true;
 }
 
-std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle)
+std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle) noexcept
 {
     Hit hit;
 
-    Vector ab = triangle.b - triangle.a;
-    Vector ac = triangle.c - triangle.a;
-    Vector qp = -ray.direction;
+    const Vector ab = triangle.b - triangle.a;
+    const Vector ac = triangle.c - triangle.a;
+    const Vector qp = -ray.direction;
 
-    Vector n = Vector::cross(ab, ac);
+    const Vector n = Vector::cross(ab, ac);
 
-    double d = Vector::dot(qp, n);
+    const double d = Vector::dot(qp, n);
 
     if (d <= 0.0)
     {
         return std::nullopt;
     }
 
-    Vector ap = ray.origin - triangle.a;
-    double t = Vector::dot(ap, n);
+    const Vector ap = ray.origin - triangle.a;
+    const double t = Vector::dot(ap, n);
 
     if (t < 0.0)
     {
         return std::nullopt;
     }
 
-    Vector e = Vector::cross(qp,ap);
+    const Vector e = Vector::cross(qp,ap);
     double v = Vector::dot(ac, e);
     if (v < 0.0 || v > d)
     {
@@ -94,13 +94,12 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
         return std::nullopt;
     }
 
-    double ood = 1.0 / d;
-    t *= ood;
+    const double ood = 1.0 / d;
     v *= ood;
     w *= ood;
-    double u = 1.0 - v - w;
+    const double u = 1.0 - v - w;
 
-    Vector coords{u, v, w};
+    const Vector coords{u, v, w};
     hit.position = triangle.getPosition(coords);
     hit.normal = triangle.getNormal(coords).normalize();
     hit.distance = (hit.position - ray.origin).magnitude();
@@ -108,16 +107,16 @@ std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangl
     return hit;
 }
 
-std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane)
+std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane) noexcept
 {
-    double dot = Vector::dot(plane.normal, ray.direction);
+    const double dot = Vector::dot(plane.normal, ray.direction);
 
     if (std::abs(dot) <= std::numeric_limits<double>::epsilon())
     {
         return std::nullopt;
     }
 
-    double t = (plane.dot - Vector::dot(plane.normal, ray.origin)) / dot;
+    const double t = (plane.dot - Vector::dot(plane.normal, ray.origin)) / dot;
 
     if (t < 0.0)
     {

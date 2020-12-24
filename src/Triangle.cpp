@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <initializer_list>
 
-Triangle::Triangle(Vector ia, Vector ib, Vector ic)
+Triangle::Triangle(Vector ia, Vector ib, Vector ic) noexcept
     : a(ia)
     , b(ib)
     , c(ic)
@@ -12,17 +12,17 @@ Triangle::Triangle(Vector ia, Vector ib, Vector ic)
         (a.y + b.y + c.y) / 3.0,
         (a.z + b.z + c.z) / 3.0)
 {
-    Vector ab = b - a;
-    Vector ac = c - a;
+    const Vector ab = b - a;
+    const Vector ac = c - a;
     normal = Vector::cross(ab, ac);
     normal.normalize();
 }
 
-Limits Triangle::getLimits(Axis axis) const
+Limits Triangle::getLimits(Axis axis) const noexcept
 {
     Limits limits;
 
-    std::initializer_list<double> values = {a.getAxis(axis), b.getAxis(axis), c.getAxis(axis)};
+    const std::initializer_list<double> values = {a.getAxis(axis), b.getAxis(axis), c.getAxis(axis)};
 
     limits.min = std::min(values);
     limits.max = std::max(values);
@@ -30,7 +30,7 @@ Limits Triangle::getLimits(Axis axis) const
     return limits;
 }
 
-Bounds Triangle::getBounds() const
+Bounds Triangle::getBounds() const noexcept
 {
     return {
         getLimits(Axis::X),
@@ -39,12 +39,21 @@ Bounds Triangle::getBounds() const
     };
 }
 
-Vector Triangle::getPosition(const Vector& coords) const
+Vector Triangle::getPosition(const Vector& coords) const noexcept
 {
     return (coords.x * a) + (coords.y * b) + (coords.z * c);
 }
 
-Vector Triangle::getNormal(const Vector& coords) const
+Vector Triangle::getNormal(const Vector& coords) const noexcept
 {
     return (coords.x * aNormal) + (coords.y * bNormal) + (coords.z * cNormal);
+}
+
+Triangle operator+(const Triangle& lhs, const Vector& rhs) noexcept
+{
+    return Triangle(
+        lhs.a + rhs,
+        lhs.b + rhs,
+        lhs.c + rhs
+    );
 }
