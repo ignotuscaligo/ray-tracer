@@ -20,21 +20,21 @@ double SpotLight::innerRadius() const
 
 void SpotLight::angle(double angle)
 {
-    m_angle = std::min(std::max(0.0, angle), 360.0);
+    m_angle = std::min(std::max(0.0, angle), Utility::pi2);
     double coneAngle = m_angle;
 
-    if (m_angle > 180.0)
+    if (m_angle > Utility::pi)
     {
-        coneAngle = 360.0 - m_angle;
+        coneAngle = Utility::pi2 - m_angle;
     }
 
     double coneHeight = std::sin(coneAngle / 2.0);
     double capHeight = 1.0 - coneHeight;
-    m_area = 2.0 * Utility::pi * capHeight;
+    m_area = Utility::pi2 * capHeight;
 
-    if (m_angle > 180.0)
+    if (m_angle > Utility::pi)
     {
-        m_area = (Utility::pi * 4.0) - m_area;
+        m_area = Utility::pi4 - m_area;
     }
 
     m_angleGenerator.maxAngle = m_angle / 2.0;

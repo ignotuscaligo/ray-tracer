@@ -7,6 +7,8 @@ namespace Utility
 {
 
 extern const double pi;
+extern const double pi2;
+extern const double pi4;
 
 void printVector(const Vector& vector);
 void printTriangle(const Triangle& triangle);

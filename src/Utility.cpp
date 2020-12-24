@@ -10,6 +10,8 @@ namespace Utility
 {
 
 const double pi = M_PI;
+const double pi2 = M_PI * 2.0;
+const double pi4 = M_PI * 4.0;
 
 void printVector(const Vector& point)
 {

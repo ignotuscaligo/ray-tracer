@@ -1,7 +1,6 @@
 #include "AngleGenerator.h"
 
 #include "Quaternion.h"
-#include "Utility.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,9 +23,9 @@ double AngleGenerator::generate(RandomGenerator& randomGenerator) const
 
 Vector AngleGenerator::generateOffsetVector(const Vector& center, RandomGenerator& randomGenerator) const
 {
-    double theta = randomGenerator.value(2.0 * Utility::pi);
-    double angle = Utility::radians(map(randomGenerator.value(1.0)));
-    bool useZ = (center.y > center.x && center.y > center.z);
+    double theta = randomGenerator.value(Utility::pi2);
+    double angle = map(randomGenerator.value(1.0));
+    bool useZ = std::abs(Vector::dot(Vector::unitY, center)) > 0.9;
     const Vector& crossAxis = useZ ? Vector::unitZ : Vector::unitY;
 
     Vector offset = Vector::cross(center, crossAxis) * std::sin(angle);
