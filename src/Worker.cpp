@@ -11,6 +11,13 @@
 #include <optional>
 #include <thread>
 
+namespace
+{
+
+constexpr float selfHitThreshold = std::numeric_limits<float>::epsilon();
+
+}
+
 Worker::Worker(size_t index, size_t fetchSize)
     : m_index(index)
     , m_fetchSize(fetchSize)
