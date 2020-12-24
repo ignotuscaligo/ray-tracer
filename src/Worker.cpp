@@ -219,7 +219,7 @@ bool Worker::processPhotons()
 
         hitQueue->ready(hitsBlock);
 
-        size_t bounceThreshold = 1;
+        size_t bounceThreshold = 2;
         size_t bouncedPhotonCount = 0;
 
         for (auto& photonHit : m_hitBuffer)

@@ -18,6 +18,7 @@
 #include "PngWriter.h"
 #include "Pyramid.h"
 #include "Quaternion.h"
+#include "SpotLight.h"
 #include "Utility.h"
 #include "Worker.h"
 #include "WorkQueue.h"
@@ -37,14 +38,14 @@ namespace
 
 constexpr size_t million = 1000000;
 
-constexpr size_t queueSize = 5 * million;
+constexpr size_t queueSize = 10 * million;
 constexpr size_t photonsPerLight = 2 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
-constexpr size_t startFrame = 88;
+constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = 1;
+constexpr size_t renderFrameCount = frameCount;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
@@ -79,12 +80,14 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), ObjReader::loadMesh(knotMeshFile)));
-        std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Cyan"), ObjReader::loadMesh(cubeMeshFile)));
+        // std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Cyan"), ObjReader::loadMesh(cubeMeshFile)));
         std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("White")));
-        std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        // std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight3 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
+        std::shared_ptr<SpotLight> spotLight0 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
+        std::shared_ptr<SpotLight> spotLight1 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
@@ -92,21 +95,23 @@ int main(int argc, char** argv)
         Object::setParent(objectPivot, root);
         Object::setParent(ground, root);
         Object::setParent(knotMesh, root);
-        Object::setParent(omniLight0, root);
+        // Object::setParent(omniLight0, root);
         // Object::setParent(omniLight1, root);
         // Object::setParent(omniLight2, root);
         // Object::setParent(omniLight3, root);
-        Object::setParent(cubeMesh, root);
+        // Object::setParent(cubeMesh, root);
+        Object::setParent(spotLight0, root);
+        Object::setParent(spotLight1, root);
 
         ground->transform.position = {0, -70, 0};
 
-        cubeMesh->transform.position = {0, -70, 0};
+        // cubeMesh->transform.position = {0, -70, 0};
 
-        omniLight0->name("OmniLight0");
-        omniLight0->transform.position = {50, 50, 30};
-        omniLight0->color(Color::fromRGB(255, 255, 255));
-        omniLight0->brightness(10000000);
-        omniLight0->innerRadius(5.0f);
+        // omniLight0->name("OmniLight0");
+        // omniLight0->transform.position = {50, 50, 30};
+        // omniLight0->color(Color::fromRGB(255, 255, 255));
+        // omniLight0->brightness(10000000);
+        // omniLight0->innerRadius(5.0f);
 
         // omniLight1->name("OmniLight1");
         // omniLight1->transform.position = {43.3f, 50, -25};
@@ -125,6 +130,20 @@ int main(int argc, char** argv)
         // omniLight3->color(Color::fromRGB(255, 255, 255));
         // omniLight3->brightness(80000);
         // omniLight3->innerRadius(5.0f);
+
+        spotLight0->name("SpotLight0");
+        spotLight0->transform.position = {70, 70, 0};
+        spotLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
+        spotLight0->color({1, 1, 0});
+        spotLight0->brightness(10000000);
+        spotLight0->angle(Utility::radians(10.0));
+
+        spotLight1->name("SpotLight1");
+        spotLight1->transform.position = {-70, 70, 0};
+        spotLight1->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
+        spotLight1->color({0, 1, 1});
+        spotLight1->brightness(10000000);
+        spotLight1->angle(Utility::radians(10.0));
 
         camera->transform.position = {0.0f, 0.0f, 100.0f};
         camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
@@ -198,12 +217,7 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Animating objects" << std::endl;
 
-            // objectPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(frame * rotationStep), 0);
-
             knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(frame * -rotationStep), Utility::radians(frame * rotationStep), Utility::radians(frame * rotationStep * 2));
-            // knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(0, 0, Utility::radians(frame * rotationStep * 2));
-
-            // omniLight1->transform.position = {-40, frame * (-18.0f / static_cast<float>(frameCount)), -40};
 
             std::cout << "---" << std::endl;
             std::cout << "Initializing lights" << std::endl;
