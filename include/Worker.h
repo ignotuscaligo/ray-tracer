@@ -5,6 +5,7 @@
 #include "Image.h"
 #include "LightQueue.h"
 #include "Material.h"
+#include "MaterialLibrary.h"
 #include "Object.h"
 #include "Photon.h"
 #include "RandomGenerator.h"
