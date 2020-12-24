@@ -1,5 +1,21 @@
 #include "MaterialLibrary.h"
 
+#include "Color.h"
+#include "DiffuseMaterial.h"
+
+MaterialLibrary::MaterialLibrary()
+{
+    addMaterial(std::make_shared<DiffuseMaterial>("Default"));
+    addMaterial(std::make_shared<DiffuseMaterial>("White", Color(1.0f, 1.0f, 1.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Black", Color(0.0f, 0.0f, 0.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Red", Color(1.0f, 0.0f, 0.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Yellow", Color(1.0f, 1.0f, 0.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Green", Color(0.0f, 1.0f, 0.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Cyan", Color(0.0f, 1.0f, 1.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Blue", Color(0.0f, 0.0f, 1.0f)));
+    addMaterial(std::make_shared<DiffuseMaterial>("Magenta", Color(1.0f, 0.0f, 1.0f)));
+}
+
 void MaterialLibrary::addMaterial(std::shared_ptr<Material> material)
 {
     if (m_indexMap.count(material->name()) > 0)

@@ -10,6 +10,8 @@
 class MaterialLibrary
 {
 public:
+    MaterialLibrary();
+
     void addMaterial(std::shared_ptr<Material> material);
     size_t indexForName(const std::string& name) const;
     std::shared_ptr<Material> fetchMaterial(const std::string& name) const;
