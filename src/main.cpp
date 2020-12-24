@@ -11,6 +11,7 @@
 #include "ObjReader.h"
 #include "OmniLight.h"
 #include "Photon.h"
+#include "MaterialLibrary.h"
 #include "Pixel.h"
 #include "Plane.h"
 #include "PlaneVolume.h"

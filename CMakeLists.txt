@@ -120,6 +120,9 @@ target_sources(ray-tracer
 
         include/AngleGenerator.h
         src/AngleGenerator.cpp
+
+        include/MaterialLibrary.h
+        src/MaterialLibrary.cpp
 )
 
 target_include_directories(ray-tracer
