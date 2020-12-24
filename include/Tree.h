@@ -35,7 +35,6 @@ public:
         std::unique_ptr<Page> page;
     };
 
-    Tree() = delete;
     Tree(const std::vector<T>& objects, size_t pageSize = 1);
     ~Tree() = default;
 
