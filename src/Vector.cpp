@@ -9,16 +9,11 @@
 
 #define USE_APPX_INV_SQR 0
 
-Axis nextAxis(Axis axis)
-{
-    return static_cast<Axis>((static_cast<int>(axis) + 1) % 3);
-}
-
 const Vector Vector::unitX{1, 0, 0};
 const Vector Vector::unitY{0, 1, 0};
 const Vector Vector::unitZ{0, 0, 1};
 
-Vector::Vector()
+Vector::Vector() noexcept
     : x(0)
     , y(0)
     , z(0)
@@ -26,7 +21,7 @@ Vector::Vector()
 {
 }
 
-Vector::Vector(double ix, double iy, double iz)
+Vector::Vector(double ix, double iy, double iz) noexcept
     : x(ix)
     , y(iy)
     , z(iz)
@@ -34,13 +29,18 @@ Vector::Vector(double ix, double iy, double iz)
 {
 }
 
-Vector::Vector(__m256d&& idata)
-    : data(idata)
+Vector::Vector(__m256d&& idata) noexcept
+    : data(std::move(idata))
     , _w(0)
 {
 }
 
-double Vector::getAxis(Axis axis) const
+Vector::Vector(const Vector& other) noexcept
+    : data(other.data)
+{
+}
+
+double Vector::getAxis(Axis axis) const noexcept
 {
     if (axis == Axis::X)
     {
@@ -56,7 +56,7 @@ double Vector::getAxis(Axis axis) const
     }
 }
 
-double Vector::operator[](Axis axis) const
+double Vector::operator[](Axis axis) const noexcept
 {
     return getAxis(axis);
 }
