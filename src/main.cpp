@@ -138,8 +138,8 @@ int main(int argc, char** argv)
 
         const size_t pixelCount = image->width() * image->height();
 
-        double pitchStep = camera->verticalFieldOfView() / static_cast<double>(image->height());
-        double yawStep = camera->horizontalFieldOfView() / static_cast<double>(image->width());
+        const double pitchStep = camera->verticalFieldOfView() / static_cast<double>(image->height());
+        const double yawStep = camera->horizontalFieldOfView() / static_cast<double>(image->width());
 
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
@@ -149,23 +149,23 @@ int main(int argc, char** argv)
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
         std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
 
-        std::shared_ptr<Worker> workers[workerCount];
+        std::vector<std::shared_ptr<Worker>> workers{workerCount};
 
-        for (size_t i = 0; i < workerCount; ++i)
+        for (auto& worker : workers)
         {
-            workers[i] = std::make_shared<Worker>(i, fetchSize);
-            workers[i]->camera = camera;
-            workers[i]->objects = objects;
-            workers[i]->photonQueue = photonQueue;
-            workers[i]->hitQueue = hitQueue;
-            workers[i]->finalHitQueue = finalHitQueue;
-            workers[i]->buffer = buffer;
-            workers[i]->image = image;
-            workers[i]->materialLibrary = materialLibrary;
-            workers[i]->lightQueue = lightQueue;
+            worker = std::make_shared<Worker>(i, fetchSize);
+            worker->camera = camera;
+            worker->objects = objects;
+            worker->photonQueue = photonQueue;
+            worker->hitQueue = hitQueue;
+            worker->finalHitQueue = finalHitQueue;
+            worker->buffer = buffer;
+            worker->image = image;
+            worker->materialLibrary = materialLibrary;
+            worker->lightQueue = lightQueue;
         }
 
-        std::thread threads[workerCount];
+        std:vector<std::thread> threads{workerCount};
 
         for (size_t i = 0; i < workerCount; ++i)
         {
@@ -178,14 +178,14 @@ int main(int argc, char** argv)
             });
         }
 
-        double rotationStep = 360.0f / static_cast<double>(frameCount);
+        const double rotationStep = 360.0f / static_cast<double>(frameCount);
 
         for (size_t frame = startFrame; frame < startFrame + renderFrameCount; ++frame)
         {
             std::cout << "---" << std::endl;
             std::cout << "Rendering frame " << frame + 1 << " / " << startFrame + renderFrameCount << std::endl;
 
-            std::chrono::time_point renderStart = std::chrono::system_clock::now();
+            const std::chrono::time_point renderStart = std::chrono::system_clock::now();
 
             std::cout << "---" << std::endl;
             std::cout << "Clearing buffer and image" << std::endl;
@@ -263,17 +263,17 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Writing buffer to image" << std::endl;
 
-            std::chrono::time_point writeImageStart = std::chrono::system_clock::now();
+            const std::chrono::time_point writeImageStart = std::chrono::system_clock::now();
 
             for (size_t y = 0; y < imageHeight; ++y)
             {
                 for (size_t x = 0; x < imageWidth; ++x)
                 {
-                    Color color = buffer->fetchColor({x, y});
+                    const Color color = buffer->fetchColor({x, y});
 
-                    float gammaRed = std::pow(color.red, 1.0f / Color::gamma);
-                    float gammaGreen = std::pow(color.green, 1.0f / Color::gamma);
-                    float gammaBlue = std::pow(color.blue, 1.0f / Color::gamma);
+                    const float gammaRed = std::pow(color.red, 1.0f / Color::gamma);
+                    const float gammaGreen = std::pow(color.green, 1.0f / Color::gamma);
+                    const float gammaBlue = std::pow(color.blue, 1.0f / Color::gamma);
 
                     workingPixel.red = std::min(static_cast<int>(gammaRed * 65535), 65535);
                     workingPixel.green = std::min(static_cast<int>(gammaGreen * 65535), 65535);
@@ -285,8 +285,8 @@ int main(int argc, char** argv)
 
             PngWriter::writeImage(renderPath + "\\" + outputName + "." + std::to_string(frame) + ".png", *image, outputName);
 
-            std::chrono::time_point writeImageEnd = std::chrono::system_clock::now();
-            std::chrono::microseconds writeImageDuration = std::chrono::duration_cast<std::chrono::microseconds>(writeImageEnd - writeImageStart);
+            const std::chrono::time_point writeImageEnd = std::chrono::system_clock::now();
+            const std::chrono::microseconds writeImageDuration = std::chrono::duration_cast<std::chrono::microseconds>(writeImageEnd - writeImageStart);
 
             std::cout << "---" << std::endl;
             std::cout << "Collecting metrics" << std::endl;
@@ -301,34 +301,34 @@ int main(int argc, char** argv)
             size_t hitDuration = 0;
             size_t writeDuration = 0;
 
-            for (size_t i = 0; i < workerCount; ++i)
+            for (auto& worker : workers)
             {
-                emitProcessed += workers[i]->emitProcessed;
-                photonsProcessed += workers[i]->photonsProcessed;
-                hitsProcessed += workers[i]->hitsProcessed;
-                finalHitsProcessed += workers[i]->finalHitsProcessed;
-                workers[i]->emitProcessed = 0;
-                workers[i]->photonsProcessed = 0;
-                workers[i]->hitsProcessed = 0;
-                workers[i]->finalHitsProcessed = 0;
+                emitProcessed += worker->emitProcessed;
+                photonsProcessed += worker->photonsProcessed;
+                hitsProcessed += worker->hitsProcessed;
+                finalHitsProcessed += worker->finalHitsProcessed;
+                worker->emitProcessed = 0;
+                worker->photonsProcessed = 0;
+                worker->hitsProcessed = 0;
+                worker->finalHitsProcessed = 0;
 
-                emitDuration += workers[i]->emitDuration;
-                photonDuration += workers[i]->photonDuration;
-                hitDuration += workers[i]->hitDuration;
-                writeDuration += workers[i]->writeDuration;
-                workers[i]->emitDuration = 0;
-                workers[i]->photonDuration = 0;
-                workers[i]->hitDuration = 0;
-                workers[i]->writeDuration = 0;
+                emitDuration += worker->emitDuration;
+                photonDuration += worker->photonDuration;
+                hitDuration += worker->hitDuration;
+                writeDuration += worker->writeDuration;
+                worker->emitDuration = 0;
+                worker->photonDuration = 0;
+                worker->hitDuration = 0;
+                worker->writeDuration = 0;
             }
 
-            size_t totalDuration = photonDuration + hitDuration + writeDuration;
+            const size_t totalDuration = photonDuration + hitDuration + writeDuration;
 
             std::cout << "---" << std::endl;
             std::cout << "Finished" << std::endl;
 
-            std::chrono::time_point renderEnd = std::chrono::system_clock::now();
-            std::chrono::microseconds renderDuration = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
+            const std::chrono::time_point renderEnd = std::chrono::system_clock::now();
+            const std::chrono::microseconds renderDuration = std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
 
             std::cout << "---" << std::endl;
             std::cout << "Render time:" << std::endl;

@@ -8,7 +8,7 @@ struct Pixel
     png_uint_16 green = 0;
     png_uint_16 blue = 0;
 
-    png_uint_16 operator[](size_t index) const
+    png_uint_16 operator[](size_t index) const noexcept
     {
         if (index == 0)
         {
