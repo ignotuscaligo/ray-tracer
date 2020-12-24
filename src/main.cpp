@@ -51,7 +51,7 @@ constexpr size_t imageHeight = 1080;
 constexpr double verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "ray_debugging_0";
+const std::string outputName = "spot_light_0";
 
 }
 

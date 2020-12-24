@@ -123,6 +123,9 @@ target_sources(ray-tracer
 
         include/MaterialLibrary.h
         src/MaterialLibrary.cpp
+
+        include/SpotLight.h
+        src/SpotLight.cpp
 )
 
 target_include_directories(ray-tracer
