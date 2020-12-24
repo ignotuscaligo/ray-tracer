@@ -158,7 +158,7 @@ bool Worker::processPhotons()
 
     // std::cout << m_index << ": processing " << photonsBlock.size() << " photons" << std::endl;
 
-    std::vector<PhotonHit> hits;
+    m_hitBuffer.clear();
 
     for (auto& photon : photonsBlock)
     {
@@ -168,7 +168,7 @@ bool Worker::processPhotons()
             continue;
         }
 
-        std::vector<PhotonHit> hitResults;
+        m_volumeHitBuffer.clear();
 
         for (auto& object : objects)
         {
@@ -177,44 +177,44 @@ bool Worker::processPhotons()
                 continue;
             }
 
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(photon.ray);
+            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(photon.ray, m_castBuffer);
 
             if (hit)
             {
-                hitResults.push_back({photon, *hit});
+                m_volumeHitBuffer.push_back({photon, *hit});
             }
         }
 
-        if (!hitResults.empty())
+        if (!m_volumeHitBuffer.empty())
         {
             double minDistance = std::numeric_limits<double>::max();
             size_t minIndex = 0;
             bool validHit = false;
 
-            for (int i = 0; i < hitResults.size(); ++i)
+            for (int i = 0; i < m_volumeHitBuffer.size(); ++i)
             {
-                if (hitResults[i].hit.distance < minDistance && hitResults[i].hit.distance > selfHitThreshold)
+                if (m_volumeHitBuffer[i].hit.distance < minDistance && m_volumeHitBuffer[i].hit.distance > selfHitThreshold)
                 {
                     validHit = true;
                     minIndex = i;
-                    minDistance = hitResults[i].hit.distance;
+                    minDistance = m_volumeHitBuffer[i].hit.distance;
                 }
             }
 
             if (validHit)
             {
-                hits.push_back(hitResults[minIndex]);
+                m_hitBuffer.push_back(m_volumeHitBuffer[minIndex]);
             }
         }
     }
 
-    if (!hits.empty())
+    if (!m_hitBuffer.empty())
     {
-        auto hitsBlock = hitQueue->initialize(hits.size());
+        auto hitsBlock = hitQueue->initialize(m_hitBuffer.size());
 
         for (size_t i = 0; i < hitsBlock.size(); ++i)
         {
-            hitsBlock[i] = hits[i];
+            hitsBlock[i] = m_hitBuffer[i];
         }
 
         hitQueue->ready(hitsBlock);
@@ -222,7 +222,7 @@ bool Worker::processPhotons()
         size_t bounceThreshold = 1;
         size_t bouncedPhotonCount = 0;
 
-        for (auto& photonHit : hits)
+        for (auto& photonHit : m_hitBuffer)
         {
             if (photonHit.photon.bounces < bounceThreshold)
             {
@@ -236,7 +236,7 @@ bool Worker::processPhotons()
             auto bouncedPhotonsBlock = photonQueue->initialize(bouncedPhotonCount * bounceCount);
             size_t photonIndex = 0;
 
-            for (auto& photonHit : hits)
+            for (auto& photonHit : m_hitBuffer)
             {
                 if (photonHit.photon.bounces < bounceThreshold)
                 {
@@ -274,7 +274,7 @@ bool Worker::processHits()
 
     auto hitsBlock = hitQueue->fetch(m_fetchSize);
 
-    std::vector<PhotonHit> validHits;
+    m_hitBuffer.clear();
 
     Vector cameraPosition = camera->position();
     Vector cameraNormal = camera->forward();
@@ -318,7 +318,7 @@ bool Worker::processHits()
                 continue;
             }
 
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(ray);
+            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(ray, m_castBuffer);
 
             if (hit)
             {
@@ -332,17 +332,17 @@ bool Worker::processHits()
         // If no object was hit, or the closest hit object is behind the camera, the hit is valid
         if (!closestHit || closestHit->distance > cameraDistance)
         {
-            validHits.push_back(photonHit);
+            m_hitBuffer.push_back(photonHit);
         }
     }
 
-    if (!validHits.empty())
+    if (!m_hitBuffer.empty())
     {
-        auto validHitsBlock = finalHitQueue->initialize(validHits.size());
+        auto validHitsBlock = finalHitQueue->initialize(m_hitBuffer.size());
 
         for (size_t i = 0; i < validHitsBlock.size(); ++i)
         {
-            validHitsBlock[i] = validHits[i];
+            validHitsBlock[i] = m_hitBuffer[i];
         }
 
         finalHitQueue->ready(validHitsBlock);

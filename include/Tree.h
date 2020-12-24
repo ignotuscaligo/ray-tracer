@@ -41,7 +41,7 @@ public:
     size_t size() const noexcept;
     size_t nodeCount() const noexcept;
     size_t nodeDepth() const noexcept;
-    std::optional<Hit> castRay(const Ray& ray) const;
+    std::optional<Hit> castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
     std::vector<T> fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
 
 private:

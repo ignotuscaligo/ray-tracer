@@ -6,16 +6,17 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 class Volume : public Object
 {
 public:
     Volume(size_t materialIndex);
 
-    std::optional<Hit> castRay(const Ray& ray) const;
+    std::optional<Hit> castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
 
 protected:
-    virtual std::optional<Hit> castTransformedRay(const Ray& ray) const;
+    virtual std::optional<Hit> castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
 
 private:
     Ray transformRay(const Ray& ray) const;

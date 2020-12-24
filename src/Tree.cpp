@@ -129,16 +129,16 @@ size_t Tree<T>::nodeDepth() const noexcept
 }
 
 template<typename T>
-std::optional<Hit> Tree<T>::castRay(const Ray& ray) const
+std::optional<Hit> Tree<T>::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const
 {
-    std::vector<Hit> hits;
+    castBuffer.clear();
 
-    Tree<T>::castRayIntoNode(ray, *m_root, hits);
+    Tree<T>::castRayIntoNode(ray, *m_root, castBuffer);
 
     double minDistance = std::numeric_limits<double>::max();
     std::optional<Hit> result;
 
-    for (const auto& hit : hits)
+    for (const auto& hit : castBuffer)
     {
         if (!result || hit.distance < minDistance)
         {
@@ -409,7 +409,7 @@ template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::root() n
 template size_t Tree<Triangle>::size() const noexcept;
 template size_t Tree<Triangle>::nodeCount() const noexcept;
 template size_t Tree<Triangle>::nodeDepth() const noexcept;
-template std::optional<Hit> Tree<Triangle>::castRay(const Ray& ray) const;
+template std::optional<Hit> Tree<Triangle>::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
 template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
 template double Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
 template void Tree<Triangle>::castRayIntoNode(const Ray& ray, Tree<Triangle>::Node& node, std::vector<Hit>& hits);
@@ -447,7 +447,7 @@ template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::root()
 template size_t Tree<PhotonHit>::size() const noexcept;
 template size_t Tree<PhotonHit>::nodeCount() const noexcept;
 template size_t Tree<PhotonHit>::nodeDepth() const noexcept;
-template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray) const;
+template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
 template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
 template double Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);
 template void Tree<PhotonHit>::castRayIntoNode(const Ray& ray, Tree<PhotonHit>::Node& node, std::vector<Hit>& hits);

@@ -13,7 +13,7 @@ public:
     PlaneVolume(size_t materialIndex);
 
 protected:
-    std::optional<Hit> castTransformedRay(const Ray& ray) const override;
+    std::optional<Hit> castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const override;
 
 private:
     Plane m_plane;

@@ -7,10 +7,10 @@ Volume::Volume(size_t materialIndex)
     registerType<Volume>();
 }
 
-std::optional<Hit> Volume::castRay(const Ray& ray) const
+std::optional<Hit> Volume::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const
 {
     Ray transformedRay = transformRay(ray);
-    std::optional<Hit> hit = castTransformedRay(transformedRay);
+    std::optional<Hit> hit = castTransformedRay(transformedRay, castBuffer);
 
     if (hit)
     {
@@ -22,7 +22,7 @@ std::optional<Hit> Volume::castRay(const Ray& ray) const
     return hit;
 }
 
-std::optional<Hit> Volume::castTransformedRay(const Ray& ray) const
+std::optional<Hit> Volume::castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const
 {
     return std::nullopt;
 }

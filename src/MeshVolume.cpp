@@ -7,7 +7,7 @@ MeshVolume::MeshVolume(size_t materialIndex, const std::vector<Triangle>& triang
     registerType<MeshVolume>();
 }
 
-std::optional<Hit> MeshVolume::castTransformedRay(const Ray& ray) const
+std::optional<Hit> MeshVolume::castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const
 {
-    return m_tree.castRay(ray);
+    return m_tree.castRay(ray, castBuffer);
 }

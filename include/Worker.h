@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Camera.h"
+#include "Hit.h"
 #include "Image.h"
 #include "LightQueue.h"
 #include "Material.h"
@@ -84,4 +85,8 @@ private:
     std::atomic_bool m_suspend;
 
     RandomGenerator m_generator;
+
+    std::vector<Hit> m_castBuffer;
+    std::vector<PhotonHit> m_hitBuffer;
+    std::vector<PhotonHit> m_volumeHitBuffer;
 };

@@ -14,7 +14,7 @@ public:
     MeshVolume(size_t materialIndex, const std::vector<Triangle>& triangles);
 
 protected:
-    std::optional<Hit> castTransformedRay(const Ray& ray) const override;
+    std::optional<Hit> castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const override;
 
 private:
     Tree<Triangle> m_tree;
