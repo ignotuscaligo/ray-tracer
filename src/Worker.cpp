@@ -185,7 +185,7 @@ bool Worker::processPhotons()
 
             for (int i = 0; i < hitResults.size(); ++i)
             {
-                if (hitResults[i].hit.distance < minDistance && hitResults[i].hit.distance > std::numeric_limits<float>::epsilon())
+                if (hitResults[i].hit.distance < minDistance && hitResults[i].hit.distance > selfHitThreshold)
                 {
                     validHit = true;
                     minIndex = i;
@@ -284,7 +284,7 @@ bool Worker::processHits()
         Vector path = cameraPosition - photonHit.hit.position;
         float cameraDistance = path.magnitude();
 
-        if (cameraDistance <= std::numeric_limits<float>::epsilon())
+        if (cameraDistance < selfHitThreshold)
         {
             continue;
         }
@@ -305,7 +305,7 @@ bool Worker::processHits()
 
             if (hit)
             {
-                if ((!closestHit || hit->distance < closestHit->distance) && hit->distance > std::numeric_limits<float>::epsilon())
+                if (hit->distance > selfHitThreshold && (!closestHit || hit->distance < closestHit->distance))
                 {
                     closestHit = hit;
                 }
