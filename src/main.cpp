@@ -151,9 +151,10 @@ int main(int argc, char** argv)
 
         std::vector<std::shared_ptr<Worker>> workers{workerCount};
 
+        size_t workerIndex = 0;
         for (auto& worker : workers)
         {
-            worker = std::make_shared<Worker>(i, fetchSize);
+            worker = std::make_shared<Worker>(workerIndex, fetchSize);
             worker->camera = camera;
             worker->objects = objects;
             worker->photonQueue = photonQueue;
@@ -163,9 +164,10 @@ int main(int argc, char** argv)
             worker->image = image;
             worker->materialLibrary = materialLibrary;
             worker->lightQueue = lightQueue;
+            ++workerIndex;
         }
 
-        std:vector<std::thread> threads{workerCount};
+        std::vector<std::thread> threads{workerCount};
 
         for (size_t i = 0; i < workerCount; ++i)
         {
