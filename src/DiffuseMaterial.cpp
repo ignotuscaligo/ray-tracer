@@ -37,6 +37,13 @@ void DiffuseMaterial::bounce(WorkQueue<Photon>::Block photonBlock, size_t startI
     for (size_t i = startIndex; i < endIndex; ++i)
     {
         Vector offsetReflection = m_angleGenerator.generateOffsetVector(reflection, generator);
+
+        float normalDot = Vector::dot(offsetReflection, photonHit.hit.normal);
+        if (normalDot <= 0.0f)
+        {
+            brightness = 0.0f;
+        }
+
         photonBlock[i].ray = {photonHit.hit.position, offsetReflection};
         photonBlock[i].color = m_color * photonHit.photon.color * brightness;
         photonBlock[i].bounces = photonHit.photon.bounces + 1;
