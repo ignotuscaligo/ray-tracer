@@ -273,10 +273,10 @@ bool Worker::processHits()
 
     for (auto& photonHit : hitsBlock)
     {
-        float dot = Vector::dot(-cameraNormal, photonHit.hit.normal);
+        float dot = Vector::dot(cameraNormal, photonHit.hit.normal);
 
         // Is the hit facing the camera?
-        if (dot < 0.0f)
+        if (dot >= 0.0f)
         {
             continue;
         }
