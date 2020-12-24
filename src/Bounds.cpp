@@ -3,31 +3,31 @@
 #include <algorithm>
 
 Limits::Limits()
-    : min(0.0f)
-    , max(0.0f)
+    : min(0.0)
+    , max(0.0)
 {
 }
 
-Limits::Limits(float imin, float imax)
+Limits::Limits(double imin, double imax)
     : min(imin)
     , max(imax)
 {
 }
 
-Limits::Limits(float value)
+Limits::Limits(double value)
     : Limits(value, value)
 {
 }
 
-bool Limits::contains(float value) const
+bool Limits::contains(double value) const
 {
     return value >= min && value <= max;
 }
 
 bool Limits::intersects(const Limits& other) const
 {
-    float highestMin = std::max(min, other.min);
-    float lowestMax = std::min(max, other.max);
+    double highestMin = std::max(min, other.min);
+    double lowestMax = std::min(max, other.max);
     return lowestMax >= highestMin;
 }
 
@@ -70,34 +70,33 @@ Bounds::Bounds(Vector min, Vector max)
 
 void Bounds::extend(Limits limits, Axis axis)
 {
-    switch (axis)
+    if (axis == Axis::X)
     {
-        case Axis::X:
-            x += limits;
-            break;
-
-        case Axis::Y:
-            y += limits;
-            break;
-
-        case Axis::Z:
-            z += limits;
-            break;
+        x += limits;
+    }
+    else if (axis == Axis::Y)
+    {
+        y += limits;
+    }
+    else
+    {
+        z += limits;
     }
 }
 
 Limits Bounds::getLimits(Axis axis) const
 {
-    switch (axis)
+    if (axis == Axis::X)
     {
-        case Axis::X:
-            return x;
-
-        case Axis::Y:
-            return y;
-
-        case Axis::Z:
-            return z;
+        return x;
+    }
+    else if (axis == Axis::Y)
+    {
+        return y;
+    }
+    else
+    {
+        return z;
     }
 }
 

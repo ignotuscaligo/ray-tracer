@@ -4,24 +4,24 @@
 
 struct Quaternion
 {
-    float x;
-    float y;
-    float z;
-    float w;
+    double x;
+    double y;
+    double z;
+    double w;
 
     Quaternion();
-    Quaternion(float ix, float iy, float iz, float iw);
+    Quaternion(double ix, double iy, double iz, double iw);
     Quaternion(Vector vector);
 
-    float magnitudeSqr() const;
-    float magnitude() const;
+    double magnitudeSqr() const;
+    double magnitude() const;
     Quaternion conjugate() const;
     Quaternion inverse() const;
 
-    static Quaternion fromPitchYawRoll(float pitch, float yaw, float roll);
-    static Quaternion fromAxisAngle(Vector axis, float angle);
+    static Quaternion fromPitchYawRoll(double pitch, double yaw, double roll);
+    static Quaternion fromAxisAngle(Vector axis, double angle);
 };
 
 Quaternion operator*(const Quaternion& lhs, const Quaternion& rhs);
 Vector operator*(const Quaternion& lhs, const Vector& rhs);
-Quaternion operator*(const Quaternion& lhs, float rhs);
+Quaternion operator*(const Quaternion& lhs, double rhs);

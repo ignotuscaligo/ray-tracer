@@ -6,12 +6,12 @@
 namespace Utility
 {
 
-extern const float pi;
+extern const double pi;
 
 void printVector(const Vector& vector);
 void printTriangle(const Triangle& triangle);
 
-float radians(float degrees);
-float degrees(float radians);
+double radians(double degrees);
+double degrees(double radians);
 
 }

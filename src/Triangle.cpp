@@ -8,9 +8,9 @@ Triangle::Triangle(Vector ia, Vector ib, Vector ic)
     , b(ib)
     , c(ic)
     , center(
-        (a.x + b.x + c.x) / 3.0f,
-        (a.y + b.y + c.y) / 3.0f,
-        (a.z + b.z + c.z) / 3.0f)
+        (a.x + b.x + c.x) / 3.0,
+        (a.y + b.y + c.y) / 3.0,
+        (a.z + b.z + c.z) / 3.0)
 {
     Vector ab = b - a;
     Vector ac = c - a;
@@ -22,7 +22,7 @@ Limits Triangle::getLimits(Axis axis) const
 {
     Limits limits;
 
-    std::initializer_list<float> values = {a.getAxis(axis), b.getAxis(axis), c.getAxis(axis)};
+    std::initializer_list<double> values = {a.getAxis(axis), b.getAxis(axis), c.getAxis(axis)};
 
     limits.min = std::min(values);
     limits.max = std::max(values);

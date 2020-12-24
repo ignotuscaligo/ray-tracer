@@ -9,7 +9,7 @@
 namespace Utility
 {
 
-const float pi = M_PI;
+const double pi = M_PI;
 
 void printVector(const Vector& point)
 {
@@ -27,14 +27,14 @@ void printTriangle(const Triangle& triangle)
     std::cout << ">";
 }
 
-float radians(float degrees)
+double radians(double degrees)
 {
-    return static_cast<float>(M_PI) * (degrees / 180.0f);
+    return pi * (degrees / 180.0);
 }
 
-float degrees(float radians)
+double degrees(double radians)
 {
-    return (radians * 180.0f) / static_cast<float>(M_PI);
+    return (radians * 180.0) / pi;
 }
 
 }

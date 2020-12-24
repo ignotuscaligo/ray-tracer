@@ -3,14 +3,14 @@
 #include <cmath>
 
 Quaternion::Quaternion()
-    : x(0.0f)
-    , y(0.0f)
-    , z(0.0f)
-    , w(1.0f)
+    : x(0.0)
+    , y(0.0)
+    , z(0.0)
+    , w(1.0)
 {
 }
 
-Quaternion::Quaternion(float ix, float iy, float iz, float iw)
+Quaternion::Quaternion(double ix, double iy, double iz, double iw)
     : x(ix)
     , y(iy)
     , z(iz)
@@ -22,16 +22,16 @@ Quaternion::Quaternion(Vector vector)
     : x(vector.x)
     , y(vector.y)
     , z(vector.z)
-    , w(0.0f)
+    , w(0.0)
 {
 }
 
-float Quaternion::magnitudeSqr() const
+double Quaternion::magnitudeSqr() const
 {
     return x * x + y * y + z * z + w * w;
 }
 
-float Quaternion::magnitude() const
+double Quaternion::magnitude() const
 {
     return std::sqrt(magnitudeSqr());
 }
@@ -48,22 +48,22 @@ Quaternion Quaternion::conjugate() const
 
 Quaternion Quaternion::inverse() const
 {
-    return conjugate() * (1.0f / magnitudeSqr());
+    return conjugate() * (1.0 / magnitudeSqr());
 }
 
-Quaternion Quaternion::fromPitchYawRoll(float pitch, float yaw, float roll)
+Quaternion Quaternion::fromPitchYawRoll(double pitch, double yaw, double roll)
 {
-    float p = pitch / 2.0f;
-    float y = yaw / 2.0f;
-    float r = roll / 2.0f;
+    double p = pitch / 2.0;
+    double y = yaw / 2.0;
+    double r = roll / 2.0;
 
-    float cp = std::cos(p);
-    float cy = std::cos(y);
-    float cr = std::cos(r);
+    double cp = std::cos(p);
+    double cy = std::cos(y);
+    double cr = std::cos(r);
 
-    float sp = std::sin(p);
-    float sy = std::sin(y);
-    float sr = std::sin(r);
+    double sp = std::sin(p);
+    double sy = std::sin(y);
+    double sr = std::sin(r);
 
     return {
         sp * cy * cr + cp * sy * sr,
@@ -73,15 +73,15 @@ Quaternion Quaternion::fromPitchYawRoll(float pitch, float yaw, float roll)
     };
 }
 
-Quaternion Quaternion::fromAxisAngle(Vector axis, float angle)
+Quaternion Quaternion::fromAxisAngle(Vector axis, double angle)
 {
-    float sa = std::sin(angle / 2.0f);
+    double sa = std::sin(angle / 2.0);
 
     return {
         axis.x * sa,
         axis.y * sa,
         axis.z * sa,
-        std::cos(angle / 2.0f)
+        std::cos(angle / 2.0)
     };
 }
 
@@ -108,7 +108,7 @@ Vector operator*(const Quaternion& lhs, const Vector& rhs)
     };
 }
 
-Quaternion operator*(const Quaternion& lhs, float rhs)
+Quaternion operator*(const Quaternion& lhs, double rhs)
 {
     return {
         lhs.x * rhs,
