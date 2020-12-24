@@ -2,6 +2,7 @@
 
 #include "RandomGenerator.h"
 
+#include <immintrin.h>
 #include <xmmintrin.h>
 
 enum class Axis
@@ -16,49 +17,49 @@ Axis nextAxis(Axis axis);
 union Vector
 {
     Vector();
-    Vector(float ix, float iy, float iz);
-    Vector(__m128&& idata);
+    Vector(double ix, double iy, double iz);
+    Vector(__m256d&& idata);
 
-    float getAxis(Axis axis) const;
-    float operator[](Axis axis) const;
+    double getAxis(Axis axis) const;
+    double operator[](Axis axis) const;
 
     Vector operator=(const Vector& rhs);
     Vector operator+=(const Vector& rhs);
-    Vector operator*=(float rhs);
-    Vector operator/=(float rhs);
-    explicit operator __m128();
-    explicit operator const float*();
+    Vector operator*=(double rhs);
+    Vector operator/=(double rhs);
+    explicit operator __m256d();
+    explicit operator const double*();
 
-    float magnitudeSquared() const;
-    float magnitude() const;
+    double magnitudeSquared() const;
+    double magnitude() const;
     Vector normalize();
     Vector normalized() const;
 
     static Vector cross(const Vector& a, const Vector& b);
-    static float dot(const __m128& a, const __m128& b);
-    static float dot(const Vector& a, const Vector& b);
-    static __m128 normalized(const __m128& a);
+    static double dot(const __m256d& a, const __m256d& b);
+    static double dot(const Vector& a, const Vector& b);
+    static __m256d normalized(const __m256d& a);
     static Vector normalized(const Vector& a);
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs);
     static Vector reflected(const Vector& incident, const Vector& normal);
-    static Vector random(RandomGenerator& generator, float magnitude = 1.0f);
-    static Vector randomSphere(RandomGenerator& generator, float magnitude = 1.0f);
+    static Vector random(RandomGenerator& generator, double magnitude = 1.0f);
+    static Vector randomSphere(RandomGenerator& generator, double magnitude = 1.0f);
 
     static const Vector unitX;
     static const Vector unitY;
     static const Vector unitZ;
 
-    __m128 data;
+    __m256d data;
 
-    struct alignas(float)
+    struct alignas(double)
     {
-        float x, y, z, _w;
+        double x, y, z, _w;
     };
 };
 
 Vector operator+(const Vector& lhs, const Vector& rhs);
 Vector operator-(const Vector& point);
 Vector operator-(const Vector& lhs, const Vector& rhs);
-Vector operator*(const Vector& lhs, const float& rhs);
-Vector operator*(const float& lhs, const Vector& rhs);
-Vector operator/(const Vector& lhs, const float& rhs);
+Vector operator*(const Vector& lhs, const double& rhs);
+Vector operator*(const double& lhs, const Vector& rhs);
+Vector operator/(const Vector& lhs, const double& rhs);

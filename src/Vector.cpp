@@ -26,7 +26,7 @@ Vector::Vector()
 {
 }
 
-Vector::Vector(float ix, float iy, float iz)
+Vector::Vector(double ix, double iy, double iz)
     : x(ix)
     , y(iy)
     , z(iz)
@@ -34,28 +34,29 @@ Vector::Vector(float ix, float iy, float iz)
 {
 }
 
-Vector::Vector(__m128&& idata)
+Vector::Vector(__m256d&& idata)
     : data(idata)
     , _w(0)
 {
 }
 
-float Vector::getAxis(Axis axis) const
+double Vector::getAxis(Axis axis) const
 {
-    switch (axis)
+    if (axis == Axis::X)
     {
-        case Axis::X:
-            return x;
-
-        case Axis::Y:
-            return y;
-
-        case Axis::Z:
-            return z;
+        return x;
+    }
+    else if (axis == Axis::Y)
+    {
+        return y;
+    }
+    else
+    {
+        return z;
     }
 }
 
-float Vector::operator[](Axis axis) const
+double Vector::operator[](Axis axis) const
 {
     return getAxis(axis);
 }
@@ -68,38 +69,38 @@ Vector Vector::operator=(const Vector& rhs)
 
 Vector Vector::operator+=(const Vector& rhs)
 {
-    data = _mm_add_ps(data, rhs.data);
+    data = _mm256_add_pd(data, rhs.data);
     return *this;
 }
 
-Vector Vector::operator*=(float rhs)
+Vector Vector::operator*=(double rhs)
 {
-    data = _mm_mul_ps(data, _mm_set1_ps(rhs));
+    data = _mm256_mul_pd(data, _mm256_set1_pd(rhs));
     return *this;
 }
 
-Vector Vector::operator/=(float rhs)
+Vector Vector::operator/=(double rhs)
 {
-    data = _mm_div_ps(data, _mm_set1_ps(rhs));
+    data = _mm256_div_pd(data, _mm256_set1_pd(rhs));
     return *this;
 }
 
-Vector::operator __m128()
+Vector::operator __m256d()
 {
     return data;
 }
 
-Vector::operator const float*()
+Vector::operator const double*()
 {
     return &x;
 }
 
-float Vector::magnitudeSquared() const
+double Vector::magnitudeSquared() const
 {
     return Vector::dot(data, data);
 }
 
-float Vector::magnitude() const
+double Vector::magnitude() const
 {
     return std::sqrt(magnitudeSquared());
 }
@@ -119,48 +120,48 @@ Vector Vector::normalized() const
 Vector Vector::cross(const Vector& a, const Vector& b)
 {
     // y, z, x
-    __m128 aA = _mm_set_ps(0, a.x, a.z, a.y);
+    __m256d aA = _mm256_set_pd(0, a.x, a.z, a.y);
 
     // z, x, y
-    __m128 aB = _mm_set_ps(0, a.y, a.x, a.z);
+    __m256d aB = _mm256_set_pd(0, a.y, a.x, a.z);
 
     // y, z, x
-    __m128 bA = _mm_set_ps(0, b.x, b.z, b.y);
+    __m256d bA = _mm256_set_pd(0, b.x, b.z, b.y);
 
     // z, x, y
-    __m128 bB = _mm_set_ps(0, b.y, b.x, b.z);
+    __m256d bB = _mm256_set_pd(0, b.y, b.x, b.z);
 
-    return _mm_sub_ps(_mm_mul_ps(aA, bB), _mm_mul_ps(aB, bA));
+    return _mm256_sub_pd(_mm256_mul_pd(aA, bB), _mm256_mul_pd(aB, bA));
 }
 
-float Vector::dot(const __m128& a, const __m128& b)
+double Vector::dot(const __m256d& a, const __m256d& b)
 {
-    __m128 mul = _mm_mul_ps(a, b);
+    __m256d mul = _mm256_mul_pd(a, b);
 
-    return mul.m128_f32[0] + mul.m128_f32[1] + mul.m128_f32[2];
+    return mul.m256d_f64[0] + mul.m256d_f64[1] + mul.m256d_f64[2];
 }
 
-float Vector::dot(const Vector& a, const Vector& b)
+double Vector::dot(const Vector& a, const Vector& b)
 {
     return Vector::dot(a.data, b.data);
 }
 
-__m128 Vector::normalized(const __m128& a)
+__m256d Vector::normalized(const __m256d& a)
 {
-    __m128 dot = _mm_set1_ps(Vector::dot(a, a));
+    __m256d dot = _mm256_set1_pd(Vector::dot(a, a));
 
 #if USE_APPX_INV_SQR
     // invRoot = inverse_square(dot)
-    __m128 invRoot = _mm_rsqrt_ps(dot);
+    __m256d invRoot = _mm256_rsqrt_pd(dot);
 
     // result = a * invRoot
-    return _mm_mul_ps(a, invRoot);
+    return _mm256_mul_pd(a, invRoot);
 #else
     // root = sqrt(dot)
-    __m128 root = _mm_sqrt_ps(dot);
+    __m256d root = _mm256_sqrt_pd(dot);
 
     // result = a / root
-    return _mm_div_ps(a, root);
+    return _mm256_div_pd(a, root);
 #endif
 }
 
@@ -172,7 +173,7 @@ Vector Vector::normalized(const Vector& a)
 Vector Vector::normalizedSub(const Vector& lhs, const Vector& rhs)
 {
     // sub = lhs - rhs
-    __m128 sub = _mm_sub_ps(lhs.data, rhs.data);
+    __m256d sub = _mm256_sub_pd(lhs.data, rhs.data);
 
     // result = sub * invRoot
     return Vector::normalized(sub);
@@ -181,20 +182,20 @@ Vector Vector::normalizedSub(const Vector& lhs, const Vector& rhs)
 // r = incident − 2 * (incident ⋅ normal) * normal
 Vector Vector::reflected(const Vector& incident, const Vector& normal)
 {
-    __m128 dot2 = _mm_set1_ps(2 * (Vector::dot(incident, normal)));
+    __m256d dot2 = _mm256_set1_pd(2 * (Vector::dot(incident, normal)));
 
-    return _mm_sub_ps(incident.data, _mm_mul_ps(dot2, normal.data));
+    return _mm256_sub_pd(incident.data, _mm256_mul_pd(dot2, normal.data));
 }
 
-Vector Vector::random(RandomGenerator& generator, float magnitude)
+Vector Vector::random(RandomGenerator& generator, double magnitude)
 {
     return Vector::randomSphere(generator) * generator.value(magnitude);
 }
 
-Vector Vector::randomSphere(RandomGenerator& generator, float magnitude)
+Vector Vector::randomSphere(RandomGenerator& generator, double magnitude)
 {
-    float theta = 2 * Utility::pi * generator.value();
-    float phi = std::acos(1.0f - 2.0f * generator.value());
+    double theta = 2 * Utility::pi * generator.value();
+    double phi = std::acos(1.0 - 2.0 * generator.value());
 
     return {
         std::sin(phi) * std::cos(theta) * magnitude,
@@ -205,30 +206,30 @@ Vector Vector::randomSphere(RandomGenerator& generator, float magnitude)
 
 Vector operator+(const Vector& lhs, const Vector& rhs)
 {
-    return _mm_add_ps(lhs.data, rhs.data);
+    return _mm256_add_pd(lhs.data, rhs.data);
 }
 
 Vector operator-(const Vector& vector)
 {
-    return _mm_sub_ps(_mm_set1_ps(0.0), vector.data);
+    return _mm256_sub_pd(_mm256_set1_pd(0.0), vector.data);
 }
 
 Vector operator-(const Vector& lhs, const Vector& rhs)
 {
-    return _mm_sub_ps(lhs.data, rhs.data);
+    return _mm256_sub_pd(lhs.data, rhs.data);
 }
 
-Vector operator*(const Vector& lhs, const float& rhs)
+Vector operator*(const Vector& lhs, const double& rhs)
 {
-    return _mm_mul_ps(lhs.data, _mm_set1_ps(rhs));
+    return _mm256_mul_pd(lhs.data, _mm256_set1_pd(rhs));
 }
 
-Vector operator*(const float& lhs, const Vector& rhs)
+Vector operator*(const double& lhs, const Vector& rhs)
 {
-    return _mm_mul_ps(_mm_set1_ps(lhs), rhs.data);
+    return _mm256_mul_pd(_mm256_set1_pd(lhs), rhs.data);
 }
 
-Vector operator/(const Vector& lhs, const float& rhs)
+Vector operator/(const Vector& lhs, const double& rhs)
 {
-    return _mm_div_ps(lhs.data, _mm_set1_ps(rhs));
+    return _mm256_div_pd(lhs.data, _mm256_set1_pd(rhs));
 }
