@@ -162,6 +162,7 @@ bool Worker::processPhotons()
 
     for (auto& photon : photonsBlock)
     {
+        // Skip photons with no brightness left, will drop them from the queue
         if (photon.color.brightness() < std::numeric_limits<float>::epsilon())
         {
             continue;
@@ -280,9 +281,18 @@ bool Worker::processHits()
 
     for (auto& photonHit : hitsBlock)
     {
-        float dot = Vector::dot(cameraNormal, photonHit.hit.normal);
+        std::optional<PixelCoords> coord = camera->coordForPoint(photonHit.hit.position);
 
-        // Is the hit facing the camera?
+        // Not within the camera frustum, skip
+        if (!coord)
+        {
+            continue;
+        }
+
+        Vector pixelDirection = camera->pixelDirection(*coord);
+        float dot = Vector::dot(pixelDirection, photonHit.hit.normal);
+
+        // Not facing the pixel, skip
         if (dot >= 0.0f)
         {
             continue;
