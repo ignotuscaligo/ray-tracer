@@ -69,13 +69,7 @@ int main(int argc, char** argv)
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Default"));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("White", Color(1.0f, 1.0f, 1.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Black", Color(0.0f, 0.0f, 0.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Red", Color(1.0f, 0.0f, 0.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Green", Color(0.0f, 1.0f, 0.0f)));
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Blue", Color(0.0f, 0.0f, 1.0f)));
 
         std::vector<std::shared_ptr<Object>> objects;
 
