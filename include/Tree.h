@@ -36,7 +36,6 @@ public:
     };
 
     Tree(const std::vector<T>& objects, size_t pageSize = 1);
-    ~Tree() = default;
 
     std::shared_ptr<Node> root();
     size_t size() const;

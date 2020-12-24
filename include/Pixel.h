@@ -4,14 +4,14 @@
 
 struct Pixel
 {
-    Pixel(png_uint_16 value = 0)
+    Pixel(png_uint_16 value = 0) noexcept
         : red(value)
         , green(value)
         , blue(value)
     {
     }
 
-    Pixel(png_uint_16 ired, png_uint_16 igreen, png_uint_16 iblue)
+    Pixel(png_uint_16 ired, png_uint_16 igreen, png_uint_16 iblue) noexcept
         : red(ired)
         , green(igreen)
         , blue(iblue)

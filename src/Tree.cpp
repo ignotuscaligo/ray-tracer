@@ -136,6 +136,24 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const
 }
 
 template<typename T>
+const Vector& Tree<T>::getPivot(const T& object)
+{
+    return {};
+}
+
+template<typename T>
+double Tree<T>::getPivot(const T& object, Axis axis)
+{
+    return 0.0;
+}
+
+template<typename T>
+Bounds Tree<T>::getBounds(const T& object)
+{
+    return {};
+}
+
+template<typename T>
 double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
 {
     size_t size = objects.size();
@@ -249,6 +267,12 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
     // {
     //     fetchWithinPyramidFromNode(pyramid, node->right, objects);
     // }
+}
+
+template<typename T>
+std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& ray, const T& object)
+{
+    return std::nullopt;
 }
 
 // Find the next non-zero bound, if available
