@@ -71,6 +71,7 @@ int main(int argc, char** argv)
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Default"));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("White", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Black", Color(0.0f, 0.0f, 0.0f)));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Red", Color(1.0f, 0.0f, 0.0f)));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Green", Color(0.0f, 1.0f, 0.0f)));
         materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Blue", Color(0.0f, 0.0f, 1.0f)));
@@ -95,7 +96,7 @@ int main(int argc, char** argv)
         Object::setParent(sun, cameraPivot);
         Object::setParent(objectPivot, root);
         Object::setParent(ground, root);
-        Object::setParent(knotMesh, objectPivot);
+        Object::setParent(knotMesh, root);
         Object::setParent(omniLight0, root);
         // Object::setParent(omniLight1, root);
         // Object::setParent(omniLight2, root);
@@ -107,9 +108,9 @@ int main(int argc, char** argv)
         cubeMesh->transform.position = {0, -70, 0};
 
         omniLight0->name("OmniLight0");
-        omniLight0->transform.position = {0, 50, 50};
+        omniLight0->transform.position = {50, 50, 30};
         omniLight0->color(Color::fromRGB(255, 255, 255));
-        omniLight0->brightness(4000000);
+        omniLight0->brightness(10000000);
         omniLight0->innerRadius(5.0f);
 
         // omniLight1->name("OmniLight1");
