@@ -126,6 +126,9 @@ target_sources(ray-tracer
 
         include/SpotLight.h
         src/SpotLight.cpp
+
+        include/ParallelLight.h
+        src/ParallelLight.cpp
 )
 
 target_include_directories(ray-tracer
