@@ -6,11 +6,13 @@ OmniLight::OmniLight()
     : Light()
 {
     registerType<OmniLight>();
+    m_area = Utility::pi * 4.0;
 }
 
 void OmniLight::innerRadius(double innerRadius)
 {
     m_innerRadius = innerRadius;
+    updateParameters();
 }
 
 double OmniLight::innerRadius() const
@@ -20,7 +22,7 @@ double OmniLight::innerRadius() const
 
 void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
 {
-    double candela = m_brightness / (Utility::pi * 4.0);
+    Color photonColor = m_color * m_lumens * photonBrightness;
 
     for (auto& photon : photonBlock)
     {
@@ -33,7 +35,7 @@ void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightne
         }
 
         photon.ray = {position() + offset, direction};
-        photon.color = m_color * (candela * photonBrightness);
+        photon.color = photonColor;
         photon.bounces = 0;
     }
 }

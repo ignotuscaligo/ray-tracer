@@ -20,6 +20,5 @@ public:
 private:
     double m_innerRadius = 0;
     double m_angle = 0;
-    double m_area = 0;
     AngleGenerator m_angleGenerator;
 };

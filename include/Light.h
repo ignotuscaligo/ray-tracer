@@ -20,6 +20,10 @@ public:
     virtual void emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const;
 
 protected:
+    virtual void updateParameters();
+
     Color m_color;
     double m_brightness = 0;
+    double m_area = 0;
+    double m_lumens = 0;
 };

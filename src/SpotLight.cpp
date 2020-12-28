@@ -11,6 +11,7 @@ SpotLight::SpotLight()
 void SpotLight::innerRadius(double innerRadius)
 {
     m_innerRadius = innerRadius;
+    updateParameters();
 }
 
 double SpotLight::innerRadius() const
@@ -38,6 +39,8 @@ void SpotLight::angle(double angle)
     }
 
     m_angleGenerator.maxAngle = m_angle / 2.0;
+
+    updateParameters();
 }
 
 double SpotLight::angle() const
@@ -47,14 +50,9 @@ double SpotLight::angle() const
 
 void SpotLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
 {
-    double candela = 0.0;
-
-    if (m_area > 0.0)
-    {
-        candela = m_brightness / m_area;
-    }
-
     Vector direction = forward();
+
+    Color photonColor = m_color * m_lumens * photonBrightness;
 
     for (auto& photon : photonBlock)
     {
@@ -67,7 +65,7 @@ void SpotLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightne
         }
 
         photon.ray = {position() + offset, offsetDirection};
-        photon.color = m_color * (candela * photonBrightness);
+        photon.color = photonColor;
         photon.bounces = 0;
     }
 }
