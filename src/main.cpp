@@ -11,6 +11,7 @@
 #include "Object.h"
 #include "ObjReader.h"
 #include "OmniLight.h"
+#include "ParallelLight.h"
 #include "Photon.h"
 #include "Pixel.h"
 #include "Plane.h"
@@ -39,20 +40,20 @@ namespace
 constexpr size_t million = 1000000;
 
 constexpr size_t queueSize = 10 * million;
-constexpr size_t photonsPerLight = 2 * million;
+constexpr size_t photonsPerLight = 5 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = frameCount;
+constexpr size_t renderFrameCount = 1;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
 constexpr double verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "spot_light_0";
+const std::string outputName = "parallel_light_0";
 
 }
 
@@ -86,8 +87,9 @@ int main(int argc, char** argv)
         // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight3 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
-        std::shared_ptr<SpotLight> spotLight0 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
-        std::shared_ptr<SpotLight> spotLight1 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
+        // std::shared_ptr<SpotLight> spotLight0 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
+        // std::shared_ptr<SpotLight> spotLight1 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
+        std::shared_ptr<ParallelLight> parallelLight0 = std::static_pointer_cast<ParallelLight>(objects.emplace_back(std::make_shared<ParallelLight>()));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
@@ -100,8 +102,9 @@ int main(int argc, char** argv)
         // Object::setParent(omniLight2, root);
         // Object::setParent(omniLight3, root);
         // Object::setParent(cubeMesh, root);
-        Object::setParent(spotLight0, root);
-        Object::setParent(spotLight1, root);
+        // Object::setParent(spotLight0, root);
+        // Object::setParent(spotLight1, root);
+        Object::setParent(parallelLight0, root);
 
         ground->transform.position = {0, -70, 0};
 
@@ -131,19 +134,26 @@ int main(int argc, char** argv)
         // omniLight3->brightness(80000);
         // omniLight3->innerRadius(5.0f);
 
-        spotLight0->name("SpotLight0");
-        spotLight0->transform.position = {70, 70, 0};
-        spotLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
-        spotLight0->color({1, 1, 0});
-        spotLight0->brightness(10000000);
-        spotLight0->angle(Utility::radians(10.0));
+        // spotLight0->name("SpotLight0");
+        // spotLight0->transform.position = {70, 70, 0};
+        // spotLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
+        // spotLight0->color({1, 1, 0});
+        // spotLight0->brightness(10000000);
+        // spotLight0->angle(Utility::radians(10.0));
 
-        spotLight1->name("SpotLight1");
-        spotLight1->transform.position = {-70, 70, 0};
-        spotLight1->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
-        spotLight1->color({0, 1, 1});
-        spotLight1->brightness(10000000);
-        spotLight1->angle(Utility::radians(10.0));
+        // spotLight1->name("SpotLight1");
+        // spotLight1->transform.position = {-70, 70, 0};
+        // spotLight1->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
+        // spotLight1->color({0, 1, 1});
+        // spotLight1->brightness(10000000);
+        // spotLight1->angle(Utility::radians(10.0));
+
+        parallelLight0->name("ParallelLight0");
+        parallelLight0->transform.position = {1000, 7000, 1000};
+        parallelLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(180.0 + 45.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(82.0), 0, 0);
+        parallelLight0->color({1, 1, 1});
+        parallelLight0->brightness(1000000);
+        parallelLight0->radius(2000.0);
 
         camera->transform.position = {0.0f, 0.0f, 100.0f};
         camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
