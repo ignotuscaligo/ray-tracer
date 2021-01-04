@@ -13,6 +13,7 @@ public:
     size_t indexForName(const std::string& name) const;
     std::shared_ptr<T> fetch(const std::string& name) const;
     std::shared_ptr<T> fetchByIndex(size_t index) const;
+    size_t size() const;
 
 private:
     std::vector<std::shared_ptr<T>> m_contents;

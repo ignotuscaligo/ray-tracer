@@ -42,7 +42,14 @@ std::shared_ptr<T> Library<T>::fetchByIndex(size_t index) const
     return m_contents[index];
 }
 
+template<typename T>
+size_t Library<T>::size() const
+{
+    return m_contents.size();
+}
+
 template void Library<Material>::add(std::shared_ptr<Material> data);
 template size_t Library<Material>::indexForName(const std::string& name) const;
 template std::shared_ptr<Material> Library<Material>::fetch(const std::string& name) const;
 template std::shared_ptr<Material> Library<Material>::fetchByIndex(size_t index) const;
+template size_t Library<Material>::size() const;
