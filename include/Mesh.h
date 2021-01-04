@@ -1,8 +1,11 @@
 #pragma once
 
+#include "Hit.h"
+#include "Ray.h"
 #include "Tree.h"
 #include "Triangle.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +26,11 @@ public:
     std::string name() const
     {
         return m_name;
+    }
+
+    std::optional<Hit> castRay(const Ray& ray, std::vector<Hit>& castBuffer) const
+    {
+        return m_tree.castRay(ray, castBuffer);
     }
 
 private:
