@@ -72,7 +72,7 @@ void Worker::exec()
             continue;
         }
 
-        if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize)
+        if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 16)
         {
             if (!processLights())
             {
@@ -232,7 +232,7 @@ bool Worker::processPhotons()
 
         if (bouncedPhotonCount > 0)
         {
-            size_t bounceCount = 2;
+            size_t bounceCount = 1;
             auto bouncedPhotonsBlock = photonQueue->initialize(bouncedPhotonCount * bounceCount);
             size_t photonIndex = 0;
 
