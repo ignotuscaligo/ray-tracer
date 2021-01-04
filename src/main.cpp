@@ -39,11 +39,12 @@ namespace
 {
 
 constexpr size_t million = 1000000;
+constexpr size_t thousand = 1000;
 
 constexpr size_t photonQueueSize = 20 * million;
 constexpr size_t hitQueueSize = 5 * million;
-constexpr size_t finalQueueSize = 1 * million;
-constexpr size_t photonsPerLight = 5 * million;
+constexpr size_t finalQueueSize = 100 * thousand;
+constexpr size_t photonsPerLight = 20 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
