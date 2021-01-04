@@ -10,7 +10,6 @@
 namespace ObjReader
 {
 
-std::vector<Triangle> loadTriangles(const std::string& filename);
 std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::string& filename);
 
 }
