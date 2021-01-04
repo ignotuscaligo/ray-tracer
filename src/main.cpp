@@ -433,6 +433,11 @@ int main(int argc, char** argv)
 
             std::cout << "Image write:" << std::endl;
             std::cout << "|- duration: " << writeImageDuration.count() << " us" << std::endl;
+
+            std::cout << "Work queues:" << std::endl;
+            std::cout << "|- photon queue maximum allocated:    " << photonQueue->largestAllocated() << std::endl;
+            std::cout << "|- hit queue maximum allocated:       " << hitQueue->largestAllocated() << std::endl;
+            std::cout << "|- final hit queue maximum allocated: " << finalHitQueue->largestAllocated() << std::endl;
         }
 
         for (size_t i = 0; i < workerCount; ++i)

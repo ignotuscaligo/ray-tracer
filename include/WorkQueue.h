@@ -52,6 +52,7 @@ public:
     size_t freeSpace() const;
     size_t allocated() const;
     size_t available() const;
+    size_t largestAllocated() const;
 
 private:
     const size_t m_size;
@@ -64,5 +65,6 @@ private:
     size_t m_readyTail;
     std::atomic<size_t> m_allocated;
     std::atomic<size_t> m_available;
+    std::atomic<size_t> m_largestAllocated;
     mutable std::mutex m_mutex;
 };

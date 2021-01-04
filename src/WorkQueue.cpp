@@ -110,6 +110,8 @@ typename WorkQueue<T>::Block WorkQueue<T>::initialize(size_t count)
             m_memoryHead = end % m_size;
             m_allocated.fetch_add(end - start);
 
+            m_largestAllocated = std::max(m_largestAllocated.load(), m_allocated.load());
+
             m_initializing.insert(end);
         }
     }
@@ -227,6 +229,12 @@ size_t WorkQueue<T>::available() const
     return m_available.load();
 }
 
+template<typename T>
+size_t WorkQueue<T>::largestAllocated() const
+{
+    return m_largestAllocated.load();
+}
+
 template WorkQueue<Photon>::Block::Block(size_t start, size_t end, std::vector<Photon>& queue);
 template Photon& WorkQueue<Photon>::Block::Iterator::operator*();
 template bool WorkQueue<Photon>::Block::Iterator::operator!=(const Iterator& rhs);
@@ -246,6 +254,7 @@ template size_t WorkQueue<Photon>::capacity() const;
 template size_t WorkQueue<Photon>::freeSpace() const;
 template size_t WorkQueue<Photon>::allocated() const;
 template size_t WorkQueue<Photon>::available() const;
+template size_t WorkQueue<Photon>::largestAllocated() const;
 
 template WorkQueue<PhotonHit>::Block::Block(size_t start, size_t end, std::vector<PhotonHit>& queue);
 template PhotonHit& WorkQueue<PhotonHit>::Block::Iterator::operator*();
@@ -266,3 +275,4 @@ template size_t WorkQueue<PhotonHit>::capacity() const;
 template size_t WorkQueue<PhotonHit>::freeSpace() const;
 template size_t WorkQueue<PhotonHit>::allocated() const;
 template size_t WorkQueue<PhotonHit>::available() const;
+template size_t WorkQueue<PhotonHit>::largestAllocated() const;
