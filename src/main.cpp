@@ -51,10 +51,10 @@ constexpr size_t renderFrameCount = 1;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
-constexpr double verticalFieldOfView = 80.0f;
+constexpr double verticalFieldOfView = 90.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "library_refactor";
+const std::string outputName = "simple_room";
 
 }
 
@@ -69,14 +69,17 @@ int main(int argc, char** argv)
 
         std::string knotMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
         std::string cubeMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\cube.obj)";
+        std::string simpleRoomMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\SimpleRoom.obj)";
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
-        materialLibrary->add(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->add(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 0.0f, 0.0f)));
+        materialLibrary->add(std::make_shared<DiffuseMaterial>("Ground", Color(1.0f)));
 
         std::shared_ptr<MeshLibrary> meshLibrary = std::make_shared<MeshLibrary>();
 
         meshLibrary->addFromFile(knotMeshFile);
+        meshLibrary->addFromFile(simpleRoomMeshFile);
 
         std::cout << "meshLibrary contains " << meshLibrary->size() << " meshes" << std::endl;
 
@@ -90,23 +93,33 @@ int main(int argc, char** argv)
         std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> cameraPivot = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
-        std::shared_ptr<Object> objectPivot = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> sun = objects.emplace_back(std::make_shared<Object>());
         std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), meshLibrary->fetch("Knot")));
         // std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Cyan"), ObjReader::loadMesh(cubeMeshFile)));
-        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("White")));
         // std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<OmniLight> omniLight3 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
         // std::shared_ptr<SpotLight> spotLight0 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
         // std::shared_ptr<SpotLight> spotLight1 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
-        std::shared_ptr<ParallelLight> parallelLight0 = std::static_pointer_cast<ParallelLight>(objects.emplace_back(std::make_shared<ParallelLight>()));
+
+        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("Ground")));
+
+        std::shared_ptr<Object> sunPivot = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<ParallelLight> sun = std::static_pointer_cast<ParallelLight>(objects.emplace_back(std::make_shared<ParallelLight>()));
+
+        std::shared_ptr<Object> roomContainer = objects.emplace_back(std::make_shared<Object>());
+        std::shared_ptr<Object> roomFloor = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("Floor")));
+        std::shared_ptr<Object> roomCeiling = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("Ceiling")));
+        std::shared_ptr<Object> roomNorthWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("NorthWall")));
+        std::shared_ptr<Object> roomSouthWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("SouthWall")));
+        std::shared_ptr<Object> roomEastWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("EastWall")));
+        std::shared_ptr<Object> roomWestWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("WestWall")));
+        std::shared_ptr<Object> roomWindowFrame = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("WindowFrame")));
 
         Object::setParent(cameraPivot, root);
         Object::setParent(camera, cameraPivot);
-        Object::setParent(sun, cameraPivot);
-        Object::setParent(objectPivot, root);
+        Object::setParent(sunPivot, root);
+        Object::setParent(sun, sunPivot);
         Object::setParent(ground, root);
         Object::setParent(knotMesh, root);
         // Object::setParent(omniLight0, root);
@@ -116,9 +129,20 @@ int main(int argc, char** argv)
         // Object::setParent(cubeMesh, root);
         // Object::setParent(spotLight0, root);
         // Object::setParent(spotLight1, root);
-        Object::setParent(parallelLight0, root);
 
-        ground->transform.position = {0, -70, 0};
+        Object::setParent(roomContainer, root);
+        Object::setParent(roomFloor, roomContainer);
+        Object::setParent(roomCeiling, roomContainer);
+        Object::setParent(roomNorthWall, roomContainer);
+        Object::setParent(roomSouthWall, roomContainer);
+        Object::setParent(roomEastWall, roomContainer);
+        Object::setParent(roomWestWall, roomContainer);
+        Object::setParent(roomWindowFrame, roomContainer);
+
+        // roomFloor->transform.position = {0, -7.62, 0};
+        // roomSouthWall->transform.position = {0, 0, -236.22};
+
+        ground->transform.position = {0, -7.62, 0};
 
         // cubeMesh->transform.position = {0, -70, 0};
 
@@ -160,17 +184,19 @@ int main(int argc, char** argv)
         // spotLight1->brightness(10000000);
         // spotLight1->angle(Utility::radians(10.0));
 
-        parallelLight0->name("ParallelLight0");
-        parallelLight0->transform.position = {1000, 7000, 1000};
-        parallelLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(180.0 + 45.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(82.0), 0, 0);
-        parallelLight0->color({1, 1, 1});
-        parallelLight0->brightness(1000000);
-        parallelLight0->radius(2000.0);
+        sun->name("ParallelLight0");
+        sun->transform.position = {0.0, 1000.0, 0.0};
+        sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(90), 0, 0);
+        sun->color({1, 1, 1});
+        sun->brightness(10000000);
+        sun->radius(1000.0);
 
-        camera->transform.position = {0.0f, 0.0f, 100.0f};
-        camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(-10), Utility::radians(180), 0);
+        sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(0.0), 0.0, 0.0);
 
-        sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(45.0f), Utility::radians(45.0f), 0.0f);
+        camera->transform.position = {274.32, 172.72, 0.0};
+        camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(0), Utility::radians(-90), 0);
+
+        knotMesh->transform.position = {0.0, 121.92, 0.0};
 
         std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(imageWidth, imageHeight);
 
@@ -221,7 +247,8 @@ int main(int argc, char** argv)
             });
         }
 
-        const double rotationStep = 360.0f / static_cast<double>(frameCount);
+        const double rotationStep = 360.0 / static_cast<double>(frameCount);
+        const double sunPivotStep = 180.0 / static_cast<double>(frameCount);
 
         for (size_t frame = startFrame; frame < startFrame + renderFrameCount; ++frame)
         {
@@ -239,7 +266,16 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Animating objects" << std::endl;
 
+            const double animTime = static_cast<double>(frame) / static_cast<double>(frameCount);
+
+            double sunIntro = std::min(1.0, animTime * 5.0);
+            double sunOutro = std::min(1.0, (1.0 - animTime) * 5.0);
+
             knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(frame * -rotationStep), Utility::radians(frame * rotationStep), Utility::radians(frame * rotationStep * 2));
+
+            sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-10.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(90.0 - (frame * sunPivotStep)), 0.0, 0.0);
+
+            sun->brightness(100000000 * sunIntro * sunOutro);
 
             std::cout << "---" << std::endl;
             std::cout << "Initializing lights" << std::endl;
