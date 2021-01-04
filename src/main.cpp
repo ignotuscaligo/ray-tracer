@@ -53,7 +53,7 @@ constexpr size_t imageHeight = 1080;
 constexpr double verticalFieldOfView = 80.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
-const std::string outputName = "parallel_light_0";
+const std::string outputName = "library_refactor";
 
 }
 
@@ -71,7 +71,7 @@ int main(int argc, char** argv)
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
-        materialLibrary->addMaterial(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
+        materialLibrary->add(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
 
         std::vector<std::shared_ptr<Object>> objects;
 

@@ -240,7 +240,7 @@ bool Worker::processPhotons()
             {
                 if (photonHit.photon.bounces < bounceThreshold)
                 {
-                    std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
+                    std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 
                     size_t startIndex = photonIndex;
                     size_t endIndex = startIndex + bounceCount;
@@ -375,7 +375,7 @@ bool Worker::processFinalHits()
 
         Vector pixelDirection = camera->pixelDirection(*coord);
 
-        std::shared_ptr<Material> material = materialLibrary->fetchMaterialByIndex(photonHit.hit.material);
+        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 
         if (material)
         {
