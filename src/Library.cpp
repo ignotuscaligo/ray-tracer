@@ -1,6 +1,7 @@
 #include "Library.h"
 
 #include "Material.h"
+#include "Mesh.h"
 
 template<typename T>
 void Library<T>::add(std::shared_ptr<T> data)
@@ -53,3 +54,9 @@ template size_t Library<Material>::indexForName(const std::string& name) const;
 template std::shared_ptr<Material> Library<Material>::fetch(const std::string& name) const;
 template std::shared_ptr<Material> Library<Material>::fetchByIndex(size_t index) const;
 template size_t Library<Material>::size() const;
+
+template void Library<Mesh>::add(std::shared_ptr<Mesh> data);
+template size_t Library<Mesh>::indexForName(const std::string& name) const;
+template std::shared_ptr<Mesh> Library<Mesh>::fetch(const std::string& name) const;
+template std::shared_ptr<Mesh> Library<Mesh>::fetchByIndex(size_t index) const;
+template size_t Library<Mesh>::size() const;

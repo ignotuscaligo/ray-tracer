@@ -133,6 +133,9 @@ target_sources(ray-tracer
         include/Library.h
         src/Library.cpp
 
+        include/MeshLibrary.h
+        src/MeshLibrary.cpp
+
         include/Mesh.h
 )
 

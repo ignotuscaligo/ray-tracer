@@ -7,6 +7,7 @@
 #include "LightQueue.h"
 #include "Material.h"
 #include "MaterialLibrary.h"
+#include "MeshLibrary.h"
 #include "MeshVolume.h"
 #include "Object.h"
 #include "ObjReader.h"
@@ -72,6 +73,17 @@ int main(int argc, char** argv)
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
 
         materialLibrary->add(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 1.0f, 1.0f)));
+
+        std::shared_ptr<MeshLibrary> meshLibrary = std::make_shared<MeshLibrary>();
+
+        meshLibrary->addFromFile(knotMeshFile);
+
+        std::cout << "meshLibrary contains " << meshLibrary->size() << " meshes" << std::endl;
+
+        for (size_t i = 0; i < meshLibrary->size(); ++i)
+        {
+            std::cout << i << ": " << meshLibrary->fetchByIndex(i)->name() << std::endl;
+        }
 
         std::vector<std::shared_ptr<Object>> objects;
 
