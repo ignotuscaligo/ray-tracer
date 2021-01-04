@@ -40,7 +40,9 @@ namespace
 
 constexpr size_t million = 1000000;
 
-constexpr size_t queueSize = 10 * million;
+constexpr size_t photonQueueSize = 20 * million;
+constexpr size_t hitQueueSize = 5 * million;
+constexpr size_t finalQueueSize = 1 * million;
 constexpr size_t photonsPerLight = 5 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
@@ -212,9 +214,9 @@ int main(int argc, char** argv)
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
         std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
-        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(queueSize);
-        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
-        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(queueSize);
+        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonQueueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(hitQueueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(finalQueueSize);
 
         std::vector<std::shared_ptr<Worker>> workers{workerCount};
 
