@@ -236,6 +236,11 @@ bool Worker::processPhotons()
             auto bouncedPhotonsBlock = photonQueue->initialize(bouncedPhotonCount * bounceCount);
             size_t photonIndex = 0;
 
+            if (bouncedPhotonsBlock.size() != bouncedPhotonCount * bounceCount)
+            {
+                std::cout << m_index << ": photon queue overflow!" << std::endl;
+            }
+
             for (auto& photonHit : m_hitBuffer)
             {
                 if (photonHit.photon.bounces < bounceThreshold)
