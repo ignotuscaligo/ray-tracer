@@ -50,7 +50,7 @@ constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = 1;
+constexpr size_t renderFrameCount = frameCount;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
