@@ -82,6 +82,7 @@ void setFromJsonIfPresent(T& output, json jsonContainer, const std::string& key)
     if (jsonContainer.contains(key))
     {
         output = jsonContainer[key].get<T>();
+        std::cout << "  Setting " << key << " to " << output << std::endl;
     }
 }
 
@@ -102,6 +103,8 @@ int main(int argc, char** argv)
 
         if (jsonData.contains("$workerConfiguration"))
         {
+            std::cout << "---" << std::endl;
+            std::cout << "Parsing $workerConfiguration" << std::endl;
             json& workerConfiguration = jsonData["$workerConfiguration"];
             setFromJsonIfPresent(config.workerCount, workerConfiguration, "$workerCount");
             setFromJsonIfPresent(config.fetchSize, workerConfiguration, "$fetchSize");
@@ -112,6 +115,8 @@ int main(int argc, char** argv)
 
         if (jsonData.contains("$renderConfiguration"))
         {
+            std::cout << "---" << std::endl;
+            std::cout << "Parsing $renderConfiguration" << std::endl;
             json& renderConfiguration = jsonData["$renderConfiguration"];
             setFromJsonIfPresent(config.imageWidth, renderConfiguration, "$width");
             setFromJsonIfPresent(config.imageHeight, renderConfiguration, "$height");
@@ -122,6 +127,8 @@ int main(int argc, char** argv)
 
         if (jsonData.contains("$materials"))
         {
+            std::cout << "---" << std::endl;
+            std::cout << "Parsing $materials" << std::endl;
             json& materials = jsonData["$materials"];
 
             for (const auto& [name, material] : materials.items())
@@ -147,6 +154,8 @@ int main(int argc, char** argv)
                         color = Color(colorData[0].get<float>(), colorData[1].get<float>(), colorData[2].get<float>());
                     }
                 }
+
+                std::cout << "  Creating " << type << " material named " << name << " with color (" << color.red << ", " << color.green << ", " << color.blue << ")" << std::endl;
 
                 if (type == "Diffuse")
                 {
