@@ -168,24 +168,34 @@ int main(int argc, char** argv)
             }
         }
 
-        std::cout << "---" << std::endl;
-        std::cout << "Setting up scene for render" << std::endl;
-
-        std::string knotMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
-        std::string cubeMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\cube.obj)";
-        std::string simpleRoomMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\SimpleRoom.obj)";
+        std::cout << "materialLibrary contains " << materialLibrary->size() << " materials" << std::endl;
+        for (size_t i = 0; i < materialLibrary->size(); ++i)
+        {
+            std::cout << i << ": " << materialLibrary->fetchByIndex(i)->name() << std::endl;
+        }
 
         std::shared_ptr<MeshLibrary> meshLibrary = std::make_shared<MeshLibrary>();
 
-        meshLibrary->addFromFile(knotMeshFile);
-        meshLibrary->addFromFile(simpleRoomMeshFile);
+        if (jsonData.contains("$meshes"))
+        {
+            std::cout << "---" << std::endl;
+            std::cout << "Parsing $meshes" << std::endl;
+            json& meshes = jsonData["$meshes"];
+
+            for (const auto& meshFilename : meshes)
+            {
+                meshLibrary->addFromFile(meshFilename.get<std::string>());
+            }
+        }
 
         std::cout << "meshLibrary contains " << meshLibrary->size() << " meshes" << std::endl;
-
         for (size_t i = 0; i < meshLibrary->size(); ++i)
         {
             std::cout << i << ": " << meshLibrary->fetchByIndex(i)->name() << std::endl;
         }
+
+        std::cout << "---" << std::endl;
+        std::cout << "Setting up scene for render" << std::endl;
 
         std::vector<std::shared_ptr<Object>> objects;
 
