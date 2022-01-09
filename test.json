@@ -1,0 +1,133 @@
+{
+    "$meshes": [
+        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\eschers_knot.obj",
+        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\cube.obj",
+        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\SimpleRoom.obj"
+    ],
+    "$materials": {
+        "Knot": {
+            "$type": "Diffuse",
+            "$color": [1.0, 0.0, 0.0]
+        },
+        "Ground": {
+            "$type": "Diffuse",
+            "$color": [1.0]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 32,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize": 5000000,
+        "$finalQueueSize": 100000
+    },
+    "$renderConfiguration": {
+        "$width": 1080,
+        "$height": 1080,
+        "$photonsPerLight": 20000000
+    },
+    "$scene": {
+        "root": {
+            "$type": "Object",
+            "cameraPivot": {
+                "$type": "Object",
+                "camera": {
+                    "$type": "Camera",
+                    "$verticalFieldOfView": 90.0,
+                    "$position": [
+                        274.32,
+                        172.72,
+                        0.0
+                    ],
+                    "$rotation": {
+                        "$type": "PitchYawRoll",
+                        "$value": [
+                            0.0,
+                            -90.0,
+                            0.0
+                        ]
+                    }
+                }
+            },
+            "sunPivot": {
+                "$type": "Object",
+                "sun": {
+                    "$type": "ParallelLight",
+                    "$position": [
+                        0.0,
+                        1000.0,
+                        0.0
+                    ],
+                    "$rotation": {
+                        "$type": "PitchYawRoll",
+                        "$value": [
+                            90.0,
+                            0.0,
+                            0.0
+                        ]
+                    },
+                    "$color": [1.0],
+                    "$brightness": 10000000,
+                    "$radius": 1000
+                }
+            },
+            "ground": {
+                "$type": "PlaneVolume",
+                "$material": "Ground",
+                "$position": [
+                    0.0,
+                    -7.62,
+                    0.0
+                ]
+            },
+            "knotMesh": {
+                "$type": "MeshVolume",
+                "$material": "Knot",
+                "$mesh": "Knot",
+                "$position": [
+                    0.0,
+                    121.92,
+                    0.0
+                ]
+            },
+            "roomContainer": {
+                "$type": "Object",
+                "roomFloor": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "Floor"
+                },
+                "roomCeiling": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "Ceiling"
+                },
+                "roomNorthWall": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "NorthWall"
+                },
+                "roomSouthWall": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "SouthWall"
+                },
+                "roomEastWall": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "EastWall"
+                },
+                "roomWestWall": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "WestWall"
+                },
+                "roomWindowFrame": {
+                    "$type": "MeshVolume",
+                    "$material": "Default",
+                    "$mesh": "WindowFrame"
+                }
+            }
+        }
+    }
+}
