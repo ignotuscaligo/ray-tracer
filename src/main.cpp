@@ -25,15 +25,20 @@
 #include "Worker.h"
 #include "WorkQueue.h"
 
+#include <nlohmann/json.hpp>
+
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <string>
 #include <thread>
+
+using namespace nlohmann;
 
 namespace
 {
@@ -59,25 +64,107 @@ constexpr double verticalFieldOfView = 90.0f;
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
 const std::string outputName = "simple_room";
 
+struct ProjectConfiguration
+{
+    size_t photonQueueSize = 20 * million;
+    size_t hitQueueSize = 5 * million;
+    size_t finalQueueSize = 100 * thousand;
+    size_t photonsPerLight = 20 * million;
+    size_t workerCount = 32;
+    size_t fetchSize = 100000;
+    size_t imageWidth = 1080;
+    size_t imageHeight = 1080;
+};
+
+template<typename T>
+void setFromJsonIfPresent(T& output, json jsonContainer, const std::string& key)
+{
+    if (jsonContainer.contains(key))
+    {
+        output = jsonContainer[key].get<T>();
+    }
+}
+
 }
 
 int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
 
+    ProjectConfiguration config;
+
     try
     {
+        std::cout << "Loading project file test.json" << std::endl;
+        std::ifstream jsonFile("C:\\Users\\ekleeman\\repos\\ray-tracer\\test.json");
+        json jsonData = json::parse(jsonFile);
+        jsonFile.close();
+
+        if (jsonData.contains("$workerConfiguration"))
+        {
+            json& workerConfiguration = jsonData["$workerConfiguration"];
+            setFromJsonIfPresent(config.workerCount, workerConfiguration, "$workerCount");
+            setFromJsonIfPresent(config.fetchSize, workerConfiguration, "$fetchSize");
+            setFromJsonIfPresent(config.photonQueueSize, workerConfiguration, "$photonQueueSize");
+            setFromJsonIfPresent(config.hitQueueSize, workerConfiguration, "$hitQueueSize");
+            setFromJsonIfPresent(config.finalQueueSize, workerConfiguration, "$finalQueueSize");
+        }
+
+        if (jsonData.contains("$renderConfiguration"))
+        {
+            json& renderConfiguration = jsonData["$renderConfiguration"];
+            setFromJsonIfPresent(config.imageWidth, renderConfiguration, "$width");
+            setFromJsonIfPresent(config.imageHeight, renderConfiguration, "$height");
+            setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight");
+        }
+
+        std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
+
+        if (jsonData.contains("$materials"))
+        {
+            json& materials = jsonData["$materials"];
+
+            for (const auto& [name, material] : materials.items())
+            {
+                if (!material.contains("$type"))
+                {
+                    throw std::runtime_error(std::string("Material \"") + name + std::string("\" requires $type"));
+                }
+
+                const std::string& type = material["$type"].get<std::string>();
+                Color color;
+
+                if (material.contains("$color"))
+                {
+                    json& colorData = material["$color"];
+
+                    if (colorData.size() == 1)
+                    {
+                        color = Color(colorData[0].get<float>());
+                    }
+                    else if (colorData.size() == 3)
+                    {
+                        color = Color(colorData[0].get<float>(), colorData[1].get<float>(), colorData[2].get<float>());
+                    }
+                }
+
+                if (type == "Diffuse")
+                {
+                    materialLibrary->add(std::make_shared<DiffuseMaterial>(name, color));
+                }
+                else
+                {
+                    std::cout << "WARNING: Unsupported material type \"" << type << "\"" << std::endl;
+                }
+            }
+        }
+
         std::cout << "---" << std::endl;
         std::cout << "Setting up scene for render" << std::endl;
 
         std::string knotMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\eschers_knot.obj)";
         std::string cubeMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\cube.obj)";
         std::string simpleRoomMeshFile = R"(C:\Users\ekleeman\Documents\Cinema 4D\SimpleRoom.obj)";
-
-        std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
-
-        materialLibrary->add(std::make_shared<DiffuseMaterial>("Knot", Color(1.0f, 0.0f, 0.0f)));
-        materialLibrary->add(std::make_shared<DiffuseMaterial>("Ground", Color(1.0f)));
 
         std::shared_ptr<MeshLibrary> meshLibrary = std::make_shared<MeshLibrary>();
 
