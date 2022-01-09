@@ -367,6 +367,8 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Animating objects" << std::endl;
 
+            // TODO: Move all animation to new system
+
             const double animTime = static_cast<double>(frame) / static_cast<double>(frameCount);
 
             double sunIntro = std::min(1.0, animTime * 5.0);
