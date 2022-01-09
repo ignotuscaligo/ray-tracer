@@ -29,8 +29,17 @@ Worker::Worker(size_t index, size_t fetchSize)
 void Worker::start()
 {
     // std::cout << m_index << ": start()" << std::endl;
+    if (m_running)
+    {
+        return;
+    }
+
     m_running = true;
     m_suspend = false;
+
+    m_thread = std::thread([this]() {
+        exec();
+    });
 }
 
 void Worker::suspend()
@@ -49,6 +58,7 @@ void Worker::stop()
 {
     // std::cout << m_index << ": stop()" << std::endl;
     m_running = false;
+    m_thread.join();
 }
 
 void Worker::exec()

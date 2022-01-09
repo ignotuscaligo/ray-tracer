@@ -343,17 +343,9 @@ int main(int argc, char** argv)
             ++workerIndex;
         }
 
-        std::vector<std::thread> threads{workerCount};
-
         for (size_t i = 0; i < workerCount; ++i)
         {
             workers[i]->start();
-
-            // TODO: move to Worker
-            threads[i] = std::thread([&workers, i]() {
-                // std::cout << "running thread" << std::endl;
-                workers[i]->exec();
-            });
         }
 
         const double rotationStep = 360.0 / static_cast<double>(frameCount);
@@ -550,11 +542,6 @@ int main(int argc, char** argv)
         for (size_t i = 0; i < workerCount; ++i)
         {
             workers[i]->stop();
-        }
-
-        for (size_t i = 0; i < workerCount; ++i)
-        {
-            threads[i].join();
         }
     }
     catch (const std::exception& e)

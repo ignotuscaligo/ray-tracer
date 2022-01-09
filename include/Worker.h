@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <memory>
+#include <thread>
 #include <vector>
 
 /*
@@ -80,6 +81,8 @@ private:
 
     size_t m_index = 0;
     size_t m_fetchSize = 0;
+
+    std::thread m_thread;
 
     std::atomic_bool m_running;
     std::atomic_bool m_suspend;
