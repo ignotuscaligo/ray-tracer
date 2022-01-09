@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.17)
 project(ray-tracer)
 
 add_subdirectory(libs/tinyobjloader)
+add_subdirectory(libs/json)
 
 add_executable(ray-tracer)
 
@@ -147,4 +148,5 @@ target_include_directories(ray-tracer
 target_link_libraries(ray-tracer
     PRIVATE
         tinyobjloader
+        nlohmann_json
 )
