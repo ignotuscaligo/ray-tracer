@@ -161,6 +161,17 @@ int main(int argc, char** argv)
                 {
                     materialLibrary->add(std::make_shared<DiffuseMaterial>(name, color));
                 }
+                else if (type == "Cauchy")
+                {
+                    float sigma = CauchyMaterial::kDefaultSigma;
+
+                    if (material.contains("$sigma"))
+                    {
+                        sigma = material["$sigma"].get<double>();
+                    }
+
+                    materialLibrary->add(std::make_shared<CauchyMaterial>(name, color, sigma));
+                }
                 else
                 {
                     std::cout << "WARNING: Unsupported material type \"" << type << "\"" << std::endl;
