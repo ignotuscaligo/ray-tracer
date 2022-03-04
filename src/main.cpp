@@ -55,7 +55,7 @@ constexpr size_t fetchSize = 100000;
 
 constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = frameCount;
+constexpr size_t renderFrameCount = 1;//frameCount;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
@@ -373,12 +373,13 @@ int main(int argc, char** argv)
 
             double sunIntro = std::min(1.0, animTime * 5.0);
             double sunOutro = std::min(1.0, (1.0 - animTime) * 5.0);
+            double sunAngle = -20.0 + ((std::sin(Utility::pi2 * animTime) + 1.0) / 2.0) * -70.0;
 
             knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(frame * -rotationStep), Utility::radians(frame * rotationStep), Utility::radians(frame * rotationStep * 2));
 
-            sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-10.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(90.0 - (frame * sunPivotStep)), 0.0, 0.0);
+            sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-10.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(sunAngle), 0.0, 0.0);
 
-            sun->brightness(100000000 * sunIntro * sunOutro);
+            // sun->brightness(100000000 * sunIntro * sunOutro);
 
             std::cout << "---" << std::endl;
             std::cout << "Initializing lights" << std::endl;
