@@ -6,6 +6,7 @@
 namespace Utility
 {
 
+extern const double halfPi;
 extern const double pi;
 extern const double pi2;
 extern const double pi4;
