@@ -128,6 +128,21 @@ Vector Vector::normalized() const noexcept
     return Vector::normalized(data);
 }
 
+double Vector::angleBetween(const Vector& a, const Vector& b) noexcept
+{
+    double dot = Vector::dot(a, b);
+    double mag = std::sqrt(a.magnitudeSquared() * b.magnitudeSquared());
+
+    if (mag > 0.0)
+    {
+        return std::acos(dot / mag);
+    }
+    else
+    {
+        return 0.0;
+    }
+}
+
 Vector Vector::cross(const Vector& a, const Vector& b) noexcept
 {
     // y, z, x

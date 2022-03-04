@@ -42,6 +42,7 @@ union Vector
     Vector normalize() noexcept;
     Vector normalized() const noexcept;
 
+    static double angleBetween(const Vector& a, const Vector& b) noexcept;
     static Vector cross(const Vector& a, const Vector& b) noexcept;
     static double dot(const __m256d& a, const __m256d& b) noexcept;
     static double dot(const Vector& a, const Vector& b) noexcept;
