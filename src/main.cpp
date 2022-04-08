@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "CauchyMaterial.h"
 #include "DiffuseMaterial.h"
+#include "EnumFlag.h"
 #include "Image.h"
 #include "LightQueue.h"
 #include "Material.h"
@@ -56,8 +57,6 @@ constexpr size_t fetchSize = 100000;
 
 constexpr size_t frameCount = 24 * 10;
 
-constexpr size_t imageWidth = 1080;
-constexpr size_t imageHeight = 1080;
 constexpr double verticalFieldOfView = 90.0f;
 
 const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
@@ -77,14 +76,386 @@ struct ProjectConfiguration
     size_t endFrame = 0;
 };
 
+ENUM_FLAG(JsonOption, unsigned int)
+enum class JsonOption
+{
+    None    = 0x00,
+    WithLog = 0x01,
+};
+
 template<typename T>
-void setFromJsonIfPresent(T& output, json jsonContainer, const std::string& key)
+void setFromJsonIfPresent(T& output, json jsonContainer, const std::string& key, JsonOption options = JsonOption::None)
 {
     if (jsonContainer.contains(key))
     {
         output = jsonContainer[key].get<T>();
-        std::cout << "  Setting " << key << " to " << output << std::endl;
+        if (checkFlag(options & JsonOption::WithLog))
+        {
+            std::cout << "  Setting " << key << " to " << output << std::endl;
+        }
     }
+}
+
+class VectorParseError : public std::runtime_error
+{
+public:
+    VectorParseError()
+    : std::runtime_error("Vector object must be an array with 3 or 4 number elements")
+    {
+    }
+};
+
+class RotationParseError : public std::runtime_error
+{
+public:
+    RotationParseError()
+    : std::runtime_error("Rotation object must contain a $type string and a Vector $value object")
+    {
+    }
+};
+
+class ColorParseError : public std::runtime_error
+{
+public:
+    ColorParseError()
+    : std::runtime_error("Color object must be an array with 1 or 3 number elements")
+    {
+    }
+};
+
+Vector parseVectorFromJson(json jsonContainer)
+{
+    if (!jsonContainer.is_array())
+    {
+        throw VectorParseError();
+    }
+
+    if (jsonContainer.size() < 3 || jsonContainer.size() > 4)
+    {
+        throw VectorParseError();
+    }
+
+    for (auto& element : jsonContainer)
+    {
+        if (!element.is_number())
+        {
+            throw VectorParseError();
+        }
+    }
+
+    Vector result{
+        jsonContainer[0].get<double>(),
+        jsonContainer[1].get<double>(),
+        jsonContainer[2].get<double>()
+    };
+
+    if (jsonContainer.size() == 4)
+    {
+        result._w =  jsonContainer[3].get<double>();
+    }
+
+    return result;
+}
+
+template<>
+void setFromJsonIfPresent<Vector>(Vector& output, json jsonContainer, const std::string& key, JsonOption options)
+{
+    if (jsonContainer.contains(key))
+    {
+        output = parseVectorFromJson(jsonContainer[key]);
+        if (checkFlag(options & JsonOption::WithLog))
+        {
+            std::cout << "  Setting " << key << " to (" << output.x << ", " << output.y << ", " << output.z << ", " << output._w << ")" << std::endl;
+        }
+    }
+}
+
+Quaternion parseRotationFromJson(json jsonContainer)
+{
+    if (!jsonContainer.is_object())
+    {
+        throw RotationParseError();
+    }
+
+    if (!jsonContainer.contains("$type"))
+    {
+        throw RotationParseError();
+    }
+
+    if (!jsonContainer.contains("$value"))
+    {
+        throw RotationParseError();
+    }
+
+    json typeObject = jsonContainer["$type"];
+
+    if (!typeObject.is_string())
+    {
+        throw RotationParseError();
+    }
+
+    std::string type = typeObject.get<std::string>();
+    Vector value = parseVectorFromJson(jsonContainer["$value"]);
+
+    Quaternion result;
+
+    if (type == "PitchYawRollDegrees")
+    {
+        result = Quaternion::fromPitchYawRoll(Utility::radians(value.x), Utility::radians(value.y), Utility::radians(value.z));
+    }
+    else if (type == "PitchYawRollRadians")
+    {
+        result = Quaternion::fromPitchYawRoll(value.x, value.y, value.z);
+    }
+    else
+    {
+        throw std::runtime_error(std::string("Unsupported rotation type: ") + type);
+    }
+
+    return result;
+}
+
+template<>
+void setFromJsonIfPresent<Quaternion>(Quaternion& output, json jsonContainer, const std::string& key, JsonOption options)
+{
+    if (jsonContainer.contains(key))
+    {
+        output = parseRotationFromJson(jsonContainer[key]);
+        if (checkFlag(options & JsonOption::WithLog))
+        {
+            std::cout << "  Setting " << key << " to (" << output.x << ", " << output.y << ", " << output.z << ", " << output.w << ")" << std::endl;
+        }
+    }
+}
+
+Color parseColorFromJson(json jsonContainer)
+{
+    if (!jsonContainer.is_array())
+    {
+        throw ColorParseError();
+    }
+
+    if (jsonContainer.size() != 1 && jsonContainer.size() != 3)
+    {
+        throw ColorParseError();
+    }
+
+    for (auto& element : jsonContainer)
+    {
+        if (!element.is_number())
+        {
+            throw ColorParseError();
+        }
+    }
+
+    if (jsonContainer.size() == 1)
+    {
+        const float grey = jsonContainer[0].get<float>();
+        return {
+            grey,
+            grey,
+            grey
+        };
+    }
+    else
+    {
+        return {
+            jsonContainer[0].get<float>(),
+            jsonContainer[1].get<float>(),
+            jsonContainer[2].get<float>()
+        };
+    }
+}
+
+template<>
+void setFromJsonIfPresent<Color>(Color& output, json jsonContainer, const std::string& key, JsonOption options)
+{
+    if (jsonContainer.contains(key))
+    {
+        output = parseColorFromJson(jsonContainer[key]);
+        if (checkFlag(options & JsonOption::WithLog))
+        {
+            std::cout << "  Setting " << key << " to (" << output.red << ", " << output.green << ", " << output.blue << ")" << std::endl;
+        }
+    }
+}
+
+class ObjectFactory
+{
+public:
+    ObjectFactory(std::shared_ptr<MaterialLibrary> materialLibrary, std::shared_ptr<MeshLibrary> meshLibrary)
+    : m_materialLibrary(materialLibrary)
+    , m_meshLibrary(meshLibrary)
+    {
+    }
+
+    void setParametersForObject(std::shared_ptr<Object> object, json jsonContainer)
+    {
+        setFromJsonIfPresent(object->transform.position, jsonContainer, "$position");
+        setFromJsonIfPresent(object->transform.rotation, jsonContainer, "$rotation");
+    }
+
+    void setParametersForCamera(std::shared_ptr<Camera> object, json jsonContainer)
+    {
+        setParametersForObject(object, jsonContainer);
+
+        double verticalFieldOfView = 0;
+        setFromJsonIfPresent(verticalFieldOfView, jsonContainer, "$verticalFieldOfView");
+
+        object->verticalFieldOfView(verticalFieldOfView);
+    }
+
+    void setParametersForVolume(std::shared_ptr<Volume> object, json jsonContainer)
+    {
+        setParametersForObject(object, jsonContainer);
+
+        std::string material = "Default";
+        setFromJsonIfPresent(material, jsonContainer, "$material");
+
+        object->materialIndex(m_materialLibrary->indexForName(material));
+    }
+
+    void setParametersForMeshVolume(std::shared_ptr<MeshVolume> object, json jsonContainer)
+    {
+        setParametersForVolume(object, jsonContainer);
+
+        std::string mesh = "Default";
+        setFromJsonIfPresent(mesh, jsonContainer, "$mesh");
+
+        object->mesh(m_meshLibrary->fetch(mesh));
+    }
+
+    void setParametersForPlaneVolume(std::shared_ptr<PlaneVolume> object, json jsonContainer)
+    {
+        setParametersForVolume(object, jsonContainer);
+    }
+
+    void setParametersForLight(std::shared_ptr<Light> object, json jsonContainer)
+    {
+        setParametersForObject(object, jsonContainer);
+
+        Color color;
+        setFromJsonIfPresent(color, jsonContainer, "$color");
+
+        object->color(color);
+
+        double brightness = 0.0;
+        setFromJsonIfPresent(brightness, jsonContainer, "$brightness");
+
+        object->brightness(brightness);
+    }
+
+    void setParametersForOmniLight(std::shared_ptr<OmniLight> object, json jsonContainer)
+    {
+        setParametersForLight(object, jsonContainer);
+
+        double innerRadius = 0.0;
+        setFromJsonIfPresent(innerRadius, jsonContainer, "$innerRadius");
+
+        object->innerRadius(innerRadius);
+    }
+
+    void setParametersForParallelLight(std::shared_ptr<ParallelLight> object, json jsonContainer)
+    {
+        setParametersForLight(object, jsonContainer);
+
+        double radius = 0.0;
+        setFromJsonIfPresent(radius, jsonContainer, "$radius");
+
+        object->radius(radius);
+    }
+
+    void setParametersForSpotLight(std::shared_ptr<SpotLight> object, json jsonContainer)
+    {
+        setParametersForLight(object, jsonContainer);
+
+        double innerRadius = 0.0;
+        setFromJsonIfPresent(innerRadius, jsonContainer, "$innerRadius");
+
+        object->innerRadius(innerRadius);
+
+        double angle = 0.0;
+        setFromJsonIfPresent(angle, jsonContainer, "$angle");
+
+        object->angle(angle);
+    }
+
+    std::shared_ptr<Object> createObjectFromJson(json jsonContainer)
+    {
+        std::string type = "Object";
+        setFromJsonIfPresent(type, jsonContainer, "$type");
+
+        if (type == "Object")
+        {
+            std::shared_ptr<Object> object = std::make_shared<Object>();
+            setParametersForObject(object, jsonContainer);
+            return object;
+        }
+        else if (type == "Camera")
+        {
+            std::shared_ptr<Camera> object = std::make_shared<Camera>();
+            setParametersForCamera(object, jsonContainer);
+            return object;
+        }
+        else if (type == "MeshVolume")
+        {
+            std::shared_ptr<MeshVolume> object = std::make_shared<MeshVolume>();
+            setParametersForMeshVolume(object, jsonContainer);
+            return object;
+        }
+        else if (type == "PlaneVolume")
+        {
+            std::shared_ptr<PlaneVolume> object = std::make_shared<PlaneVolume>();
+            setParametersForPlaneVolume(object, jsonContainer);
+            return object;
+        }
+        else if (type == "OmniLight")
+        {
+            std::shared_ptr<OmniLight> object = std::make_shared<OmniLight>();
+            setParametersForOmniLight(object, jsonContainer);
+            return object;
+        }
+        else if (type == "ParallelLight")
+        {
+            std::shared_ptr<ParallelLight> object = std::make_shared<ParallelLight>();
+            setParametersForParallelLight(object, jsonContainer);
+            return object;
+        }
+        else if (type == "SpotLight")
+        {
+            std::shared_ptr<SpotLight> object = std::make_shared<SpotLight>();
+            setParametersForSpotLight(object, jsonContainer);
+            return object;
+        }
+        else
+        {
+            throw std::runtime_error(std::string("Unrecognized object type: ") + type);
+        }
+    }
+
+private:
+    std::shared_ptr<MaterialLibrary> m_materialLibrary;
+    std::shared_ptr<MeshLibrary> m_meshLibrary;
+};
+
+std::vector<std::shared_ptr<Object>> parseObjectFromJson(const std::string& name, json jsonContainer, std::shared_ptr<Object> parent, ObjectFactory& objectFactory)
+{
+    std::vector<std::shared_ptr<Object>> parsedObjects;
+    std::shared_ptr<Object> parsedObject = objectFactory.createObjectFromJson(jsonContainer);
+    parsedObjects.push_back(parsedObject);
+    parsedObject->name(name);
+    Object::setParent(parsedObject, parent);
+
+    for (const auto& [childName, childObject] : jsonContainer.items())
+    {
+        if (childName[0] != '$')
+        {
+            std::vector<std::shared_ptr<Object>> childObjects = parseObjectFromJson(childName, childObject, parsedObject, objectFactory);
+            parsedObjects.insert(parsedObjects.end(), childObjects.begin(), childObjects.end());
+        }
+    }
+
+    return parsedObjects;
 }
 
 }
@@ -107,11 +478,11 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Parsing $workerConfiguration" << std::endl;
             json& workerConfiguration = jsonData["$workerConfiguration"];
-            setFromJsonIfPresent(config.workerCount, workerConfiguration, "$workerCount");
-            setFromJsonIfPresent(config.fetchSize, workerConfiguration, "$fetchSize");
-            setFromJsonIfPresent(config.photonQueueSize, workerConfiguration, "$photonQueueSize");
-            setFromJsonIfPresent(config.hitQueueSize, workerConfiguration, "$hitQueueSize");
-            setFromJsonIfPresent(config.finalQueueSize, workerConfiguration, "$finalQueueSize");
+            setFromJsonIfPresent(config.workerCount, workerConfiguration, "$workerCount", JsonOption::WithLog);
+            setFromJsonIfPresent(config.fetchSize, workerConfiguration, "$fetchSize", JsonOption::WithLog);
+            setFromJsonIfPresent(config.photonQueueSize, workerConfiguration, "$photonQueueSize", JsonOption::WithLog);
+            setFromJsonIfPresent(config.hitQueueSize, workerConfiguration, "$hitQueueSize", JsonOption::WithLog);
+            setFromJsonIfPresent(config.finalQueueSize, workerConfiguration, "$finalQueueSize", JsonOption::WithLog);
         }
 
         if (jsonData.contains("$renderConfiguration"))
@@ -119,11 +490,11 @@ int main(int argc, char** argv)
             std::cout << "---" << std::endl;
             std::cout << "Parsing $renderConfiguration" << std::endl;
             json& renderConfiguration = jsonData["$renderConfiguration"];
-            setFromJsonIfPresent(config.imageWidth, renderConfiguration, "$width");
-            setFromJsonIfPresent(config.imageHeight, renderConfiguration, "$height");
-            setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight");
-            setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame");
-            setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame");
+            setFromJsonIfPresent(config.imageWidth, renderConfiguration, "$width", JsonOption::WithLog);
+            setFromJsonIfPresent(config.imageHeight, renderConfiguration, "$height", JsonOption::WithLog);
+            setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight", JsonOption::WithLog);
+            setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame", JsonOption::WithLog);
+            setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame", JsonOption::WithLog);
         }
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
@@ -208,122 +579,56 @@ int main(int argc, char** argv)
             std::cout << i << ": " << meshLibrary->fetchByIndex(i)->name() << std::endl;
         }
 
-        std::cout << "---" << std::endl;
-        std::cout << "Setting up scene for render" << std::endl;
-
         std::vector<std::shared_ptr<Object>> objects;
+        ObjectFactory objectFactory{materialLibrary, meshLibrary};
 
-        std::shared_ptr<Object> root = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> cameraPivot = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(objects.emplace_back(std::make_shared<Camera>(imageWidth, imageHeight, verticalFieldOfView)));
-        std::shared_ptr<Object> knotMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Knot"), meshLibrary->fetch("Knot")));
-        // std::shared_ptr<Object> cubeMesh = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Cyan"), ObjReader::loadMesh(cubeMeshFile)));
-        // std::shared_ptr<OmniLight> omniLight0 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
-        // std::shared_ptr<OmniLight> omniLight1 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
-        // std::shared_ptr<OmniLight> omniLight2 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
-        // std::shared_ptr<OmniLight> omniLight3 = std::static_pointer_cast<OmniLight>(objects.emplace_back(std::make_shared<OmniLight>()));
-        // std::shared_ptr<SpotLight> spotLight0 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
-        // std::shared_ptr<SpotLight> spotLight1 = std::static_pointer_cast<SpotLight>(objects.emplace_back(std::make_shared<SpotLight>()));
+        if (jsonData.contains("$scene"))
+        {
+            std::cout << "---" << std::endl;
+            std::cout << "Parsing $scene" << std::endl;
+            json& scene = jsonData["$scene"];
 
-        std::shared_ptr<Object> ground = objects.emplace_back(std::make_shared<PlaneVolume>(materialLibrary->indexForName("Ground")));
+            for (const auto& [name, object] : scene.items())
+            {
+                std::vector<std::shared_ptr<Object>> parsedObjects = parseObjectFromJson(name, object, nullptr, objectFactory);
+                objects.insert(objects.end(), parsedObjects.begin(), parsedObjects.end());
+            }
+        }
 
-        std::shared_ptr<Object> sunPivot = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<ParallelLight> sun = std::static_pointer_cast<ParallelLight>(objects.emplace_back(std::make_shared<ParallelLight>()));
+        for (auto& object : objects)
+        {
+            if (object->hasType<Camera>())
+            {
+                std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(object);
+                camera->setFromRenderConfiguration(config.imageWidth, config.imageHeight);
+            }
+        }
 
-        std::shared_ptr<Object> roomContainer = objects.emplace_back(std::make_shared<Object>());
-        std::shared_ptr<Object> roomFloor = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("Floor")));
-        std::shared_ptr<Object> roomCeiling = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("Ceiling")));
-        std::shared_ptr<Object> roomNorthWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("NorthWall")));
-        std::shared_ptr<Object> roomSouthWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("SouthWall")));
-        std::shared_ptr<Object> roomEastWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("EastWall")));
-        std::shared_ptr<Object> roomWestWall = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("WestWall")));
-        std::shared_ptr<Object> roomWindowFrame = objects.emplace_back(std::make_shared<MeshVolume>(materialLibrary->indexForName("Default"), meshLibrary->fetch("WindowFrame")));
+        std::cout << "Parsed " << objects.size() << " object(s) from json" << std::endl;
 
-        Object::setParent(cameraPivot, root);
-        Object::setParent(camera, cameraPivot);
-        Object::setParent(sunPivot, root);
-        Object::setParent(sun, sunPivot);
-        Object::setParent(ground, root);
-        Object::setParent(knotMesh, root);
-        // Object::setParent(omniLight0, root);
-        // Object::setParent(omniLight1, root);
-        // Object::setParent(omniLight2, root);
-        // Object::setParent(omniLight3, root);
-        // Object::setParent(cubeMesh, root);
-        // Object::setParent(spotLight0, root);
-        // Object::setParent(spotLight1, root);
+        std::shared_ptr<Camera> camera;
+        std::shared_ptr<MeshVolume> knotMesh;
+        std::shared_ptr<Object> sunPivot;
 
-        Object::setParent(roomContainer, root);
-        Object::setParent(roomFloor, roomContainer);
-        Object::setParent(roomCeiling, roomContainer);
-        Object::setParent(roomNorthWall, roomContainer);
-        Object::setParent(roomSouthWall, roomContainer);
-        Object::setParent(roomEastWall, roomContainer);
-        Object::setParent(roomWestWall, roomContainer);
-        Object::setParent(roomWindowFrame, roomContainer);
+        for (auto& object : objects)
+        {
+            if (object->name() == "camera")
+            {
+                camera = std::static_pointer_cast<Camera>(object);
+            }
+            else if (object->name() == "knotMesh")
+            {
+                knotMesh = std::static_pointer_cast<MeshVolume>(object);
+            }
+            else if (object->name() == "sunPivot")
+            {
+                sunPivot = object;
+            }
+        }
 
-        // roomFloor->transform.position = {0, -7.62, 0};
-        // roomSouthWall->transform.position = {0, 0, -236.22};
+        std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(config.imageWidth, config.imageHeight);
 
-        ground->transform.position = {0, -7.62, 0};
-
-        // cubeMesh->transform.position = {0, -70, 0};
-
-        // omniLight0->name("OmniLight0");
-        // omniLight0->transform.position = {50, 50, 30};
-        // omniLight0->color(Color::fromRGB(255, 255, 255));
-        // omniLight0->brightness(10000000);
-        // omniLight0->innerRadius(5.0f);
-
-        // omniLight1->name("OmniLight1");
-        // omniLight1->transform.position = {43.3f, 50, -25};
-        // omniLight1->color(Color::fromRGB(0, 255, 0));
-        // omniLight1->brightness(1000000);
-        // omniLight1->innerRadius(5.0f);
-
-        // omniLight2->name("OmniLight2");
-        // omniLight2->transform.position = {-43.3f, 50, -25};
-        // omniLight2->color(Color::fromRGB(0, 0, 255));
-        // omniLight2->brightness(1000000);
-        // omniLight2->innerRadius(5.0f);
-
-        // omniLight3->name("OmniLight3");
-        // omniLight3->transform.position = {0, 0, 0};
-        // omniLight3->color(Color::fromRGB(255, 255, 255));
-        // omniLight3->brightness(80000);
-        // omniLight3->innerRadius(5.0f);
-
-        // spotLight0->name("SpotLight0");
-        // spotLight0->transform.position = {70, 70, 0};
-        // spotLight0->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
-        // spotLight0->color({1, 1, 0});
-        // spotLight0->brightness(10000000);
-        // spotLight0->angle(Utility::radians(10.0));
-
-        // spotLight1->name("SpotLight1");
-        // spotLight1->transform.position = {-70, 70, 0};
-        // spotLight1->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(90.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(80.0), 0, 0);
-        // spotLight1->color({0, 1, 1});
-        // spotLight1->brightness(10000000);
-        // spotLight1->angle(Utility::radians(10.0));
-
-        sun->name("ParallelLight0");
-        sun->transform.position = {0.0, 1000.0, 0.0};
-        sun->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(90), 0, 0);
-        sun->color({1, 1, 1});
-        sun->brightness(10000000);
-        sun->radius(1000.0);
-
-        sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(0.0), 0.0, 0.0);
-
-        camera->transform.position = {274.32, 172.72, 0.0};
-        camera->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(0), Utility::radians(-90), 0);
-
-        knotMesh->transform.position = {0.0, 121.92, 0.0};
-
-        std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(imageWidth, imageHeight);
-
-        std::shared_ptr<Image> image = std::make_shared<Image>(imageWidth, imageHeight);
+        std::shared_ptr<Image> image = std::make_shared<Image>(config.imageWidth, config.imageHeight);
         Pixel workingPixel;
 
         const size_t pixelCount = image->width() * image->height();
@@ -458,9 +763,9 @@ int main(int argc, char** argv)
 
             const std::chrono::time_point writeImageStart = std::chrono::system_clock::now();
 
-            for (size_t y = 0; y < imageHeight; ++y)
+            for (size_t y = 0; y < config.imageHeight; ++y)
             {
-                for (size_t x = 0; x < imageWidth; ++x)
+                for (size_t x = 0; x < config.imageWidth; ++x)
                 {
                     const Color color = buffer->fetchColor({x, y});
 
@@ -472,7 +777,7 @@ int main(int argc, char** argv)
                     workingPixel.green = std::min(static_cast<int>(gammaGreen * 65535), 65535);
                     workingPixel.blue = std::min(static_cast<int>(gammaBlue * 65535), 65535);
 
-                    image->setPixel((imageWidth - 1) - x, (imageHeight - 1) - y, workingPixel);
+                    image->setPixel((config.imageWidth - 1) - x, (config.imageHeight - 1) - y, workingPixel);
                 }
             }
 

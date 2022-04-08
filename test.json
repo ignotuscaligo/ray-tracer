@@ -42,7 +42,7 @@
                         0.0
                     ],
                     "$rotation": {
-                        "$type": "PitchYawRoll",
+                        "$type": "PitchYawRollDegrees",
                         "$value": [
                             0.0,
                             -90.0,
@@ -61,7 +61,7 @@
                         0.0
                     ],
                     "$rotation": {
-                        "$type": "PitchYawRoll",
+                        "$type": "PitchYawRollDegrees",
                         "$value": [
                             90.0,
                             0.0,
