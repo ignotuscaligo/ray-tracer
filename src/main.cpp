@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Camera.h"
+#include "CauchyMaterial.h"
 #include "DiffuseMaterial.h"
 #include "Image.h"
 #include "LightQueue.h"
