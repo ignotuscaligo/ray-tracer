@@ -24,7 +24,9 @@
     "$renderConfiguration": {
         "$width": 1080,
         "$height": 1080,
-        "$photonsPerLight": 20000000
+        "$photonsPerLight": 20000000,
+        "$startFrame": 0,
+        "$endFrame": 0
     },
     "$scene": {
         "root": {

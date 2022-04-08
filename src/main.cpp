@@ -53,9 +53,7 @@ constexpr size_t photonsPerLight = 20 * million;
 constexpr size_t workerCount = 32;
 constexpr size_t fetchSize = 100000;
 
-constexpr size_t startFrame = 0;
 constexpr size_t frameCount = 24 * 10;
-constexpr size_t renderFrameCount = 1;//frameCount;
 
 constexpr size_t imageWidth = 1080;
 constexpr size_t imageHeight = 1080;
@@ -74,6 +72,8 @@ struct ProjectConfiguration
     size_t fetchSize = 100000;
     size_t imageWidth = 1080;
     size_t imageHeight = 1080;
+    size_t startFrame = 0;
+    size_t endFrame = 0;
 };
 
 template<typename T>
@@ -121,6 +121,8 @@ int main(int argc, char** argv)
             setFromJsonIfPresent(config.imageWidth, renderConfiguration, "$width");
             setFromJsonIfPresent(config.imageHeight, renderConfiguration, "$height");
             setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight");
+            setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame");
+            setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame");
         }
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
@@ -362,10 +364,11 @@ int main(int argc, char** argv)
         const double rotationStep = 360.0 / static_cast<double>(frameCount);
         const double sunPivotStep = 180.0 / static_cast<double>(frameCount);
 
-        for (size_t frame = startFrame; frame < startFrame + renderFrameCount; ++frame)
+        const size_t configFrameCount = (config.endFrame - config.startFrame) + 1;
+        for (size_t frame = config.startFrame; frame <= config.endFrame; ++frame)
         {
             std::cout << "---" << std::endl;
-            std::cout << "Rendering frame " << frame + 1 << " / " << startFrame + renderFrameCount << std::endl;
+            std::cout << "Rendering frame " << frame + 1 << " / " << configFrameCount << std::endl;
 
             const std::chrono::time_point renderStart = std::chrono::system_clock::now();
 
