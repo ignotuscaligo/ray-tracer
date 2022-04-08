@@ -34,6 +34,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -59,11 +60,11 @@ constexpr size_t frameCount = 24 * 10;
 
 constexpr double verticalFieldOfView = 90.0f;
 
-const std::string renderPath = "C:\\Users\\ekleeman\\repos\\ray-tracer\\renders";
 const std::string outputName = "simple_room";
 
 struct ProjectConfiguration
 {
+    std::filesystem::path projectFilePath;
     size_t photonQueueSize = 20 * million;
     size_t hitQueueSize = 5 * million;
     size_t finalQueueSize = 100 * thousand;
@@ -74,6 +75,7 @@ struct ProjectConfiguration
     size_t imageHeight = 1080;
     size_t startFrame = 0;
     size_t endFrame = 0;
+    std::filesystem::path renderPath;
 };
 
 ENUM_FLAG(JsonOption, unsigned int)
@@ -465,11 +467,12 @@ int main(int argc, char** argv)
     std::cout << "Hello!" << std::endl;
 
     ProjectConfiguration config;
+    config.projectFilePath = std::filesystem::absolute("C:\\Users\\ekleeman\\repos\\ray-tracer\\test.json");
 
     try
     {
-        std::cout << "Loading project file test.json" << std::endl;
-        std::ifstream jsonFile("C:\\Users\\ekleeman\\repos\\ray-tracer\\test.json");
+        std::cout << "Loading project file " << config.projectFilePath << std::endl;
+        std::ifstream jsonFile(config.projectFilePath);
         json jsonData = json::parse(jsonFile);
         jsonFile.close();
 
@@ -495,6 +498,16 @@ int main(int argc, char** argv)
             setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight", JsonOption::WithLog);
             setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame", JsonOption::WithLog);
             setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame", JsonOption::WithLog);
+
+            if (renderConfiguration.contains("$renderPath"))
+            {
+                config.renderPath = renderConfiguration["$renderPath"].get<std::string>();
+            }
+
+            if (config.renderPath.is_relative())
+            {
+                config.renderPath = std::filesystem::absolute(config.projectFilePath.parent_path() / config.renderPath);
+            }
         }
 
         std::shared_ptr<MaterialLibrary> materialLibrary = std::make_shared<MaterialLibrary>();
@@ -781,7 +794,7 @@ int main(int argc, char** argv)
                 }
             }
 
-            PngWriter::writeImage(renderPath + "\\" + outputName + "." + std::to_string(frame) + ".png", *image, outputName);
+            PngWriter::writeImage(config.renderPath.string() + "\\" + outputName + "." + std::to_string(frame) + ".png", *image, outputName);
 
             const std::chrono::time_point writeImageEnd = std::chrono::system_clock::now();
             const std::chrono::microseconds writeImageDuration = std::chrono::duration_cast<std::chrono::microseconds>(writeImageEnd - writeImageStart);

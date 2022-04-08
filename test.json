@@ -26,7 +26,8 @@
         "$height": 1080,
         "$photonsPerLight": 20000000,
         "$startFrame": 0,
-        "$endFrame": 0
+        "$endFrame": 0,
+        "$renderPath": "renders"
     },
     "$scene": {
         "root": {
