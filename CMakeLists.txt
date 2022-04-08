@@ -141,6 +141,8 @@ target_sources(ray-tracer
         src/MeshLibrary.cpp
 
         include/Mesh.h
+
+        include/EnumFlag.h
 )
 
 target_include_directories(ray-tracer
