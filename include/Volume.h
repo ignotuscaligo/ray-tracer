@@ -11,7 +11,11 @@
 class Volume : public Object
 {
 public:
+    Volume();
     Volume(size_t materialIndex);
+
+    void materialIndex(size_t materialIndex);
+    size_t materialIndex() const;
 
     std::optional<Hit> castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
 

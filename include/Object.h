@@ -19,6 +19,8 @@ public:
     Quaternion rotation() const;
     Vector forward() const;
 
+    std::shared_ptr<Object> getChild(const std::string& name) const;
+
     static void setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent);
 
     Transform transform;

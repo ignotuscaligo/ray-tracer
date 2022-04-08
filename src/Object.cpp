@@ -47,6 +47,19 @@ Vector Object::forward() const
     return rotation() * Vector(0, 0, 1);
 }
 
+std::shared_ptr<Object> Object::getChild(const std::string& name) const
+{
+    for (auto& child : m_children)
+    {
+        if (child->name() == name)
+        {
+            return child;
+        }
+    }
+
+    return {};
+}
+
 void Object::setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent)
 {
     if (child->m_parent == parent)

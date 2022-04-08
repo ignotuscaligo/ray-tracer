@@ -1,10 +1,27 @@
 #include "Volume.h"
 
+Volume::Volume()
+    : Object()
+    , m_materialIndex(-1)
+{
+    registerType<Volume>();
+}
+
 Volume::Volume(size_t materialIndex)
     : Object()
     , m_materialIndex(materialIndex)
 {
     registerType<Volume>();
+}
+
+void Volume::materialIndex(size_t materialIndex)
+{
+    m_materialIndex = materialIndex;
+}
+
+size_t Volume::materialIndex() const
+{
+    return m_materialIndex;
 }
 
 std::optional<Hit> Volume::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const

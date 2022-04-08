@@ -10,6 +10,7 @@
 class PlaneVolume : public Volume
 {
 public:
+    PlaneVolume();
     PlaneVolume(size_t materialIndex);
 
 protected:

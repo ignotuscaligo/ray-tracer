@@ -4,6 +4,18 @@
 #include "Utility.h"
 
 #include <cmath>
+#include <stdexcept>
+
+Camera::Camera()
+    : Object()
+    , m_width(0)
+    , m_height(0)
+    , m_aspectRatio(0)
+    , m_verticalFieldOfView(0)
+    , m_horizontalFieldOfView(0)
+{
+    registerType<Camera>();
+}
 
 Camera::Camera(size_t width, size_t height, double verticalFieldOfView)
     : Object()
@@ -36,9 +48,27 @@ double Camera::horizontalFieldOfView() const
     return m_horizontalFieldOfView;
 }
 
+void Camera::verticalFieldOfView(double verticalFieldOfView)
+{
+    m_verticalFieldOfView = verticalFieldOfView;
+}
+
 double Camera::verticalFieldOfView() const
 {
     return m_verticalFieldOfView;
+}
+
+void Camera::setFromRenderConfiguration(size_t width, size_t height)
+{
+    if (width == 0 || height == 0)
+    {
+        throw std::runtime_error("Cannot configure Camera with 0 width or 0 height");
+    }
+
+    m_width = width;
+    m_height = height;
+    m_aspectRatio = static_cast<double>(m_width) / static_cast<double>(m_height);
+    m_horizontalFieldOfView = m_verticalFieldOfView * m_aspectRatio;
 }
 
 std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
