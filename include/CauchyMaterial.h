@@ -11,7 +11,7 @@
 class CauchyMaterial : public Material
 {
 public:
-    constexpr double kDefaultSigma = 0.2;
+    static constexpr double kDefaultSigma = 0.2;
 
     CauchyMaterial();
     CauchyMaterial(const std::string& name, const Color& color = {1.0f, 1.0f, 1.0f}, double sigma = kDefaultSigma);
