@@ -455,7 +455,11 @@ std::filesystem::path resolvePath(const std::filesystem::path& path, const std::
 {
     if (path.is_relative())
     {
-        path = std::filesystem::absolute(basePath / path);
+        return std::filesystem::absolute(basePath / path);
+    }
+    else
+    {
+        return path;
     }
 }
 
