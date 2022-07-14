@@ -451,6 +451,14 @@ std::vector<std::shared_ptr<Object>> parseObjectFromJson(const std::string& name
     return parsedObjects;
 }
 
+std::filesystem::path resolvePath(const std::filesystem::path& path, const std::filesystem::path& basePath)
+{
+    if (path.is_relative())
+    {
+        path = std::filesystem::absolute(basePath / path);
+    }
+}
+
 }
 
 int main(int argc, char** argv)
@@ -494,12 +502,7 @@ int main(int argc, char** argv)
 
             if (renderConfiguration.contains("$renderPath"))
             {
-                config.renderPath = renderConfiguration["$renderPath"].get<std::string>();
-            }
-
-            if (config.renderPath.is_relative())
-            {
-                config.renderPath = std::filesystem::absolute(config.projectFilePath.parent_path() / config.renderPath);
+                config.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), config.projectFilePath.parent_path());
             }
 
             if (renderConfiguration.contains("$renderName"))
