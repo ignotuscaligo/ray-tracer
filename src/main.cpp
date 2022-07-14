@@ -49,8 +49,6 @@ namespace
 constexpr size_t million = 1000000;
 constexpr size_t thousand = 1000;
 
-constexpr double verticalFieldOfView = 90.0f;
-
 struct ProjectConfiguration
 {
     std::filesystem::path projectFilePath;
