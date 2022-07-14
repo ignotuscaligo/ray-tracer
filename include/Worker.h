@@ -55,6 +55,8 @@ public:
     void exec();
     std::exception_ptr exception();
 
+    void setBounceThreshold(size_t bounceThreshold);
+
     std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<LightQueue> lightQueue;
@@ -83,6 +85,8 @@ private:
 
     size_t m_index = 0;
     size_t m_fetchSize = 0;
+
+    size_t m_bounceThreshold = 1;
 
     std::thread m_thread;
 

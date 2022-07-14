@@ -122,6 +122,11 @@ std::exception_ptr Worker::exception()
     return m_exception;
 }
 
+void Worker::setBounceThreshold(size_t bounceThreshold)
+{
+    m_bounceThreshold = bounceThreshold;
+}
+
 bool Worker::processLights()
 {
     auto workStart = std::chrono::system_clock::now();
@@ -226,12 +231,11 @@ bool Worker::processPhotons()
 
         hitQueue->ready(hitsBlock);
 
-        size_t bounceThreshold = 6;
         size_t bouncedPhotonCount = 0;
 
         for (auto& photonHit : m_hitBuffer)
         {
-            if (photonHit.photon.bounces < bounceThreshold)
+            if (photonHit.photon.bounces < m_bounceThreshold)
             {
                 ++bouncedPhotonCount;
             }
@@ -250,7 +254,7 @@ bool Worker::processPhotons()
 
             for (auto& photonHit : m_hitBuffer)
             {
-                if (photonHit.photon.bounces < bounceThreshold)
+                if (photonHit.photon.bounces < m_bounceThreshold)
                 {
                     std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 

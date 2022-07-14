@@ -62,6 +62,7 @@ struct ProjectConfiguration
     size_t imageHeight = 1080;
     size_t startFrame = 0;
     size_t endFrame = 0;
+    size_t bounceThreshold = 1;
     size_t frameCount = 0;
     std::filesystem::path renderPath;
     std::string renderName;
@@ -517,6 +518,7 @@ int main(int argc, char** argv)
             setFromJsonIfPresent(config.photonsPerLight, renderConfiguration, "$photonsPerLight", JsonOption::WithLog);
             setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame", JsonOption::WithLog);
             setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame", JsonOption::WithLog);
+            setFromJsonIfPresent(config.bounceThreshold, renderConfiguration, "$bounceThreshold", JsonOption::WithLog);
 
             config.frameCount = (config.endFrame - config.startFrame) + 1;
 
@@ -679,6 +681,7 @@ int main(int argc, char** argv)
             worker->image = image;
             worker->materialLibrary = materialLibrary;
             worker->lightQueue = lightQueue;
+            worker->setBounceThreshold(config.bounceThreshold);
             ++workerIndex;
         }
 
