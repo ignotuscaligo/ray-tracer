@@ -59,53 +59,61 @@ void Worker::stop()
 
 void Worker::exec()
 {
-    if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+    try
     {
-        std::cout << m_index << ": ABORT: missing required references!" << std::endl;
-        m_running = false;
+        if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+        {
+            std::cout << m_index << ": ABORT: missing required references!" << std::endl;
+            m_running = false;
+        }
+
+        while (m_running)
+        {
+            if (m_suspend)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 16)
+            {
+                if (!processLights())
+                {
+                    break;
+                }
+            }
+
+            if (photonQueue->available() > 0)
+            {
+                if (!processPhotons())
+                {
+                    break;
+                }
+            }
+
+            if (hitQueue->available() > 0)
+            {
+                if (!processHits())
+                {
+                    break;
+                }
+            }
+
+            if (finalHitQueue->available() > 0)
+            {
+                if (!processFinalHits())
+                {
+                    break;
+                }
+            }
+
+            std::this_thread::yield();
+        }
     }
-
-    while (m_running)
+    catch (const std::exception& e)
     {
-        if (m_suspend)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            continue;
-        }
-
-        if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 16)
-        {
-            if (!processLights())
-            {
-                break;
-            }
-        }
-
-        if (photonQueue->available() > 0)
-        {
-            if (!processPhotons())
-            {
-                break;
-            }
-        }
-
-        if (hitQueue->available() > 0)
-        {
-            if (!processHits())
-            {
-                break;
-            }
-        }
-
-        if (finalHitQueue->available() > 0)
-        {
-            if (!processFinalHits())
-            {
-                break;
-            }
-        }
-
-        std::this_thread::yield();
+        m_exception = std::current_exception();
+        m_running = false;
     }
 }
 
