@@ -27,7 +27,8 @@
         "$photonsPerLight": 20000000,
         "$startFrame": 0,
         "$endFrame": 0,
-        "$renderPath": "renders"
+        "$renderPath": "renders",
+        "$renderName": "test"
     },
     "$scene": {
         "root": {
