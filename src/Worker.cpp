@@ -116,8 +116,11 @@ void Worker::exec()
 
         std::this_thread::yield();
     }
+}
 
-    // std::cout << m_index << ": end thread" << std::endl;
+std::exception_ptr Worker::exception()
+{
+    return m_exception;
 }
 
 bool Worker::processLights()

@@ -14,6 +14,7 @@
 #include "WorkQueue.h"
 
 #include <atomic>
+#include <exception>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -52,6 +53,7 @@ public:
     void resume();
     void stop();
     void exec();
+    std::exception_ptr exception();
 
     std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
@@ -92,4 +94,6 @@ private:
     std::vector<Hit> m_castBuffer;
     std::vector<PhotonHit> m_hitBuffer;
     std::vector<PhotonHit> m_volumeHitBuffer;
+
+    std::exception_ptr m_exception;
 };
