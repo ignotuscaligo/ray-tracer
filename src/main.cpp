@@ -467,8 +467,26 @@ int main(int argc, char** argv)
 {
     std::cout << "Hello!" << std::endl;
 
+    if (argc == 1)
+    {
+        std::cout << "Please provide a project file to process" << std::endl;
+        return 1;
+    }
+    else if (argc > 2)
+    {
+        std::cout << "Too many arguments, only 1 required" << std::endl;
+        return 1;
+    }
+
+    std::filesystem::path projectFilePath = argv[1];
+    if (!std::filesystem::is_regular_file(projectFilePath))
+    {
+        std::cout << "Provided path is invalid: " << projectFilePath << std::endl;
+        return 1;
+    }
+
     ProjectConfiguration config;
-    config.projectFilePath = std::filesystem::absolute("C:\\Users\\ekleeman\\repos\\ray-tracer\\test.json");
+    config.projectFilePath = std::filesystem::absolute(projectFilePath);
 
     try
     {
