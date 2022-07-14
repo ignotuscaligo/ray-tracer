@@ -583,7 +583,8 @@ int main(int argc, char** argv)
 
             for (const auto& meshFilename : meshes)
             {
-                meshLibrary->addFromFile(meshFilename.get<std::string>());
+                std::filesystem::path meshPath = resolvePath(meshFilename.get<std::string>(), config.projectFilePath.parent_path());
+                meshLibrary->addFromFile(meshPath);
             }
         }
 
