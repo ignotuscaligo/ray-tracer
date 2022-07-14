@@ -2,11 +2,11 @@
 
 #include <iostream>
 
-PngWriter::PngWriter(const std::string& filename)
+PngWriter::PngWriter(const std::filesystem::path& path)
 {
-    m_file = fopen(filename.c_str(), "wb");
+    m_file = fopen(path.string().c_str(), "wb");
     if (m_file == nullptr) {
-        std::cout << "Could not open file " << filename << " for writing" << std::endl;
+        std::cout << "Could not open file " << path << " for writing" << std::endl;
         return;
     }
 
@@ -136,11 +136,11 @@ void PngWriter::writeImage(Image& image)
     delete[] rowPointers;
 }
 
-void PngWriter::writeImage(const std::string& filename, Image& image, const std::string& title)
+void PngWriter::writeImage(const std::filesystem::path& path, Image& image, const std::string& title)
 {
     std::cout << "---" << std::endl;
-    std::cout << "Write image " << filename << std::endl;
-    PngWriter writer(filename);
+    std::cout << "Write image " << path << std::endl;
+    PngWriter writer(path);
 
     if (!writer.valid())
     {

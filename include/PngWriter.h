@@ -2,6 +2,7 @@
 
 #include "Image.h"
 
+#include <filesystem>
 #include <png.h>
 #include <stdio.h>
 #include <string>
@@ -9,7 +10,7 @@
 class PngWriter
 {
 public:
-    PngWriter(const std::string& filename);
+    PngWriter(const std::filesystem::path& path);
     PngWriter(const PngWriter& other) = delete;
     PngWriter(PngWriter&& other) noexcept;
     ~PngWriter();
@@ -25,7 +26,7 @@ public:
     void setTitle(const std::string& title);
     void writeImage(Image& image);
 
-    static void writeImage(const std::string& filename, Image& image, const std::string& title);
+    static void writeImage(const std::filesystem::path& path, Image& image, const std::string& title);
 
 private:
     FILE* m_file = nullptr;
