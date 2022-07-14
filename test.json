@@ -1,8 +1,8 @@
 {
     "$meshes": [
-        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\eschers_knot.obj",
-        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\cube.obj",
-        "C:\\Users\\ekleeman\\Documents\\Cinema 4D\\SimpleRoom.obj"
+        "meshes/eschers_knot.obj",
+        "meshes/cube.obj",
+        "meshes/SimpleRoom.obj"
     ],
     "$materials": {
         "Knot": {
