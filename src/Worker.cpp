@@ -28,7 +28,6 @@ Worker::Worker(size_t index, size_t fetchSize)
 
 void Worker::start()
 {
-    // std::cout << m_index << ": start()" << std::endl;
     if (m_running)
     {
         return;
@@ -44,30 +43,22 @@ void Worker::start()
 
 void Worker::suspend()
 {
-    // std::cout << m_index << ": suspend()" << std::endl;
     m_suspend = true;
 }
 
 void Worker::resume()
 {
-    // std::cout << m_index << ": resume()" << std::endl;
     m_suspend = false;
 }
 
 void Worker::stop()
 {
-    // std::cout << m_index << ": stop()" << std::endl;
     m_running = false;
     m_thread.join();
 }
 
 void Worker::exec()
 {
-    // std::cout << m_index << ": start thread" << std::endl;
-
-    // std::vector<PhotonHit> hits;
-    // Pixel workingPixel;
-
     if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
     {
         std::cout << m_index << ": ABORT: missing required references!" << std::endl;
@@ -163,13 +154,8 @@ bool Worker::processLights()
 
 bool Worker::processPhotons()
 {
-    // std::cout << m_index << ": processing photons" << std::endl;
-
     auto workStart = std::chrono::system_clock::now();
-    // std::cout << m_index << ": fetching " << m_fetchSize << " photons" << std::endl;
     auto photonsBlock = photonQueue->fetch(m_fetchSize);
-
-    // std::cout << m_index << ": processing " << photonsBlock.size() << " photons" << std::endl;
 
     m_hitBuffer.clear();
 
@@ -280,14 +266,11 @@ bool Worker::processPhotons()
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
     photonDuration += workDuration.count();
 
-    // std::cout << m_index << ": finished processing photons, generated " << hits.size() << " hits" << std::endl;
-
     return true;
 }
 
 bool Worker::processHits()
 {
-    // std::cout << m_index << ": processing hits" << std::endl;
     auto workStart = std::chrono::system_clock::now();
 
     auto hitsBlock = hitQueue->fetch(m_fetchSize);
