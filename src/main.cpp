@@ -49,18 +49,7 @@ namespace
 constexpr size_t million = 1000000;
 constexpr size_t thousand = 1000;
 
-constexpr size_t photonQueueSize = 20 * million;
-constexpr size_t hitQueueSize = 5 * million;
-constexpr size_t finalQueueSize = 100 * thousand;
-constexpr size_t photonsPerLight = 20 * million;
-constexpr size_t workerCount = 32;
-constexpr size_t fetchSize = 100000;
-
-constexpr size_t frameCount = 24 * 10;
-
 constexpr double verticalFieldOfView = 90.0f;
-
-const std::string outputName = "simple_room";
 
 struct ProjectConfiguration
 {
@@ -75,7 +64,9 @@ struct ProjectConfiguration
     size_t imageHeight = 1080;
     size_t startFrame = 0;
     size_t endFrame = 0;
+    size_t frameCount = 0;
     std::filesystem::path renderPath;
+    std::string renderName;
 };
 
 ENUM_FLAG(JsonOption, unsigned int)
@@ -499,6 +490,8 @@ int main(int argc, char** argv)
             setFromJsonIfPresent(config.startFrame, renderConfiguration, "$startFrame", JsonOption::WithLog);
             setFromJsonIfPresent(config.endFrame, renderConfiguration, "$endFrame", JsonOption::WithLog);
 
+            config.frameCount = (config.endFrame - config.startFrame) + 1;
+
             if (renderConfiguration.contains("$renderPath"))
             {
                 config.renderPath = renderConfiguration["$renderPath"].get<std::string>();
@@ -507,6 +500,11 @@ int main(int argc, char** argv)
             if (config.renderPath.is_relative())
             {
                 config.renderPath = std::filesystem::absolute(config.projectFilePath.parent_path() / config.renderPath);
+            }
+
+            if (renderConfiguration.contains("$renderName"))
+            {
+                config.renderName = renderConfiguration["$renderName"].get<std::string>();
             }
         }
 
@@ -653,16 +651,16 @@ int main(int argc, char** argv)
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
 
         std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
-        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(photonQueueSize);
-        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(hitQueueSize);
-        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(finalQueueSize);
+        std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(config.photonQueueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.hitQueueSize);
+        std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.finalQueueSize);
 
-        std::vector<std::shared_ptr<Worker>> workers{workerCount};
+        std::vector<std::shared_ptr<Worker>> workers{config.workerCount};
 
         size_t workerIndex = 0;
         for (auto& worker : workers)
         {
-            worker = std::make_shared<Worker>(workerIndex, fetchSize);
+            worker = std::make_shared<Worker>(workerIndex, config.fetchSize);
             worker->camera = camera;
             worker->objects = objects;
             worker->photonQueue = photonQueue;
@@ -675,13 +673,13 @@ int main(int argc, char** argv)
             ++workerIndex;
         }
 
-        for (size_t i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < config.workerCount; ++i)
         {
             workers[i]->start();
         }
 
-        const double rotationStep = 360.0 / static_cast<double>(frameCount);
-        const double sunPivotStep = 180.0 / static_cast<double>(frameCount);
+        const double rotationStep = 360.0 / static_cast<double>(config.frameCount);
+        const double sunPivotStep = 180.0 / static_cast<double>(config.frameCount);
 
         const size_t configFrameCount = (config.endFrame - config.startFrame) + 1;
         for (size_t frame = config.startFrame; frame <= config.endFrame; ++frame)
@@ -702,7 +700,7 @@ int main(int argc, char** argv)
 
             // TODO: Move all animation to new system
 
-            const double animTime = static_cast<double>(frame) / static_cast<double>(frameCount);
+            const double animTime = static_cast<double>(frame) / static_cast<double>(config.frameCount);
 
             double sunIntro = std::min(1.0, animTime * 5.0);
             double sunOutro = std::min(1.0, (1.0 - animTime) * 5.0);
@@ -723,7 +721,7 @@ int main(int argc, char** argv)
             {
                 if (object->hasType<Light>())
                 {
-                    lightQueue->setPhotonCount(object->name(), photonsPerLight);
+                    lightQueue->setPhotonCount(object->name(), config.photonsPerLight);
                     ++lightCount;
                 }
             }
@@ -794,7 +792,9 @@ int main(int argc, char** argv)
                 }
             }
 
-            PngWriter::writeImage(config.renderPath.string() + "\\" + outputName + "." + std::to_string(frame) + ".png", *image, outputName);
+            std::string fileName = config.renderName + "." + std::to_string(frame) + ".png";
+            std::filesystem::path outputPath = config.renderPath / fileName;
+            PngWriter::writeImage(outputPath, *image, config.renderName);
 
             const std::chrono::time_point writeImageEnd = std::chrono::system_clock::now();
             const std::chrono::microseconds writeImageDuration = std::chrono::duration_cast<std::chrono::microseconds>(writeImageEnd - writeImageStart);
@@ -849,22 +849,22 @@ int main(int argc, char** argv)
             std::cout << "Lights:" << std::endl;
             std::cout << "|- processed:             " << emitProcessed << std::endl;
             std::cout << "|- process total time:    " << emitDuration << " us" << std::endl;
-            std::cout << "|- process time / worker: " << emitDuration / workerCount << " us" << std::endl;
+            std::cout << "|- process time / worker: " << emitDuration / config.workerCount << " us" << std::endl;
 
             std::cout << "Photons:" << std::endl;
             std::cout << "|- processed:             " << photonsProcessed << std::endl;
             std::cout << "|- process total time:    " << photonDuration << " us" << std::endl;
-            std::cout << "|- process time / worker: " << photonDuration / workerCount << " us" << std::endl;
+            std::cout << "|- process time / worker: " << photonDuration / config.workerCount << " us" << std::endl;
 
             std::cout << "Hits:" << std::endl;
             std::cout << "|- processed:             " << hitsProcessed << std::endl;
             std::cout << "|- process total time:    " << hitDuration << " us" << std::endl;
-            std::cout << "|- process time / worker: " << hitDuration / workerCount << " us" << std::endl;
+            std::cout << "|- process time / worker: " << hitDuration / config.workerCount << " us" << std::endl;
 
             std::cout << "Final hits:" << std::endl;
             std::cout << "|- processed:             " << finalHitsProcessed << std::endl;
             std::cout << "|- process total time:    " << writeDuration << " us" << std::endl;
-            std::cout << "|- process time / worker: " << writeDuration / workerCount << " us" << std::endl;
+            std::cout << "|- process time / worker: " << writeDuration / config.workerCount << " us" << std::endl;
 
             std::cout << "Image write:" << std::endl;
             std::cout << "|- duration: " << writeImageDuration.count() << " us" << std::endl;
@@ -875,7 +875,7 @@ int main(int argc, char** argv)
             std::cout << "|- final hit queue maximum allocated: " << finalHitQueue->largestAllocated() << std::endl;
         }
 
-        for (size_t i = 0; i < workerCount; ++i)
+        for (size_t i = 0; i < config.workerCount; ++i)
         {
             workers[i]->stop();
         }
