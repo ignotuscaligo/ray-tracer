@@ -3,7 +3,7 @@
 #include "Mesh.h"
 #include "Library.h"
 
-#include <filesytem>
+#include <filesystem>
 #include <string>
 
 class MeshLibrary : public Library<Mesh>
