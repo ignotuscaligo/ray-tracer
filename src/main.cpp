@@ -46,16 +46,16 @@ using namespace nlohmann;
 namespace
 {
 
-constexpr size_t million = 1000000;
-constexpr size_t thousand = 1000;
+constexpr const size_t kMillion = 1000000;
+constexpr const size_t kThousand = 1000;
 
 struct ProjectConfiguration
 {
     std::filesystem::path projectFilePath;
-    size_t photonQueueSize = 20 * million;
-    size_t hitQueueSize = 5 * million;
-    size_t finalQueueSize = 100 * thousand;
-    size_t photonsPerLight = 20 * million;
+    size_t photonQueueSize = 20 * kMillion;
+    size_t hitQueueSize = 5 * kMillion;
+    size_t finalQueueSize = 100 * kThousand;
+    size_t photonsPerLight = 20 * kMillion;
     size_t workerCount = 32;
     size_t fetchSize = 100000;
     size_t imageWidth = 1080;
