@@ -647,6 +647,8 @@ int main(int argc, char** argv)
 
         std::cout << "Parsed " << objects.size() << " object(s) from json" << std::endl;
 
+        std::cout << "---" << std::endl;
+        std::cout << "Creating image buffers" << std::endl;
 
         std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(config.imageWidth, config.imageHeight);
         std::shared_ptr<Image> image = std::make_shared<Image>(config.imageWidth, config.imageHeight);
