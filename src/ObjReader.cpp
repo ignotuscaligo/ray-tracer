@@ -3,6 +3,7 @@
 #include "Vector.h"
 
 #include <array>
+#include <exception>
 #include <iostream>
 #include <tiny_obj_loader.h>
 
@@ -31,7 +32,7 @@ std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::filesystem::path& path)
 
     if (!err.empty())
     {
-        std::cout << "err: " << err << std::endl;
+        throw std::runtime_error(std::string("ObjReader::loadMeshes error: ") + err);
     }
 
     std::vector<std::shared_ptr<Mesh>> meshes;
