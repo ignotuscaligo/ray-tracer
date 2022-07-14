@@ -9,10 +9,10 @@
 namespace ObjReader
 {
 
-std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::string& filename)
+std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::filesystem::path& path)
 {
     std::cout << "---" << std::endl;
-    std::cout << "Loading meshes from OBJ " << filename << std::endl;
+    std::cout << "Loading meshes from OBJ " << path << std::endl;
 
     tinyobj::attrib_t attrib;
 
@@ -22,7 +22,7 @@ std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::string& filename)
     std::string warn;
     std::string err;
 
-    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str());
+    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str());
 
     if (!warn.empty())
     {

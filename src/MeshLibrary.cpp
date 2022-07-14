@@ -10,9 +10,9 @@ MeshLibrary::MeshLibrary()
 {
 }
 
-void MeshLibrary::addFromFile(const std::string& filename)
+void MeshLibrary::addFromFile(const std::filesystem::path& path)
 {
-    std::vector<std::shared_ptr<Mesh>> meshes = ObjReader::loadMeshes(filename);
+    std::vector<std::shared_ptr<Mesh>> meshes = ObjReader::loadMeshes(path);
 
     for (auto& mesh : meshes)
     {
