@@ -734,6 +734,8 @@ int main(int argc, char** argv)
             size_t lastHits = hitsAllocated;
             size_t lastFinalHits = finalHitsAllocated;
 
+            std::exception_ptr workerException;
+
             while (photonsAllocated > 0 || hitsAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -756,6 +758,25 @@ int main(int argc, char** argv)
                 lastPhotons = photonsAllocated;
                 lastHits = hitsAllocated;
                 lastFinalHits = finalHitsAllocated;
+
+                for (auto& worker : workers)
+                {
+                    if (worker->exception())
+                    {
+                        workerException = worker->exception();
+                        break;
+                    }
+                }
+            }
+
+            if (workerException)
+            {
+                for (auto& worker : workers)
+                {
+                    worker->stop();
+                }
+
+                std::rethrow_exception(workerException);
             }
 
             std::cout << "---" << std::endl;
