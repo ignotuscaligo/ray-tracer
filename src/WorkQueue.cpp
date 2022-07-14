@@ -126,27 +126,28 @@ typename WorkQueue<T>::Block WorkQueue<T>::initialize(size_t count)
 template<typename T>
 void WorkQueue<T>::ready(Block block)
 {
+    std::scoped_lock<std::mutex> lock(m_mutex);
+
+    if (block.startIndex != block.endIndex)
     {
-        std::scoped_lock<std::mutex> lock(m_mutex);
+        auto it = m_initializing.find(block.endIndex);
 
-        if (block.startIndex != block.endIndex)
+        size_t head = m_memoryHead;
+
+        if (!m_initializing.empty())
         {
-            auto it = m_initializing.find(block.endIndex);
-
-            size_t head = m_memoryHead;
-
-            if (!m_initializing.empty())
-            {
-                head = *m_initializing.begin();
-            }
-
-            m_initializing.erase(it);
-
-            size_t prev = m_readyHead;
-            m_readyHead = head % m_size;
-
-            m_available.fetch_add(block.endIndex - block.startIndex);
+            head = *m_initializing.begin();
         }
+
+        if (it != m_initializing.end())
+        {
+            m_initializing.erase(it);
+        }
+
+        size_t prev = m_readyHead;
+        m_readyHead = head % m_size;
+
+        m_available.fetch_add(block.endIndex - block.startIndex);
     }
 }
 
@@ -182,26 +183,26 @@ typename WorkQueue<T>::Block WorkQueue<T>::fetch(size_t count)
 template<typename T>
 void WorkQueue<T>::release(Block block)
 {
+    std::scoped_lock<std::mutex> lock(m_mutex);
+
+    if (block.startIndex != block.endIndex)
     {
-        std::scoped_lock<std::mutex> lock(m_mutex);
-
-        if (block.startIndex != block.endIndex)
+        auto it = m_processing.find(block.startIndex);
+        if (it != m_processing.end())
         {
-            auto it = m_processing.find(block.startIndex);
             m_processing.erase(it);
-
-            size_t tail = m_readyTail;
-
-            if (!m_processing.empty())
-            {
-                tail = *m_processing.begin();
-            }
-
-            size_t prev = m_memoryTail;
-            m_memoryTail = tail % m_size;
-
-            m_allocated.fetch_sub(block.endIndex - block.startIndex);
         }
+
+        size_t tail = m_readyTail;
+        if (!m_processing.empty())
+        {
+            tail = *m_processing.begin();
+        }
+
+        size_t prev = m_memoryTail;
+        m_memoryTail = tail % m_size;
+
+        m_allocated.fetch_sub(block.endIndex - block.startIndex);
     }
 }
 
