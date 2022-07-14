@@ -612,46 +612,24 @@ int main(int argc, char** argv)
             }
         }
 
+        std::shared_ptr<Camera> camera;
         for (auto& object : objects)
         {
             if (object->hasType<Camera>())
             {
-                std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(object);
+                camera = std::static_pointer_cast<Camera>(object);
                 camera->setFromRenderConfiguration(config.imageWidth, config.imageHeight);
             }
         }
 
         std::cout << "Parsed " << objects.size() << " object(s) from json" << std::endl;
 
-        std::shared_ptr<Camera> camera;
-        std::shared_ptr<MeshVolume> knotMesh;
-        std::shared_ptr<Object> sunPivot;
-
-        for (auto& object : objects)
-        {
-            if (object->name() == "camera")
-            {
-                camera = std::static_pointer_cast<Camera>(object);
-            }
-            else if (object->name() == "knotMesh")
-            {
-                knotMesh = std::static_pointer_cast<MeshVolume>(object);
-            }
-            else if (object->name() == "sunPivot")
-            {
-                sunPivot = object;
-            }
-        }
 
         std::shared_ptr<Buffer> buffer = std::make_shared<Buffer>(config.imageWidth, config.imageHeight);
-
         std::shared_ptr<Image> image = std::make_shared<Image>(config.imageWidth, config.imageHeight);
         Pixel workingPixel;
 
         const size_t pixelCount = image->width() * image->height();
-
-        const double pitchStep = camera->verticalFieldOfView() / static_cast<double>(image->height());
-        const double yawStep = camera->horizontalFieldOfView() / static_cast<double>(image->width());
 
         std::cout << "---" << std::endl;
         std::cout << "Rendering image at " << image->width() << " px by " << image->height() << " px" << std::endl;
@@ -684,9 +662,6 @@ int main(int argc, char** argv)
             workers[i]->start();
         }
 
-        const double rotationStep = 360.0 / static_cast<double>(config.frameCount);
-        const double sunPivotStep = 180.0 / static_cast<double>(config.frameCount);
-
         const size_t configFrameCount = (config.endFrame - config.startFrame) + 1;
         for (size_t frame = config.startFrame; frame <= config.endFrame; ++frame)
         {
@@ -700,23 +675,6 @@ int main(int argc, char** argv)
 
             buffer->clear();
             image->clear();
-
-            std::cout << "---" << std::endl;
-            std::cout << "Animating objects" << std::endl;
-
-            // TODO: Move all animation to new system
-
-            const double animTime = static_cast<double>(frame) / static_cast<double>(config.frameCount);
-
-            double sunIntro = std::min(1.0, animTime * 5.0);
-            double sunOutro = std::min(1.0, (1.0 - animTime) * 5.0);
-            double sunAngle = -20.0 + ((std::sin(Utility::pi2 * animTime) + 1.0) / 2.0) * -70.0;
-
-            knotMesh->transform.rotation = Quaternion::fromPitchYawRoll(Utility::radians(frame * -rotationStep), Utility::radians(frame * rotationStep), Utility::radians(frame * rotationStep * 2));
-
-            sunPivot->transform.rotation = Quaternion::fromPitchYawRoll(0, Utility::radians(-10.0), 0) * Quaternion::fromPitchYawRoll(Utility::radians(sunAngle), 0.0, 0.0);
-
-            // sun->brightness(100000000 * sunIntro * sunOutro);
 
             std::cout << "---" << std::endl;
             std::cout << "Initializing lights" << std::endl;
