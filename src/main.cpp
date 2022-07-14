@@ -635,6 +635,11 @@ int main(int argc, char** argv)
         {
             if (object->hasType<Camera>())
             {
+                if (camera)
+                {
+                    throw std::runtime_error("Only one Camera is allowed in the scene");
+                }
+
                 camera = std::static_pointer_cast<Camera>(object);
                 camera->setFromRenderConfiguration(config.imageWidth, config.imageHeight);
             }
