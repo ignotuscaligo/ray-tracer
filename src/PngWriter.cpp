@@ -6,7 +6,7 @@ PngWriter::PngWriter(const std::filesystem::path& path)
 {
     m_file = fopen(path.string().c_str(), "wb");
     if (m_file == nullptr) {
-        std::cout << "Could not open file " << path << " for writing" << std::endl;
+        std::cout << "Could not open file " << path.generic_string() << " for writing" << std::endl;
         return;
     }
 
@@ -139,7 +139,7 @@ void PngWriter::writeImage(Image& image)
 void PngWriter::writeImage(const std::filesystem::path& path, Image& image, const std::string& title)
 {
     std::cout << "---" << std::endl;
-    std::cout << "Write image " << path << std::endl;
+    std::cout << "Write image " << path.generic_string() << std::endl;
     PngWriter writer(path);
 
     if (!writer.valid())

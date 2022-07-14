@@ -13,7 +13,7 @@ namespace ObjReader
 std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::filesystem::path& path)
 {
     std::cout << "---" << std::endl;
-    std::cout << "Loading meshes from OBJ " << path << std::endl;
+    std::cout << "Loading meshes from OBJ " << path.generic_string() << std::endl;
 
     tinyobj::attrib_t attrib;
 

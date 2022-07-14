@@ -472,7 +472,7 @@ int main(int argc, char** argv)
 
     try
     {
-        std::cout << "Loading project file " << config.projectFilePath << std::endl;
+        std::cout << "Loading project file " << config.projectFilePath.generic_string() << std::endl;
         std::ifstream jsonFile(config.projectFilePath);
         json jsonData = json::parse(jsonFile);
         jsonFile.close();
