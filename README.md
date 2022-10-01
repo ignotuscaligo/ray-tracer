@@ -28,3 +28,15 @@ cmake ..
 cd build
 cmake --build . --config Release
 ```
+
+# Running
+
+## Windows
+```
+build\Release\ray-tracer.exe test.json
+```
+
+## Linux / macOS
+```
+build\Release\ray-tracer.exe test.json
+```
