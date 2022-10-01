@@ -14,6 +14,14 @@ cd ray-tracer
 git submodule update --init
 ```
 
+### Linux
+
+Install libpng-dev
+
+```
+sudo apt install libpng-dev
+```
+
 # Configuring
 
 ```
