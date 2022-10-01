@@ -46,5 +46,5 @@ build\Release\ray-tracer.exe test.json
 
 ## Linux / macOS
 ```
-build\Release\ray-tracer.exe test.json
+build/Release/ray-tracer test.json
 ```
