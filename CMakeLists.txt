@@ -17,6 +17,11 @@ if (WIN32)
         PROPERTIES
             VS_PACKAGE_REFERENCES "libpng_1.6.28.1"
     )
+else()
+    find_package(PNG REQUIRED)
+    target_link_libraries(ray-tracer
+        PRIVATE
+        PNG::PNG)
 endif()
 
 target_sources(ray-tracer
