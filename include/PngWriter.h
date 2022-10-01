@@ -2,6 +2,7 @@
 
 #include "Image.h"
 
+#include <cstring>
 #include <filesystem>
 #include <png.h>
 #include <stdio.h>

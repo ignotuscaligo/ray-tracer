@@ -328,7 +328,7 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 
     if (objects.size() <= m_pageSize)
     {
-        node->page = std::make_unique<Tree<T>::Node::Page>();
+        node->page = std::make_unique<typename Tree<T>::Node::Page>();
         node->page->contents = objects;
     }
     else
@@ -369,7 +369,7 @@ std::shared_ptr<typename Tree<T>::Node> Tree<T>::generateTree(const std::vector<
 
         if (!middleObjects.empty())
         {
-            node->page = std::make_unique<Tree<T>::Node::Page>();
+            node->page = std::make_unique<typename Tree<T>::Node::Page>();
             node->page->contents = middleObjects;
         }
     }
