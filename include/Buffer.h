@@ -4,6 +4,7 @@
 #include "PixelCoords.h"
 
 #include <atomic>
+#include <cstddef>
 #include <vector>
 
 class Buffer

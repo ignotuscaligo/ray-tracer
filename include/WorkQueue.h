@@ -1,8 +1,9 @@
 #pragma once
 
-#include <vector>
+#include <atomic>
 #include <set>
 #include <mutex>
+#include <vector>
 
 template<typename T>
 class WorkQueue
