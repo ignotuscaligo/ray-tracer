@@ -31,7 +31,6 @@ Vector::Vector(double ix, double iy, double iz) noexcept
 
 Vector::Vector(__m256d&& idata) noexcept
     : data(std::move(idata))
-    , _w(0)
 {
 }
 
