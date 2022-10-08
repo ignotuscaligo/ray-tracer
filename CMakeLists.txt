@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.17)
 
 project(ray-tracer)
 
-add_subdirectory(libs/tinyobjloader)
-add_subdirectory(libs/json)
+include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+conan_basic_setup(TARGETS)
 
 add_executable(ray-tracer)
 
@@ -12,17 +12,17 @@ set_target_properties(ray-tracer
         CXX_STANDARD 17
 )
 
-if (WIN32)
-    set_target_properties(ray-tracer
-        PROPERTIES
-            VS_PACKAGE_REFERENCES "libpng_1.6.28.1"
-    )
-else()
-    find_package(PNG REQUIRED)
-    target_link_libraries(ray-tracer
-        PRIVATE
-        PNG::PNG)
-endif()
+target_link_libraries(ray-tracer
+    PRIVATE
+        CONAN_PKG::nlohmann_json
+        CONAN_PKG::libpng
+        CONAN_PKG::tinyobjloader
+)
+
+target_include_directories(ray-tracer
+    PRIVATE
+        include/
+)
 
 target_sources(ray-tracer
     PRIVATE
@@ -148,15 +148,4 @@ target_sources(ray-tracer
         include/Mesh.h
 
         include/EnumFlag.h
-)
-
-target_include_directories(ray-tracer
-    PRIVATE
-        include/
-)
-
-target_link_libraries(ray-tracer
-    PRIVATE
-        tinyobjloader
-        nlohmann_json
 )
