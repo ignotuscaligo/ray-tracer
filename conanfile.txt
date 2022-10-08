@@ -4,4 +4,5 @@ nlohmann_json/3.11.2
 tinyobjloader/1.0.6
 
 [generators]
-cmake
+cmake_find_package
+virtualenv

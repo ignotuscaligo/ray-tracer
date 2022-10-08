@@ -21,6 +21,22 @@ Run `conan install` in the `build/` directory with the relative path to this pro
 conan install ..
 ```
 
+# Activate virtual environment
+
+The Conan configuration for this project sets up the dependencies in a virtual environment:
+
+## Windows
+
+```
+call activate.bat
+```
+
+## Linux / macOS
+
+```
+source activate.sh
+```
+
 # Configuring
 
 Run `cmake` in the `build/` directory with the relative path to this project.
@@ -34,14 +50,14 @@ cmake ..
 Run `cmake -- build .` in the `build/` directory. Build configuration can be selected with `--config Debug` or `--config Release`.
 
 ```
-cmake --build . --config Release
+cmake --build . --target ray-tracer --config Release
 ```
 
 # Running
 
 ## Windows
 ```
-build\bin\ray-tracer.exe test.json
+build\Release\ray-tracer.exe test.json
 ```
 
 ## Linux / macOS

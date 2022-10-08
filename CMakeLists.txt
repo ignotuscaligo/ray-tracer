@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 3.17)
 
+# ===== Setup
+
 project(ray-tracer)
 
-include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-conan_basic_setup(TARGETS)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_BINARY_DIR})
+
+find_package(nlohmann_json REQUIRED)
+find_package(PNG REQUIRED)
+find_package(tinyobjloader REQUIRED)
+
+# ===== Executable
 
 add_executable(ray-tracer)
-
 set_target_properties(ray-tracer
     PROPERTIES
         CXX_STANDARD 17
@@ -14,9 +20,9 @@ set_target_properties(ray-tracer
 
 target_link_libraries(ray-tracer
     PRIVATE
-        CONAN_PKG::nlohmann_json
-        CONAN_PKG::libpng
-        CONAN_PKG::tinyobjloader
+        nlohmann_json::nlohmann_json
+        PNG::PNG
+        tinyobjloader::tinyobjloader
 )
 
 target_include_directories(ray-tracer
