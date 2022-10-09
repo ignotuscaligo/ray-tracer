@@ -1,40 +1,56 @@
 # Initial setup
 
-This repo uses submodules to manage dependencies, so be sure to initialize those:
+## Install Conan
 
-```
-git clone --recurse-submodules https://github.com/ignotuscaligo/ray-tracer.git
-```
+This project uses Conan to manage external dependencies. Install for your environment using their instructions at [Conan](https://docs.conan.io/en/latest/installation.html)
 
-or
+## Set up build directory
 
-```
-git clone https://github.com/ignotuscaligo/ray-tracer.git
-cd ray-tracer
-git submodule update --init
-```
-
-### Linux
-
-Install libpng-dev
-
-```
-sudo apt install libpng-dev
-```
-
-# Configuring
+Create a new `build/` directory either in this folder, or externally. Keep track of the build folder path relative to this project.
 
 ```
 mkdir build
 cd build
+```
+
+# Installing dependencies
+
+Run `conan install` in the `build/` directory with the relative path to this project.
+
+```
+conan install ..
+```
+
+# Activate virtual environment
+
+The Conan configuration for this project sets up the dependencies in a virtual environment:
+
+## Windows
+
+```
+call activate.bat
+```
+
+## Linux / macOS
+
+```
+source activate.sh
+```
+
+# Configuring
+
+Run `cmake` in the `build/` directory with the relative path to this project.
+
+```
 cmake ..
 ```
 
 # Building
 
+Run `cmake -- build .` in the `build/` directory. Build configuration can be selected with `--config Debug` or `--config Release`.
+
 ```
-cd build
-cmake --build . --config Release
+cmake --build . --target ray-tracer --config Release
 ```
 
 # Running

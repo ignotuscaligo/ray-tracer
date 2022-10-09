@@ -1,28 +1,55 @@
 cmake_minimum_required(VERSION 3.17)
 
+# ===== Setup
+
 project(ray-tracer)
 
-add_subdirectory(libs/tinyobjloader)
-add_subdirectory(libs/json)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_BINARY_DIR})
+
+find_package(nlohmann_json REQUIRED)
+find_package(PNG REQUIRED)
+find_package(tinyobjloader REQUIRED)
+
+# ===== Executable
 
 add_executable(ray-tracer)
-
 set_target_properties(ray-tracer
     PROPERTIES
         CXX_STANDARD 17
 )
 
-if (WIN32)
-    set_target_properties(ray-tracer
-        PROPERTIES
-            VS_PACKAGE_REFERENCES "libpng_1.6.28.1"
+if (UNIX)
+    find_package(Threads)
+
+    target_compile_options(ray-tracer
+        PUBLIC
+            -march=native
     )
-else()
-    find_package(PNG REQUIRED)
+
     target_link_libraries(ray-tracer
         PRIVATE
-        PNG::PNG)
+            ${CMAKE_THREAD_LIBS_INIT}
+    )
 endif()
+
+target_link_libraries(ray-tracer
+    PRIVATE
+        nlohmann_json::nlohmann_json
+        PNG::PNG
+        tinyobjloader::tinyobjloader
+)
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_libraries(ray-tracer
+        PRIVATE
+            stdc++fs
+    )
+endif()
+
+target_include_directories(ray-tracer
+    PRIVATE
+        include/
+)
 
 target_sources(ray-tracer
     PRIVATE
@@ -148,15 +175,4 @@ target_sources(ray-tracer
         include/Mesh.h
 
         include/EnumFlag.h
-)
-
-target_include_directories(ray-tracer
-    PRIVATE
-        include/
-)
-
-target_link_libraries(ray-tracer
-    PRIVATE
-        tinyobjloader
-        nlohmann_json
 )

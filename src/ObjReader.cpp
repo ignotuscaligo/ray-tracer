@@ -5,6 +5,8 @@
 #include <array>
 #include <exception>
 #include <iostream>
+
+#define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 namespace ObjReader
@@ -20,15 +22,8 @@ std::vector<std::shared_ptr<Mesh>> loadMeshes(const std::filesystem::path& path)
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
 
-    std::string warn;
     std::string err;
-
-    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.string().c_str());
-
-    if (!warn.empty())
-    {
-        std::cout << "warn: " << warn << std::endl;
-    }
+    bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &err, path.string().c_str());
 
     if (!err.empty())
     {
