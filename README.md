@@ -64,3 +64,23 @@ build\Release\ray-tracer.exe test.json
 ```
 build/Release/ray-tracer test.json
 ```
+
+# Testing
+
+The `tests` target is configured along with the main executable above.
+
+```
+cmake --build . --target tests --config Release
+```
+
+## Windows
+
+```
+build\tests\Release\tests.exe -s -d yes
+```
+
+## Linux / macOS
+
+```
+build/tests/Release/tests -s -d yes
+```

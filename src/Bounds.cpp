@@ -3,8 +3,8 @@
 #include <algorithm>
 
 Limits::Limits(double imin, double imax) noexcept
-    : min(imin)
-    , max(imax)
+    : min(std::min(imin, imax))
+    , max(std::max(imin, imax))
 {
 }
 
