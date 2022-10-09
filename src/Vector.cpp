@@ -161,9 +161,8 @@ Vector Vector::cross(const Vector& a, const Vector& b) noexcept
 
 double Vector::dot(const __m256d& a, const __m256d& b) noexcept
 {
-    const __m256d mul = _mm256_mul_pd(a, b);
-
-    return mul.m256d_f64[0] + mul.m256d_f64[1] + mul.m256d_f64[2];
+    const Vector mul{_mm256_mul_pd(a, b)};
+    return mul.x + mul.y + mul.z;
 }
 
 double Vector::dot(const Vector& a, const Vector& b) noexcept
