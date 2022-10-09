@@ -669,12 +669,80 @@ TEST_CASE("Bounds::operator[] returns expected values", "[Bounds]")
 
 TEST_CASE("Bounds::contains returns expected values", "[Bounds]")
 {
+    Limits limitsX{-1.0, 2.0};
+    Limits limitsY{-2.0, 3.0};
+    Limits limitsZ{-3.0, 4.0};
+
+    Bounds bounds{limitsX, limitsY, limitsZ};
+
+    REQUIRE(bounds.contains(Vector()));
+    REQUIRE(bounds.contains(Vector(-1.0, -2.0, -3.0)));
+    REQUIRE(bounds.contains(Vector(2.0, 3.0, 4.0)));
+    REQUIRE(!bounds.contains(Vector(-2.0, -2.0, -3.0)));
+    REQUIRE(!bounds.contains(Vector(3.0, 3.0, 4.0)));
 }
 
 TEST_CASE("Bounds::intersects returns expected values", "[Bounds]")
 {
+    Limits limitsAX{-1.0, 1.0};
+    Limits limitsAY{-1.0, 1.0};
+    Limits limitsAZ{-1.0, 1.0};
+
+    Bounds boundsA{limitsAX, limitsAY, limitsAZ};
+
+    SECTION("Overlapping bounds intersect")
+    {
+        Limits limitsBX{0.0, 2.0};
+        Limits limitsBY{0.0, 2.0};
+        Limits limitsBZ{0.0, 2.0};
+
+        Bounds boundsB{limitsBX, limitsBY, limitsBZ};
+
+        REQUIRE(boundsA.intersects(boundsB));
+        REQUIRE(boundsB.intersects(boundsA));
+    }
+
+    SECTION("Touching bounds intersect")
+    {
+        Limits limitsBX{1.0, 2.0};
+        Limits limitsBY{1.0, 2.0};
+        Limits limitsBZ{1.0, 2.0};
+
+        Bounds boundsB{limitsBX, limitsBY, limitsBZ};
+
+        REQUIRE(boundsA.intersects(boundsB));
+        REQUIRE(boundsB.intersects(boundsA));
+    }
+
+    SECTION("Separate bounds do not intersect")
+    {
+        Limits limitsBX{2.0, 3.0};
+        Limits limitsBY{2.0, 3.0};
+        Limits limitsBZ{2.0, 3.0};
+
+        Bounds boundsB{limitsBX, limitsBY, limitsBZ};
+
+        REQUIRE(!boundsA.intersects(boundsB));
+        REQUIRE(!boundsB.intersects(boundsA));
+    }
 }
 
 TEST_CASE("Bounds::minimum and ::maximum return expected values", "[Bounds]")
 {
+    Limits limitsX{-1.0, 2.0};
+    Limits limitsY{-2.0, 3.0};
+    Limits limitsZ{-3.0, 4.0};
+
+    Bounds bounds{limitsX, limitsY, limitsZ};
+
+    Vector minimum = bounds.minimum();
+    Vector maximum = bounds.maximum();
+
+    REQUIRE_THAT(minimum.x,  WithinULP(limitsX.min, 1));
+    REQUIRE_THAT(minimum.y,  WithinULP(limitsY.min, 1));
+    REQUIRE_THAT(minimum.z,  WithinULP(limitsZ.min, 1));
+
+    REQUIRE_THAT(maximum.x,  WithinULP(limitsX.max, 1));
+    REQUIRE_THAT(maximum.y,  WithinULP(limitsY.max, 1));
+    REQUIRE_THAT(maximum.z,  WithinULP(limitsZ.max, 1));
 }
