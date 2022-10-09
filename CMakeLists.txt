@@ -34,7 +34,7 @@ if (UNIX)
 endif()
 
 target_link_libraries(ray-tracer-lib
-    PRIVATE
+    PUBLIC
         nlohmann_json::nlohmann_json
         PNG::PNG
         tinyobjloader::tinyobjloader
