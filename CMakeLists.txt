@@ -10,10 +10,11 @@ find_package(nlohmann_json REQUIRED)
 find_package(PNG REQUIRED)
 find_package(tinyobjloader REQUIRED)
 
-# ===== Executable
+# ===== Library
 
-add_executable(ray-tracer)
-set_target_properties(ray-tracer
+add_library(ray-tracer-lib)
+
+set_target_properties(ray-tracer-lib
     PROPERTIES
         CXX_STANDARD 17
 )
@@ -21,18 +22,18 @@ set_target_properties(ray-tracer
 if (UNIX)
     find_package(Threads)
 
-    target_compile_options(ray-tracer
+    target_compile_options(ray-tracer-lib
         PUBLIC
             -march=native
     )
 
-    target_link_libraries(ray-tracer
+    target_link_libraries(ray-tracer-lib
         PRIVATE
             ${CMAKE_THREAD_LIBS_INIT}
     )
 endif()
 
-target_link_libraries(ray-tracer
+target_link_libraries(ray-tracer-lib
     PRIVATE
         nlohmann_json::nlohmann_json
         PNG::PNG
@@ -40,21 +41,19 @@ target_link_libraries(ray-tracer
 )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_link_libraries(ray-tracer
+    target_link_libraries(ray-tracer-lib
         PRIVATE
             stdc++fs
     )
 endif()
 
-target_include_directories(ray-tracer
-    PRIVATE
+target_include_directories(ray-tracer-lib
+    PUBLIC
         include/
 )
 
-target_sources(ray-tracer
+target_sources(ray-tracer-lib
     PRIVATE
-        src/main.cpp
-
         include/Pixel.h
 
         include/Image.h
@@ -176,3 +175,24 @@ target_sources(ray-tracer
 
         include/EnumFlag.h
 )
+
+# ===== Executable
+
+add_executable(ray-tracer)
+
+set_target_properties(ray-tracer
+    PROPERTIES
+        CXX_STANDARD 17
+)
+
+target_link_libraries(ray-tracer
+    PRIVATE
+        ray-tracer-lib
+)
+
+target_sources(ray-tracer
+    PRIVATE
+        src/main.cpp
+)
+
+add_subdirectory(tests)
