@@ -18,10 +18,19 @@ set_target_properties(ray-tracer
         CXX_STANDARD 17
 )
 
-target_compile_options(ray-tracer
-    PUBLIC
-        -march=native
-)
+if (UNIX)
+    find_package(Threads)
+
+    target_compile_options(ray-tracer
+        PUBLIC
+            -march=native
+    )
+
+    target_link_libraries(ray-tracer
+        PRIVATE
+            ${CMAKE_THREAD_LIBS_INIT}
+    )
+endif()
 
 target_link_libraries(ray-tracer
     PRIVATE
@@ -29,6 +38,13 @@ target_link_libraries(ray-tracer
         PNG::PNG
         tinyobjloader::tinyobjloader
 )
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_libraries(ray-tracer
+        PRIVATE
+            stdc++fs
+    )
+endif()
 
 target_include_directories(ray-tracer
     PRIVATE
