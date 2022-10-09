@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.17)
 
 enable_testing()
 
-find_package(Catch2 REQUIRED)
+find_package(Catch2 3 REQUIRED)
 
 add_executable(tests)
 
