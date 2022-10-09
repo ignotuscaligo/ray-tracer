@@ -1,6 +1,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "Bounds.h"
+#include "Vector.h"
 
 using Catch::Matchers::WithinULP;
 
@@ -382,4 +383,298 @@ TEST_CASE("Limits addition assignment operator extends range", "[Limits]")
         REQUIRE_THAT(limitsA.min,  WithinULP(-2.0, 1));
         REQUIRE_THAT(limitsA.max,  WithinULP(2.0, 1));
     }
+}
+
+TEST_CASE("Bounds constructors produce expected initial state", "[Bounds]")
+{
+    SECTION("Default constructor initializes to zero")
+    {
+        Bounds bounds;
+
+        REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+        REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+        REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+        REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+        REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+        REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+    }
+
+    SECTION("Limits x, y, z constructor initializes to provided Limits")
+    {
+        Limits limitsX{-1.0, 1.0};
+        Limits limitsY{2.0};
+        Limits limitsZ{-3.0, 5.0};
+
+        Bounds bounds{limitsX, limitsY, limitsZ};
+
+        REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX.min, 1));
+        REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX.max, 1));
+
+        REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY.min, 1));
+        REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY.max, 1));
+
+        REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ.min, 1));
+        REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ.max, 1));
+    }
+
+    SECTION("Vector constructor initializes to single value Limits")
+    {
+        Vector vector{-1.0, 2.0, -3.0};
+
+        Bounds bounds{vector};
+
+        REQUIRE_THAT(bounds.x.min,  WithinULP(vector.x, 1));
+        REQUIRE_THAT(bounds.x.max,  WithinULP(vector.x, 1));
+
+        REQUIRE_THAT(bounds.y.min,  WithinULP(vector.y, 1));
+        REQUIRE_THAT(bounds.y.max,  WithinULP(vector.y, 1));
+
+        REQUIRE_THAT(bounds.z.min,  WithinULP(vector.z, 1));
+        REQUIRE_THAT(bounds.z.max,  WithinULP(vector.z, 1));
+    }
+
+    SECTION("Vector min, max constructor initializes Limits to match")
+    {
+        Vector vectorMin{-1.0, -2.0, -3.0};
+        Vector vectorMax{4.0, 5.0, 6.0};
+
+        Bounds bounds{vectorMin, vectorMax};
+
+        REQUIRE_THAT(bounds.x.min,  WithinULP(vectorMin.x, 1));
+        REQUIRE_THAT(bounds.x.max,  WithinULP(vectorMax.x, 1));
+
+        REQUIRE_THAT(bounds.y.min,  WithinULP(vectorMin.y, 1));
+        REQUIRE_THAT(bounds.y.max,  WithinULP(vectorMax.y, 1));
+
+        REQUIRE_THAT(bounds.z.min,  WithinULP(vectorMin.z, 1));
+        REQUIRE_THAT(bounds.z.max,  WithinULP(vectorMax.z, 1));
+    }
+}
+
+TEST_CASE("Bounds::extend performs expected operation", "[Bounds]")
+{
+    SECTION("Per axis extend behaves as expected")
+    {
+        Limits limitsX1{-1.0, 1.0};
+        Limits limitsY1{-2.0, 3.0};
+        Limits limitsZ1{-5.0, 2.0};
+
+        Limits limitsX2{-2.0, 1.0};
+        Limits limitsY2{-3.0, 3.0};
+        Limits limitsZ2{-6.0, 2.0};
+
+        Limits limitsX3{-1.0, 2.0};
+        Limits limitsY3{-2.0, 4.0};
+        Limits limitsZ3{-5.0, 3.0};
+
+        Bounds bounds;
+
+        SECTION("X axis")
+        {
+            bounds.extend(limitsX1, Axis::X);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX1.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX1.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+
+            bounds.extend(limitsX2, Axis::X);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX2.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX1.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+
+            bounds.extend(limitsX3, Axis::X);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX2.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX3.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+        }
+
+        SECTION("Y axis")
+        {
+            bounds.extend(limitsY1, Axis::Y);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY1.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY1.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+
+            bounds.extend(limitsY2, Axis::Y);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY2.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY1.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+
+            bounds.extend(limitsY3, Axis::Y);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY2.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY3.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(0.0, 1));
+        }
+
+        SECTION("Z axis")
+        {
+            bounds.extend(limitsZ1, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ1.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ1.max, 1));
+
+            bounds.extend(limitsZ2, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ2.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ1.max, 1));
+
+            bounds.extend(limitsZ3, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(0.0, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(0.0, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ2.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ3.max, 1));
+        }
+
+        SECTION("All axes")
+        {
+            bounds.extend(limitsX1, Axis::X);
+            bounds.extend(limitsY1, Axis::Y);
+            bounds.extend(limitsZ1, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX1.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX1.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY1.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY1.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ1.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ1.max, 1));
+
+            bounds.extend(limitsX2, Axis::X);
+            bounds.extend(limitsY2, Axis::Y);
+            bounds.extend(limitsZ2, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX2.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX1.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY2.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY1.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ2.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ1.max, 1));
+
+            bounds.extend(limitsX3, Axis::X);
+            bounds.extend(limitsY3, Axis::Y);
+            bounds.extend(limitsZ3, Axis::Z);
+
+            REQUIRE_THAT(bounds.x.min,  WithinULP(limitsX2.min, 1));
+            REQUIRE_THAT(bounds.x.max,  WithinULP(limitsX3.max, 1));
+
+            REQUIRE_THAT(bounds.y.min,  WithinULP(limitsY2.min, 1));
+            REQUIRE_THAT(bounds.y.max,  WithinULP(limitsY3.max, 1));
+
+            REQUIRE_THAT(bounds.z.min,  WithinULP(limitsZ2.min, 1));
+            REQUIRE_THAT(bounds.z.max,  WithinULP(limitsZ3.max, 1));
+        }
+    }
+}
+
+TEST_CASE("Bounds::getLimits returns expected values", "[Bounds]")
+{
+    Limits limitsX{-1.0, 2.0};
+    Limits limitsY{-2.0, 3.0};
+    Limits limitsZ{-3.0, 4.0};
+
+    Bounds bounds{limitsX, limitsY, limitsZ};
+
+    Limits actualLimitsX = bounds.getLimits(Axis::X);
+    Limits actualLimitsY = bounds.getLimits(Axis::Y);
+    Limits actualLimitsZ = bounds.getLimits(Axis::Z);
+
+    REQUIRE_THAT(actualLimitsX.min,  WithinULP(limitsX.min, 1));
+    REQUIRE_THAT(actualLimitsX.max,  WithinULP(limitsX.max, 1));
+
+    REQUIRE_THAT(actualLimitsY.min,  WithinULP(limitsY.min, 1));
+    REQUIRE_THAT(actualLimitsY.max,  WithinULP(limitsY.max, 1));
+
+    REQUIRE_THAT(actualLimitsZ.min,  WithinULP(limitsZ.min, 1));
+    REQUIRE_THAT(actualLimitsZ.max,  WithinULP(limitsZ.max, 1));
+}
+
+TEST_CASE("Bounds::operator[] returns expected values", "[Bounds]")
+{
+    Limits limitsX{-1.0, 2.0};
+    Limits limitsY{-2.0, 3.0};
+    Limits limitsZ{-3.0, 4.0};
+
+    Bounds bounds{limitsX, limitsY, limitsZ};
+
+    Limits actualLimitsX = bounds[Axis::X];
+    Limits actualLimitsY = bounds[Axis::Y];
+    Limits actualLimitsZ = bounds[Axis::Z];
+
+    REQUIRE_THAT(actualLimitsX.min,  WithinULP(limitsX.min, 1));
+    REQUIRE_THAT(actualLimitsX.max,  WithinULP(limitsX.max, 1));
+
+    REQUIRE_THAT(actualLimitsY.min,  WithinULP(limitsY.min, 1));
+    REQUIRE_THAT(actualLimitsY.max,  WithinULP(limitsY.max, 1));
+
+    REQUIRE_THAT(actualLimitsZ.min,  WithinULP(limitsZ.min, 1));
+    REQUIRE_THAT(actualLimitsZ.max,  WithinULP(limitsZ.max, 1));
+}
+
+TEST_CASE("Bounds::contains returns expected values", "[Bounds]")
+{
+}
+
+TEST_CASE("Bounds::intersects returns expected values", "[Bounds]")
+{
+}
+
+TEST_CASE("Bounds::minimum and ::maximum return expected values", "[Bounds]")
+{
 }
