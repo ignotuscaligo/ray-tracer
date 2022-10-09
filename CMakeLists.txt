@@ -18,6 +18,11 @@ set_target_properties(ray-tracer
         CXX_STANDARD 17
 )
 
+target_compile_options(ray-tracer
+    PUBLIC
+        -march=native
+)
+
 target_link_libraries(ray-tracer
     PRIVATE
         nlohmann_json::nlohmann_json
