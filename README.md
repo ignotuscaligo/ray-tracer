@@ -1,3 +1,7 @@
+# ray-tracer
+
+[![CMake](https://github.com/ignotuscaligo/ray-tracer/actions/workflows/cmake.yml/badge.svg)](https://github.com/ignotuscaligo/ray-tracer/actions/workflows/cmake.yml)
+
 # Initial setup
 
 ## Install Conan
