@@ -108,11 +108,20 @@ std::optional<Camera::SubPixelCoords> Camera::coordForPointSubPixel(const Vector
 
 Camera::ExposureWindow Camera::exposureWindowForPixel(const PixelCoords& /*coord*/) const
 {
-    // Default: every photon is in window. With photon.time defaulting to 0, gating
-    // against this window is a no-op. The first non-trivial camera subclass will return
-    // a [0, frameDuration) window for global shutter; a rolling-shutter subclass returns
-    // a window whose start/end slide with pixel position.
-    return ExposureWindow{};
+    // Default: the globally-configured window. Initially infinite (accepts everything);
+    // setGlobalExposureWindow narrows it for motion-blur runs without requiring a
+    // Camera subclass. Rolling-shutter / slit / leaf models override this method.
+    return m_globalExposureWindow;
+}
+
+void Camera::setGlobalExposureWindow(const ExposureWindow& window)
+{
+    m_globalExposureWindow = window;
+}
+
+Camera::ExposureWindow Camera::globalExposureWindow() const
+{
+    return m_globalExposureWindow;
 }
 
 Vector Camera::pixelDirection(const PixelCoords& coord) const

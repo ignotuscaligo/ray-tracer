@@ -173,6 +173,25 @@ bool Worker::processLights()
 
         std::static_pointer_cast<Light>(object)->emit(photons, photonBrightness, m_generator);
 
+        // Stamp each freshly-emitted photon with a random time within the camera's
+        // global exposure window (vision doc pillar 2 — "Photons with attached emission
+        // timestamp"). The animation query is then consulted per-photon at this time
+        // when raycasting, which is what makes motion blur fall out naturally without
+        // any temporal supersampling.
+        //
+        // If the window is infinite (default), all photons get time=0 — preserving
+        // the pre-motion-blur baseline. Only when the camera has a bounded window do we
+        // sample real per-photon times.
+        const Camera::ExposureWindow window = camera->globalExposureWindow();
+        if (std::isfinite(window.start) && std::isfinite(window.end) && window.end > window.start)
+        {
+            const float span = window.end - window.start;
+            for (auto& photon : photons)
+            {
+                photon.time = window.start + static_cast<float>(m_generator.value(span));
+            }
+        }
+
         emitProcessed += photons.size();
 
         photonQueue->ready(photons);

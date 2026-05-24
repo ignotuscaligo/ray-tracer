@@ -56,11 +56,17 @@ public:
     Vector pixelDirection(const PixelCoords& coord) const;
 
     // Per-pixel exposure window (vision doc pillar 3). The default base-class
-    // implementation returns an infinite window — every photon is accepted regardless of
-    // its emission time. Subclasses can return narrower or position-dependent windows to
-    // express global / rolling / leaf-shutter behavior. Override to introduce real motion
-    // blur or shutter-pattern effects.
+    // implementation returns the globally-set exposure window (initially infinite,
+    // accepting every photon). Subclasses can override for position-dependent windows
+    // to express rolling-shutter / slit / leaf-shutter behavior. Calling
+    // setGlobalExposureWindow(...) on the base class lets a simple "global shutter"
+    // motion-blur configuration be applied without subclassing.
     virtual ExposureWindow exposureWindowForPixel(const PixelCoords& coord) const;
+
+    // Set the exposure window returned by the default exposureWindowForPixel
+    // implementation. Has no effect on subclasses that override exposureWindowForPixel.
+    void setGlobalExposureWindow(const ExposureWindow& window);
+    ExposureWindow globalExposureWindow() const;
 
 private:
     size_t m_width;
@@ -68,4 +74,5 @@ private:
     double m_aspectRatio;
     double m_verticalFieldOfView;
     double m_horizontalFieldOfView;
+    ExposureWindow m_globalExposureWindow;
 };

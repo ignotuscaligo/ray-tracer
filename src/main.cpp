@@ -297,6 +297,19 @@ public:
         setFromJsonIfPresent(verticalFieldOfView, jsonContainer, "$verticalFieldOfView");
 
         object->verticalFieldOfView(verticalFieldOfView);
+
+        if (jsonContainer.contains("$exposureWindow"))
+        {
+            json& window = jsonContainer["$exposureWindow"];
+            if (window.is_array() && window.size() == 2)
+            {
+                Camera::ExposureWindow w;
+                w.start = window[0].get<float>();
+                w.end = window[1].get<float>();
+                object->setGlobalExposureWindow(w);
+                std::cout << "  Setting $exposureWindow to [" << w.start << ", " << w.end << ")" << std::endl;
+            }
+        }
     }
 
     void setParametersForVolume(std::shared_ptr<Volume> object, json jsonContainer)
