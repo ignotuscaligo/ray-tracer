@@ -4,6 +4,15 @@ cmake_minimum_required(VERSION 3.17)
 
 project(ray-tracer)
 
+# C++20 is required project-wide. Two things in this codebase depend on it:
+#   1. `std::atomic<float>` (P0020R6) — Buffer accumulates raw float energy with
+#      lock-free atomic adds. C++17 atomic<float> was specified but
+#      `fetch_add` on floating-point atomics is C++20.
+#   2. Designated initializers and other ergonomics used throughout.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_BINARY_DIR})
 
 find_package(nlohmann_json REQUIRED)
@@ -26,7 +35,8 @@ add_library(ray-tracer-lib)
 
 set_target_properties(ray-tracer-lib
     PROPERTIES
-        CXX_STANDARD 17
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
 )
 
 if (UNIX)
@@ -199,7 +209,8 @@ add_executable(ray-tracer)
 
 set_target_properties(ray-tracer
     PROPERTIES
-        CXX_STANDARD 17
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
 )
 
 target_link_libraries(ray-tracer

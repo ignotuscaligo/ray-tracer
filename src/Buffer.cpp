@@ -1,57 +1,53 @@
 #include "Buffer.h"
 
-#include <cmath>
-#include <cstdint>
-
-namespace
-{
-
-constexpr float scalingFactor = 65535.0f;
-
-}
+#include <cstddef>
 
 Buffer::Buffer(size_t width, size_t height)
     : m_width(width)
     , m_height(height)
-    , m_buffer(m_width * m_height * 3)
+    , m_count(width * height * 3)
+    , m_buffer(std::make_unique<std::atomic<float>[]>(width * height * 3))
 {
     clear();
 }
 
 void Buffer::clear()
 {
-    for (auto& value : m_buffer)
+    for (size_t i = 0; i < m_count; ++i)
     {
-        value = 0;
+        m_buffer[i].store(0.0f, std::memory_order_relaxed);
     }
 }
 
 void Buffer::addColor(PixelCoords coords, const Color& color)
 {
-    size_t index = ((coords.y * m_width) + coords.x) * 3;
+    const size_t index = ((coords.y * m_width) + coords.x) * 3;
 
-    if (index >= m_buffer.size())
+    if (index + 2 >= m_count)
     {
         return;
     }
 
-    m_buffer[index + 0].fetch_add(static_cast<uint32_t>(std::round(color.red * scalingFactor)));
-    m_buffer[index + 1].fetch_add(static_cast<uint32_t>(std::round(color.green * scalingFactor)));
-    m_buffer[index + 2].fetch_add(static_cast<uint32_t>(std::round(color.blue * scalingFactor)));
+    // std::atomic<float>::fetch_add is C++20 (P0020). Lock-free on most
+    // platforms (including Apple Silicon and modern x86) — verified at
+    // construction time by std::atomic<float>::is_always_lock_free if needed.
+    m_buffer[index + 0].fetch_add(color.red,   std::memory_order_relaxed);
+    m_buffer[index + 1].fetch_add(color.green, std::memory_order_relaxed);
+    m_buffer[index + 2].fetch_add(color.blue,  std::memory_order_relaxed);
 }
 
 Color Buffer::fetchColor(PixelCoords coords) const
 {
-    size_t index = ((coords.y * m_width) + coords.x) * 3;
+    const size_t index = ((coords.y * m_width) + coords.x) * 3;
 
-    if (index >= m_buffer.size())
+    if (index + 2 >= m_count)
     {
         return {};
     }
 
     return {
-        static_cast<float>(m_buffer[index + 0].load()) / scalingFactor,
-        static_cast<float>(m_buffer[index + 1].load()) / scalingFactor,
-        static_cast<float>(m_buffer[index + 2].load()) / scalingFactor
+        m_buffer[index + 0].load(std::memory_order_relaxed),
+        m_buffer[index + 1].load(std::memory_order_relaxed),
+        m_buffer[index + 2].load(std::memory_order_relaxed)
     };
 }
