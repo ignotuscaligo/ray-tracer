@@ -2,7 +2,6 @@
 
 #include "Buffer.h"
 #include "Camera.h"
-#include "CauchyMaterial.h"
 #include "DiffuseMaterial.h"
 #include "EnumFlag.h"
 #include "Image.h"
@@ -570,17 +569,6 @@ int main(int argc, char** argv)
                 if (type == "Diffuse")
                 {
                     materialLibrary->add(std::make_shared<DiffuseMaterial>(name, color));
-                }
-                else if (type == "Cauchy")
-                {
-                    float sigma = CauchyMaterial::kDefaultSigma;
-
-                    if (material.contains("$sigma"))
-                    {
-                        sigma = material["$sigma"].get<double>();
-                    }
-
-                    materialLibrary->add(std::make_shared<CauchyMaterial>(name, color, sigma));
                 }
                 else
                 {
