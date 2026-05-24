@@ -1,5 +1,6 @@
 #include "Worker.h"
 
+#include "AnimationQuery.h"
 #include "Color.h"
 #include "Light.h"
 #include "Pixel.h"
@@ -210,7 +211,8 @@ bool Worker::processPhotons()
                 continue;
             }
 
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(photon.ray, m_castBuffer);
+            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
+                photon.ray, m_castBuffer, photon.time, animationQuery.get());
 
             if (hit)
             {
@@ -352,7 +354,8 @@ bool Worker::processHits()
                 continue;
             }
 
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRay(ray, m_castBuffer);
+            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
+                ray, m_castBuffer, photonHit.photon.time, animationQuery.get());
 
             if (hit)
             {

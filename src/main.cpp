@@ -670,10 +670,30 @@ int main(int argc, char** argv)
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.hitQueueSize);
         std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.finalQueueSize);
 
-        // Continuous-time animation oracle. The static stub returns the scene-load
-        // transform regardless of time — behavior is unchanged from the no-animation
-        // baseline. Future work will swap this for a keyframed implementation.
+        // Continuous-time animation oracle (vision doc pillar 1). Default is static; if
+        // the scene contains an object named "MirrorSphere", attach a translation
+        // animation so the motion-blur pipeline can be exercised end-to-end. This
+        // wiring is intentionally hard-coded for v1 — a JSON-driven animation schema is
+        // future work. The translation magnitude is small relative to the Cornell box
+        // (a few units per second over a 1-second exposure window) so the smear is
+        // legible without overwhelming the reflected scene.
         std::shared_ptr<AnimationQuery> animationQuery = std::make_shared<StaticAnimationQuery>();
+        for (auto& object : objects)
+        {
+            if (object->name() == "MirrorSphere")
+            {
+                animationQuery = std::make_shared<TranslatingAnimationQuery>(
+                    object->name(),
+                    object->position(),
+                    object->rotation(),
+                    Vector{40.0, 0.0, 0.0}  // 40 world-units per second along +X
+                );
+                std::cout << "---" << std::endl;
+                std::cout << "Attached TranslatingAnimationQuery to MirrorSphere "
+                          << "(velocity = (40, 0, 0) units/sec)" << std::endl;
+                break;
+            }
+        }
 
         std::vector<std::shared_ptr<Worker>> workers{config.workerCount};
 

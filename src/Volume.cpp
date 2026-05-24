@@ -1,5 +1,7 @@
 #include "Volume.h"
 
+#include "AnimationQuery.h"
+
 Volume::Volume()
     : Object()
     , m_materialIndex(-1)
@@ -26,13 +28,20 @@ size_t Volume::materialIndex() const
 
 std::optional<Hit> Volume::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const
 {
-    Ray transformedRay = transformRay(ray);
+    return castRayAt(ray, castBuffer, 0.0f, nullptr);
+}
+
+std::optional<Hit> Volume::castRayAt(const Ray& ray, std::vector<Hit>& castBuffer,
+                                      float time, const AnimationQuery* animation) const
+{
+    const Transform worldTransform = resolveTransformAt(time, animation);
+    const Ray transformedRay = transformRay(ray, worldTransform);
     std::optional<Hit> hit = castTransformedRay(transformedRay, castBuffer);
 
     if (hit)
     {
-        hit->position = position() + (rotation() * hit->position);
-        hit->normal = rotation() * hit->normal,
+        hit->position = worldTransform.position + (worldTransform.rotation * hit->position);
+        hit->normal = worldTransform.rotation * hit->normal;
         hit->material = m_materialIndex;
     }
 
@@ -44,10 +53,28 @@ std::optional<Hit> Volume::castTransformedRay(const Ray& ray, std::vector<Hit>& 
     return std::nullopt;
 }
 
-Ray Volume::transformRay(const Ray& ray) const
+Ray Volume::transformRay(const Ray& ray, const Transform& worldTransform) const
 {
     return {
-        rotation().inverse() * (ray.origin - position()),
-        rotation().inverse() * ray.direction
+        worldTransform.rotation.inverse() * (ray.origin - worldTransform.position),
+        worldTransform.rotation.inverse() * ray.direction
     };
+}
+
+Transform Volume::resolveTransformAt(float time, const AnimationQuery* animation) const
+{
+    if (animation)
+    {
+        std::optional<Transform> overridden = animation->transformAt(name(), time);
+        if (overridden)
+        {
+            return *overridden;
+        }
+    }
+
+    Transform t;
+    t.position = position();
+    t.rotation = rotation();
+    t.scale = transform.scale;
+    return t;
 }

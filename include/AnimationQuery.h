@@ -1,7 +1,10 @@
 #pragma once
 
 #include "Transform.h"
+#include "Vector.h"
+#include "Quaternion.h"
 
+#include <optional>
 #include <string>
 
 // Continuous-time animation interface. The renderer never advances "the scene" to a
@@ -16,30 +19,69 @@
 // blur falls out for free because each photon hits the scene at its own time. With the
 // default StaticAnimationQuery, behavior is identical to the no-animation baseline — the
 // transform is the same regardless of `time`.
+//
+// transformAt returns std::nullopt when the object is not animated; callers fall back to
+// the object's scene-load transform. This avoids requiring the animation system to know
+// about every object's static position.
 class AnimationQuery
 {
 public:
     virtual ~AnimationQuery() = default;
 
-    // Resolve the transform of an object identified by `objectName` at the given time
-    // (seconds). Implementations may interpolate keyframes, evaluate procedural rigs, or
-    // simply return the static scene-load transform.
-    virtual Transform transformAt(const std::string& objectName, float time) const = 0;
+    virtual std::optional<Transform> transformAt(const std::string& objectName, float time) const = 0;
 };
 
-// No-op animation query: returns the same transform regardless of `time`. Used until a
-// real animation system exists. The transform itself is supplied by the caller (typically
-// by passing the object's scene-load transform).
+// No-op animation query: never returns an override, so callers always fall back to the
+// scene-load transform. Used as the default and as the test for "no animation".
 class StaticAnimationQuery : public AnimationQuery
 {
 public:
-    Transform transformAt(const std::string& /*objectName*/, float /*time*/) const override
+    std::optional<Transform> transformAt(const std::string& /*objectName*/, float /*time*/) const override
     {
-        return m_transform;
+        return std::nullopt;
+    }
+};
+
+// Translates a single named object at constant velocity from its scene-load position.
+// All other objects are static.
+//
+// position(t) = basePosition + velocity * t
+//
+// This is the minimum-viable non-trivial AnimationQuery — enough to exercise the
+// motion-blur pipeline end-to-end on rotationally-symmetric primitives (where rotation
+// produces no observable change). Real keyframed animation comes later; the BRDF
+// pipeline doesn't care which AnimationQuery implementation is in play, only that the
+// queried transform is consistent with the photon's emission time.
+class TranslatingAnimationQuery : public AnimationQuery
+{
+public:
+    TranslatingAnimationQuery(const std::string& objectName,
+                               const Vector& basePosition,
+                               const Quaternion& baseRotation,
+                               const Vector& velocity)
+        : m_objectName(objectName)
+        , m_basePosition(basePosition)
+        , m_baseRotation(baseRotation)
+        , m_velocity(velocity)
+    {
     }
 
-    void setTransform(const Transform& transform) { m_transform = transform; }
+    std::optional<Transform> transformAt(const std::string& objectName, float time) const override
+    {
+        if (objectName != m_objectName)
+        {
+            return std::nullopt;
+        }
+
+        Transform t;
+        t.position = m_basePosition + m_velocity * static_cast<double>(time);
+        t.rotation = m_baseRotation;
+        return t;
+    }
 
 private:
-    Transform m_transform;
+    std::string m_objectName;
+    Vector m_basePosition;
+    Quaternion m_baseRotation;
+    Vector m_velocity;
 };
