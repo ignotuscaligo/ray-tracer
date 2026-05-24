@@ -10,6 +10,16 @@ find_package(nlohmann_json REQUIRED)
 find_package(PNG REQUIRED)
 find_package(tinyobjloader REQUIRED)
 
+# Detect host architecture so we only feed AVX hints to x86 builds.
+# -march=native is meaningful on x86 (enables AVX intrinsics that the
+# Vector.cpp fast path relies on). On Apple Silicon (arm64) -march=native is
+# rejected by Apple clang; the Vector implementation falls back to scalar.
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
+    set(RAY_TRACER_ARCH_IS_X86 TRUE)
+else()
+    set(RAY_TRACER_ARCH_IS_X86 FALSE)
+endif()
+
 # ===== Library
 
 add_library(ray-tracer-lib)
@@ -22,10 +32,12 @@ set_target_properties(ray-tracer-lib
 if (UNIX)
     find_package(Threads)
 
-    target_compile_options(ray-tracer-lib
-        PUBLIC
-            -march=native
-    )
+    if (RAY_TRACER_ARCH_IS_X86)
+        target_compile_options(ray-tracer-lib
+            PUBLIC
+                -march=native
+        )
+    endif()
 
     target_link_libraries(ray-tracer-lib
         PRIVATE

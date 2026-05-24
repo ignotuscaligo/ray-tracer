@@ -2,8 +2,17 @@
 
 #include "RandomGenerator.h"
 
-#include <immintrin.h>
-#include <xmmintrin.h>
+// AVX intrinsics are x86-only. On Apple Silicon (and any non-x86 target) we
+// fall back to a scalar implementation that exposes the same Vector API.
+// The original AVX path is preserved behind __AVX__ so an x86 build still
+// gets the vectorized version.
+#if defined(__AVX__)
+#  include <immintrin.h>
+#  include <xmmintrin.h>
+#  define RAY_TRACER_HAS_AVX 1
+#else
+#  define RAY_TRACER_HAS_AVX 0
+#endif
 
 enum class Axis
 {
@@ -21,7 +30,9 @@ union Vector
 {
     Vector() noexcept;
     Vector(double ix, double iy, double iz) noexcept;
+#if RAY_TRACER_HAS_AVX
     Vector(__m256d&& idata) noexcept;
+#endif
     Vector(const Vector& other) noexcept;
     Vector(Vector&& other) noexcept;
     ~Vector() = default;
@@ -34,7 +45,9 @@ union Vector
     Vector operator+=(const Vector& rhs) noexcept;
     Vector operator*=(double rhs) noexcept;
     Vector operator/=(double rhs) noexcept;
+#if RAY_TRACER_HAS_AVX
     explicit operator __m256d() noexcept;
+#endif
     explicit operator const double*() noexcept;
 
     double magnitudeSquared() const noexcept;
@@ -44,9 +57,13 @@ union Vector
 
     static double angleBetween(const Vector& a, const Vector& b) noexcept;
     static Vector cross(const Vector& a, const Vector& b) noexcept;
+#if RAY_TRACER_HAS_AVX
     static double dot(const __m256d& a, const __m256d& b) noexcept;
+#endif
     static double dot(const Vector& a, const Vector& b) noexcept;
+#if RAY_TRACER_HAS_AVX
     static __m256d normalized(const __m256d& a) noexcept;
+#endif
     static Vector normalized(const Vector& a) noexcept;
     static Vector normalizedSub(const Vector& lhs, const Vector& rhs) noexcept;
     static Vector reflected(const Vector& incident, const Vector& normal) noexcept;
@@ -57,7 +74,9 @@ union Vector
     static const Vector unitY;
     static const Vector unitZ;
 
+#if RAY_TRACER_HAS_AVX
     __m256d data;
+#endif
 
     struct alignas(double)
     {
