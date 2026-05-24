@@ -20,6 +20,14 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
     const Vector& incident = photonHit.photon.ray.direction;
     const Vector& normal = photonHit.hit.normal;
 
+    // Energy split across N daughters. Each sample()'s `weight` already encodes
+    // f*cos/pdf — the standard Monte Carlo throughput — so averaging across N
+    // independent samples (the 1/N factor) gives the correct expected outgoing
+    // energy = incoming * albedo. Without 1/N, N daughters would carry N*incoming
+    // *albedo and inflate the scene's total energy by a factor of N per bounce.
+    const size_t n = (endIndex > startIndex) ? (endIndex - startIndex) : 1;
+    const float invN = 1.0f / static_cast<float>(n);
+
     for (size_t i = startIndex; i < endIndex; ++i)
     {
         // Carry forward all photon state (time, color, anything added later) by copy,
@@ -38,7 +46,7 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
         }
 
         photonBlock[i].ray = {photonHit.hit.position, s.direction};
-        photonBlock[i].color = photonHit.photon.color * s.weight;
+        photonBlock[i].color = photonHit.photon.color * s.weight * invN;
     }
 }
 

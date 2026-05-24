@@ -97,7 +97,10 @@ void Worker::exec()
                 continue;
             }
 
-            if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 16)
+            // Gate light emission on enough headroom for worst-case fan-out: each
+            // fetched photon can spawn up to ~32 daughters per bounce (Lambertian
+            // default), and we want a comfortable multi-batch buffer beyond that.
+            if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 64)
             {
                 if (!processLights())
                 {
@@ -285,26 +288,60 @@ bool Worker::processPhotons()
 
         if (bouncedPhotonCount > 0)
         {
-            size_t bounceCount = 1;
-            auto bouncedPhotonsBlock = photonQueue->initialize(bouncedPhotonCount * bounceCount);
+            // Per-material fan-out: each hit's material decides how many daughter
+            // photons to spawn. Delta (mirror) returns 1, Lambertian returns ~32,
+            // Microfacet scales by roughness. The Worker sums N across all hits in
+            // the batch up front so we make exactly one photon-queue allocation.
+            //
+            // Energy conservation is handled inside Material::bounce by splitting
+            // the incoming color by 1/N per daughter — total outgoing energy per
+            // hit stays equal to incoming * material_albedo, regardless of N.
+            size_t totalDaughters = 0;
+            for (auto& photonHit : m_hitBuffer)
+            {
+                if (photonHit.photon.bounces < m_bounceThreshold)
+                {
+                    std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+                    totalDaughters += material ? material->daughterPhotonCount() : 1;
+                }
+            }
+
+            auto bouncedPhotonsBlock = photonQueue->initialize(totalDaughters);
             size_t photonIndex = 0;
 
-            if (bouncedPhotonsBlock.size() != bouncedPhotonCount * bounceCount)
+            if (bouncedPhotonsBlock.size() != totalDaughters)
             {
-                std::cout << m_index << ": photon queue overflow!" << std::endl;
+                std::cout << m_index << ": photon queue overflow! requested "
+                          << totalDaughters << " got " << bouncedPhotonsBlock.size() << std::endl;
             }
+
+            const size_t allocated = bouncedPhotonsBlock.size();
 
             for (auto& photonHit : m_hitBuffer)
             {
                 if (photonHit.photon.bounces < m_bounceThreshold)
                 {
                     std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+                    const size_t n = material ? material->daughterPhotonCount() : 1;
 
                     size_t startIndex = photonIndex;
-                    size_t endIndex = startIndex + bounceCount;
+                    size_t endIndex = startIndex + n;
+
+                    // Defensive clamp: if the photon queue overflowed and gave us a
+                    // shorter block, truncate this hit's fan-out and stop processing
+                    // further hits rather than running off the end of the buffer.
+                    if (endIndex > allocated)
+                    {
+                        endIndex = allocated;
+                    }
+                    if (startIndex >= endIndex)
+                    {
+                        break;
+                    }
+
                     material->bounce(bouncedPhotonsBlock, startIndex, endIndex, photonHit, m_generator);
 
-                    photonIndex += bounceCount;
+                    photonIndex += n;
                 }
             }
 

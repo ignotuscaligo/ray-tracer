@@ -57,7 +57,7 @@
     "$workerConfiguration": {
         "$workerCount": 10,
         "$fetchSize": 100000,
-        "$photonQueueSize": 20000000,
+        "$photonQueueSize": 80000000,
         "$hitQueueSize": 5000000,
         "$finalQueueSize": 200000
     },
