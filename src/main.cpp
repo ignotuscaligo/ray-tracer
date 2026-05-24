@@ -1,6 +1,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 
 #include "Buffer.h"
+#include "AnimationQuery.h"
 #include "Camera.h"
 #include "LambertianMaterial.h"
 #include "MicrofacetMaterial.h"
@@ -669,6 +670,11 @@ int main(int argc, char** argv)
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.hitQueueSize);
         std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.finalQueueSize);
 
+        // Continuous-time animation oracle. The static stub returns the scene-load
+        // transform regardless of time — behavior is unchanged from the no-animation
+        // baseline. Future work will swap this for a keyframed implementation.
+        std::shared_ptr<AnimationQuery> animationQuery = std::make_shared<StaticAnimationQuery>();
+
         std::vector<std::shared_ptr<Worker>> workers{config.workerCount};
 
         size_t workerIndex = 0;
@@ -684,6 +690,7 @@ int main(int argc, char** argv)
             worker->image = image;
             worker->materialLibrary = materialLibrary;
             worker->lightQueue = lightQueue;
+            worker->animationQuery = animationQuery;
             worker->setBounceThreshold(config.bounceThreshold);
             ++workerIndex;
         }

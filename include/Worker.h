@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AnimationQuery.h"
 #include "Buffer.h"
 #include "Camera.h"
 #include "Hit.h"
@@ -66,6 +67,12 @@ public:
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
+    // Continuous-time transform oracle (vision doc pillar 1). Default initialization is
+    // a StaticAnimationQuery — every transformAt() call returns the scene-load transform
+    // regardless of time. Workers currently read object positions through the existing
+    // Object::position() path; the animation query is plumbed for future use without
+    // requiring a Worker API change.
+    std::shared_ptr<AnimationQuery> animationQuery;
 
     size_t emitDuration = 0;
     size_t photonDuration = 0;

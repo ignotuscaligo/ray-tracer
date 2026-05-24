@@ -101,6 +101,8 @@ target_sources(ray-tracer-lib
         include/Quaternion.h
         src/Quaternion.cpp
 
+        include/AnimationQuery.h
+
         include/Hit.h
         src/Hit.cpp
 
