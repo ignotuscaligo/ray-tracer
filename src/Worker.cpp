@@ -386,6 +386,15 @@ bool Worker::processFinalHits()
             continue;
         }
 
+        // Time gate: drop bounces whose emission timestamp falls outside the camera's
+        // exposure window for this pixel. With the default base-class window (infinite),
+        // every photon is accepted and behavior is identical to the pre-gate pipeline.
+        Camera::ExposureWindow window = camera->exposureWindowForPixel(*coord);
+        if (!window.contains(photonHit.photon.time))
+        {
+            continue;
+        }
+
         Vector pixelDirection = camera->pixelDirection(*coord);
 
         std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);

@@ -87,6 +87,15 @@ std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
     };
 }
 
+Camera::ExposureWindow Camera::exposureWindowForPixel(const PixelCoords& /*coord*/) const
+{
+    // Default: every photon is in window. With photon.time defaulting to 0, gating
+    // against this window is a no-op. The first non-trivial camera subclass will return
+    // a [0, frameDuration) window for global shutter; a rolling-shutter subclass returns
+    // a window whose start/end slide with pixel position.
+    return ExposureWindow{};
+}
+
 Vector Camera::pixelDirection(const PixelCoords& coord) const
 {
     double horizontal = static_cast<double>(coord.x) / static_cast<double>(m_width);
