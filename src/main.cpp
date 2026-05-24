@@ -2,7 +2,7 @@
 
 #include "Buffer.h"
 #include "Camera.h"
-#include "DiffuseMaterial.h"
+#include "LambertianMaterial.h"
 #include "EnumFlag.h"
 #include "Image.h"
 #include "LightQueue.h"
@@ -566,9 +566,9 @@ int main(int argc, char** argv)
 
                 std::cout << "  Creating " << type << " material named " << name << " with color (" << color.red << ", " << color.green << ", " << color.blue << ")" << std::endl;
 
-                if (type == "Diffuse")
+                if (type == "Diffuse" || type == "Lambertian")
                 {
-                    materialLibrary->add(std::make_shared<DiffuseMaterial>(name, color));
+                    materialLibrary->add(std::make_shared<LambertianMaterial>(name, color));
                 }
                 else
                 {

@@ -150,8 +150,8 @@ target_sources(ray-tracer-lib
         include/Material.h
         src/Material.cpp
 
-        include/DiffuseMaterial.h
-        src/DiffuseMaterial.cpp
+        include/LambertianMaterial.h
+        src/LambertianMaterial.cpp
 
         include/ObjReader.h
         src/ObjReader.cpp
