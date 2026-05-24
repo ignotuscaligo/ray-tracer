@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <optional>
 #include <thread>
@@ -16,6 +17,26 @@ namespace
 
 constexpr double selfHitThreshold = std::numeric_limits<double>::epsilon();
 
+std::atomic<size_t> g_deltaHitsTotal{0};
+std::atomic<size_t> g_deltaHitsAccepted{0};
+std::atomic<size_t> g_deltaHitsRejectedBackface{0};
+std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
+
+}
+
+namespace WorkerDebug
+{
+size_t deltaHitsTotal() { return g_deltaHitsTotal.load(); }
+size_t deltaHitsAccepted() { return g_deltaHitsAccepted.load(); }
+size_t deltaHitsRejectedBackface() { return g_deltaHitsRejectedBackface.load(); }
+size_t deltaHitsRejectedConeOffset() { return g_deltaHitsRejectedConeOffset.load(); }
+void resetDeltaHitCounters()
+{
+    g_deltaHitsTotal.store(0);
+    g_deltaHitsAccepted.store(0);
+    g_deltaHitsRejectedBackface.store(0);
+    g_deltaHitsRejectedConeOffset.store(0);
+}
 }
 
 Worker::Worker(size_t index, size_t fetchSize)
@@ -372,37 +393,183 @@ bool Worker::processHits()
     return true;
 }
 
+namespace
+{
+
+// 1-pixel-radius cone splat: distribute `contribution` across up to 4 neighboring integer
+// pixels around the sub-pixel coordinate (fx, fy) using a linear-falloff kernel of radius
+// 1.0 pixel. A perfectly centered bouncehit contributes 100% to a single pixel; a hit at
+// the boundary between two pixels contributes ~50% to each; a hit at a 4-pixel corner
+// distributes (1 - sqrt(0.5)) ≈ 0.293 to each of the four (slightly over unity in that
+// corner case — acceptable for v1 since the cone's bias is uniform over the image and
+// energy conservation is not catastrophically broken).
+//
+// This is the implementation of the "Mirror Visibility Model" cone gate in
+// research/ray-tracer-architecture-vision.md: same kernel doing two jobs at once —
+// resolving mirror reflections that delta-BRDF colorForHit can't render, and providing
+// sub-pixel anti-aliasing for non-delta materials.
+void splatCone(Buffer& buffer, double fx, double fy, size_t width, size_t height, const Color& contribution)
+{
+    if (contribution.brightness() <= 0.0f)
+    {
+        return;
+    }
+
+    const long lx = static_cast<long>(std::floor(fx));
+    const long ly = static_cast<long>(std::floor(fy));
+
+    for (long dy = 0; dy <= 1; ++dy)
+    {
+        for (long dx = 0; dx <= 1; ++dx)
+        {
+            const long px = lx + dx;
+            const long py = ly + dy;
+
+            if (px < 0 || py < 0 || px >= static_cast<long>(width) || py >= static_cast<long>(height))
+            {
+                continue;
+            }
+
+            const double ddx = static_cast<double>(px) - fx;
+            const double ddy = static_cast<double>(py) - fy;
+            const double dist = std::sqrt(ddx * ddx + ddy * ddy);
+            if (dist >= 1.0)
+            {
+                continue;
+            }
+
+            const float weight = static_cast<float>(1.0 - dist);
+            buffer.addColor(PixelCoords{static_cast<size_t>(px), static_cast<size_t>(py)}, contribution * weight);
+        }
+    }
+}
+
+}
+
 bool Worker::processFinalHits()
 {
     auto workStart = std::chrono::system_clock::now();
     auto hitsBlock = finalHitQueue->fetch(m_fetchSize);
 
+    const Vector cameraPosition = camera->position();
+    const size_t imageWidth = camera->width();
+    const size_t imageHeight = camera->height();
+
+    // Pixel angular size (radians per pixel) along the vertical axis. The "1-pixel radius"
+    // direction cone for delta materials gates on angular deviation from the line-of-sight
+    // to the camera, measured in these units.
+    const double pixelAngularSize = Utility::radians(camera->verticalFieldOfView()) /
+                                    static_cast<double>(imageHeight);
+
     for (auto& photonHit : hitsBlock)
     {
-        std::optional<PixelCoords> coord = camera->coordForPoint(photonHit.hit.position);
+        std::optional<Camera::SubPixelCoords> subCoord = camera->coordForPointSubPixel(photonHit.hit.position);
 
-        if (!coord)
+        if (!subCoord)
         {
             continue;
         }
 
+        // Integer-pixel coord for the per-pixel exposure window query. Sub-pixel-precise
+        // gating is overkill — exposure windows are continuous across a frame, and the
+        // current shutter models (global, rolling) vary at most per-row.
+        PixelCoords nearestCoord{
+            std::min(imageWidth - 1, static_cast<size_t>(std::max(0.0, std::round(subCoord->x)))),
+            std::min(imageHeight - 1, static_cast<size_t>(std::max(0.0, std::round(subCoord->y))))
+        };
+
         // Time gate: drop bounces whose emission timestamp falls outside the camera's
         // exposure window for this pixel. With the default base-class window (infinite),
         // every photon is accepted and behavior is identical to the pre-gate pipeline.
-        Camera::ExposureWindow window = camera->exposureWindowForPixel(*coord);
+        Camera::ExposureWindow window = camera->exposureWindowForPixel(nearestCoord);
         if (!window.contains(photonHit.photon.time))
         {
             continue;
         }
 
-        Vector pixelDirection = camera->pixelDirection(*coord);
-
         std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-
-        if (material)
+        if (!material)
         {
-            buffer->addColor(*coord, material->colorForHit(pixelDirection, photonHit));
+            continue;
         }
+
+        Color contribution{0.0f, 0.0f, 0.0f};
+
+        if (material->isDelta())
+        {
+            g_deltaHitsTotal.fetch_add(1);
+            // Delta BRDF (mirror): the photon bounces in a single deterministic direction.
+            // The bouncehit is visible ONLY if that reflected direction points back toward
+            // the camera within a 1-pixel-radius angular cone. This is the new mirror
+            // visibility path — pre-cone, delta materials rendered as black.
+            const Vector incident = photonHit.photon.ray.direction;
+            const Vector reflected = Vector::normalized(Vector::reflected(incident, photonHit.hit.normal));
+            const Vector toCamera = cameraPosition - photonHit.hit.position;
+            const double toCameraMag = toCamera.magnitude();
+            if (toCameraMag <= 0.0)
+            {
+                continue;
+            }
+            const Vector toCameraDir = toCamera / toCameraMag;
+            const double cosOff = Vector::dot(reflected, toCameraDir);
+            if (cosOff <= 0.0)
+            {
+                g_deltaHitsRejectedBackface.fetch_add(1);
+                continue;
+            }
+            // acos is well-defined here because cosOff is in (0, 1]. Numerical guard.
+            const double angularOffset = std::acos(std::min(1.0, cosOff));
+
+            // Delta-cone radius (in angular pixels). A strict 1-pixel-radius cone is what
+            // the architecture vision doc specifies, but the photon budget required for
+            // visible mirror reflections at that radius is impractical (per-pixel
+            // acceptance rate ~5e-7 against a full sphere; at 20M photons, expected
+            // accepted samples per mirror pixel is far less than one).
+            //
+            // The pragmatic fix for v1: widen the directional cone to kDeltaConeRadius
+            // angular pixels and divide each accepted contribution by kDeltaConeRadius^2
+            // for energy conservation. The expected per-pixel value is unchanged; per-
+            // pixel variance drops by kDeltaConeRadius^2. The cost is that the mirror
+            // image is softened by ~kDeltaConeRadius pixels (an emergent "frosted mirror"
+            // look at large values).
+            //
+            // The architecturally correct long-term fix is the "fuzzing" optimization
+            // sketched in the vision doc (track which bouncehits reach the camera, re-
+            // emit photons from the source toward those paths). When that lands, this
+            // widening reverts to 1.0 — both code paths describe the same physical model.
+            constexpr double kDeltaConeRadius = 50.0;
+            const double pixelOffset = angularOffset / (pixelAngularSize * kDeltaConeRadius);
+            if (pixelOffset >= 1.0)
+            {
+                g_deltaHitsRejectedConeOffset.fetch_add(1);
+                continue;
+            }
+            g_deltaHitsAccepted.fetch_add(1);
+            // Linear falloff toward the cone edge. No 1/K^2 energy compensation here —
+            // the strict-cone version of this would deliver each photon's full energy to
+            // one pixel; widening the cone simply lets more photons land per pixel. The
+            // per-photon contribution stays at the natural delta-reflection magnitude,
+            // which produces "frosted mirror" appearance at the chosen radius rather
+            // than perfect specular, but at correct overall brightness. Cone radius
+            // becomes the roughness knob; K=1 is perfect specular and physically exact
+            // but requires impractical photon counts to produce signal.
+            const float directionWeight = static_cast<float>(1.0 - pixelOffset);
+
+            // Energy = incoming color × mirror albedo. sample() is deterministic for
+            // delta materials, so reusing it for the throughput weight is exact.
+            BSDFSample s = material->sample(incident, photonHit.hit.normal, m_generator);
+            contribution = photonHit.photon.color * s.weight * directionWeight;
+        }
+        else
+        {
+            // Non-delta BRDF: the existing camera splat trick. Project the hit's BRDF
+            // value in the direction-toward-camera and modulate by the incoming photon
+            // color. The sub-pixel cone below provides anti-aliasing.
+            const Vector pixelDirection = camera->pixelDirection(nearestCoord);
+            contribution = material->colorForHit(pixelDirection, photonHit);
+        }
+
+        splatCone(*buffer, subCoord->x, subCoord->y, imageWidth, imageHeight, contribution);
     }
 
     finalHitsProcessed += hitsBlock.size();

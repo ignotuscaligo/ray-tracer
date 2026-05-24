@@ -108,3 +108,15 @@ private:
 
     std::exception_ptr m_exception;
 };
+
+// Diagnostic counters for the delta-material cone gate in processFinalHits. Reset between
+// frames; queried after the render completes. Will be removed once the cone-budget tuning
+// settles.
+namespace WorkerDebug
+{
+size_t deltaHitsTotal();
+size_t deltaHitsAccepted();
+size_t deltaHitsRejectedBackface();
+size_t deltaHitsRejectedConeOffset();
+void resetDeltaHitCounters();
+}

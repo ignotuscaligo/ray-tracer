@@ -87,6 +87,25 @@ std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
     };
 }
 
+std::optional<Camera::SubPixelCoords> Camera::coordForPointSubPixel(const Vector& point) const
+{
+    Pyramid frustum = Pyramid(position(), rotation(), m_verticalFieldOfView, m_horizontalFieldOfView);
+    Vector position = frustum.relativePositionInFrustum(point);
+
+    if (position.z <= 0.0 || position.x < 0.0 || position.x > 1.0 || position.y < 0.0 || position.y > 1.0)
+    {
+        return std::nullopt;
+    }
+
+    // Pixel centers live at integer values; pixelDirection(coord) maps coord.x = k to
+    // normalized fraction k / width. So the continuous pixel coordinate is just
+    // (normalized fraction) * dimension.
+    return SubPixelCoords{
+        position.x * static_cast<double>(m_width),
+        position.y * static_cast<double>(m_height)
+    };
+}
+
 Camera::ExposureWindow Camera::exposureWindowForPixel(const PixelCoords& /*coord*/) const
 {
     // Default: every photon is in window. With photon.time defaulting to 0, gating

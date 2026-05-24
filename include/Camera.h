@@ -39,6 +39,20 @@ public:
     void setFromRenderConfiguration(size_t width, size_t height);
 
     std::optional<PixelCoords> coordForPoint(const Vector& point) const;
+    // Continuous (floating-point) pixel-space coordinate of a world point. Pixel centers
+    // are at integer values (matching pixelDirection's coord -> direction mapping). The
+    // returned x is in [0, width) and y is in [0, height); std::nullopt if the point is
+    // behind the camera or outside the frustum.
+    //
+    // This is the input to the 1-pixel-radius bouncehit gating in Worker::processFinalHits.
+    // A bouncehit's contribution is splat into all pixels whose integer center is within
+    // 1.0 of (fx, fy), with linear falloff in distance.
+    struct SubPixelCoords
+    {
+        double x;
+        double y;
+    };
+    std::optional<SubPixelCoords> coordForPointSubPixel(const Vector& point) const;
     Vector pixelDirection(const PixelCoords& coord) const;
 
     // Per-pixel exposure window (vision doc pillar 3). The default base-class

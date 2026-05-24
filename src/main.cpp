@@ -896,6 +896,13 @@ int main(int argc, char** argv)
             std::cout << "|- photon queue maximum allocated:    " << photonQueue->largestAllocated() << std::endl;
             std::cout << "|- hit queue maximum allocated:       " << hitQueue->largestAllocated() << std::endl;
             std::cout << "|- final hit queue maximum allocated: " << finalHitQueue->largestAllocated() << std::endl;
+
+            std::cout << "Delta cone gate:" << std::endl;
+            std::cout << "|- total delta hits:                  " << WorkerDebug::deltaHitsTotal() << std::endl;
+            std::cout << "|- accepted (inside cone):            " << WorkerDebug::deltaHitsAccepted() << std::endl;
+            std::cout << "|- rejected (back-facing reflection): " << WorkerDebug::deltaHitsRejectedBackface() << std::endl;
+            std::cout << "|- rejected (outside cone):           " << WorkerDebug::deltaHitsRejectedConeOffset() << std::endl;
+            WorkerDebug::resetDeltaHitCounters();
         }
 
         for (size_t i = 0; i < config.workerCount; ++i)
