@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "AnimationQuery.h"
 #include "Camera.h"
+#include "EmittingQueue.h"
 #include "LambertianMaterial.h"
 #include "MicrofacetMaterial.h"
 #include "MirrorMaterial.h"
@@ -56,6 +57,7 @@ struct ProjectConfiguration
     std::filesystem::path projectFilePath;
     size_t photonQueueSize = 20 * kMillion;
     size_t hitQueueSize = 5 * kMillion;
+    size_t emittingQueueSize = 20 * kMillion;
     size_t finalQueueSize = 100 * kThousand;
     size_t photonsPerLight = 20 * kMillion;
     size_t workerCount = 32;
@@ -520,6 +522,7 @@ int main(int argc, char** argv)
             setFromJsonIfPresent(config.fetchSize, workerConfiguration, "$fetchSize", JsonOption::WithLog);
             setFromJsonIfPresent(config.photonQueueSize, workerConfiguration, "$photonQueueSize", JsonOption::WithLog);
             setFromJsonIfPresent(config.hitQueueSize, workerConfiguration, "$hitQueueSize", JsonOption::WithLog);
+            setFromJsonIfPresent(config.emittingQueueSize, workerConfiguration, "$emittingQueueSize", JsonOption::WithLog);
             setFromJsonIfPresent(config.finalQueueSize, workerConfiguration, "$finalQueueSize", JsonOption::WithLog);
         }
 
@@ -681,6 +684,7 @@ int main(int argc, char** argv)
         std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
         std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(config.photonQueueSize);
         std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.hitQueueSize);
+        std::shared_ptr<EmittingQueue> emittingQueue = std::make_shared<EmittingQueue>(config.emittingQueueSize);
         std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(config.finalQueueSize);
 
         // Continuous-time animation oracle (vision doc pillar 1). Default is static; if
@@ -718,6 +722,7 @@ int main(int argc, char** argv)
             worker->objects = objects;
             worker->photonQueue = photonQueue;
             worker->hitQueue = hitQueue;
+            worker->emittingQueue = emittingQueue;
             worker->finalHitQueue = finalHitQueue;
             worker->buffer = buffer;
             worker->image = image;
@@ -767,42 +772,48 @@ int main(int argc, char** argv)
             size_t photonsToEmit = lightQueue->remainingPhotons();
             size_t photonsAllocated = photonQueue->allocated();
             size_t hitsAllocated = hitQueue->allocated();
+            size_t emittingAllocated = emittingQueue->allocated();
             size_t finalHitsAllocated = finalHitQueue->allocated();
 
             std::cout << "---" << std::endl;
             std::cout << "remaining emissions:  " << photonsToEmit << std::endl;
             std::cout << "remaining photons:    " << photonsAllocated << std::endl;
             std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+            std::cout << "remaining emitting:   " << emittingAllocated << std::endl;
             std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
 
             size_t lastEmit = photonsToEmit;
             size_t lastPhotons = photonsAllocated;
             size_t lastHits = hitsAllocated;
+            size_t lastEmitting = emittingAllocated;
             size_t lastFinalHits = finalHitsAllocated;
 
             std::exception_ptr workerException;
 
-            while (photonsAllocated > 0 || hitsAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0)
+            while (photonsAllocated > 0 || hitsAllocated > 0 || emittingAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
                 photonsToEmit = lightQueue->remainingPhotons();
                 photonsAllocated = photonQueue->allocated();
                 hitsAllocated = hitQueue->allocated();
+                emittingAllocated = emittingQueue->allocated();
                 finalHitsAllocated = finalHitQueue->allocated();
 
-                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits || finalHitsAllocated != lastFinalHits || photonsToEmit != lastEmit)
+                if (photonsAllocated != lastPhotons || hitsAllocated != lastHits || emittingAllocated != lastEmitting || finalHitsAllocated != lastFinalHits || photonsToEmit != lastEmit)
                 {
                     std::cout << "---" << std::endl;
                     std::cout << "remaining emissions:  " << photonsToEmit << std::endl;
                     std::cout << "remaining photons:    " << photonsAllocated << std::endl;
                     std::cout << "remaining hits:       " << hitsAllocated << std::endl;
+                    std::cout << "remaining emitting:   " << emittingAllocated << std::endl;
                     std::cout << "remaining final hits: " << finalHitsAllocated << std::endl;
                 }
 
                 lastEmit = photonsToEmit;
                 lastPhotons = photonsAllocated;
                 lastHits = hitsAllocated;
+                lastEmitting = emittingAllocated;
                 lastFinalHits = finalHitsAllocated;
 
                 for (auto& worker : workers)
@@ -928,6 +939,7 @@ int main(int argc, char** argv)
             std::cout << "Work queues:" << std::endl;
             std::cout << "|- photon queue maximum allocated:    " << photonQueue->largestAllocated() << std::endl;
             std::cout << "|- hit queue maximum allocated:       " << hitQueue->largestAllocated() << std::endl;
+            std::cout << "|- emitting queue maximum allocated:  " << emittingQueue->largestAllocated() << std::endl;
             std::cout << "|- final hit queue maximum allocated: " << finalHitQueue->largestAllocated() << std::endl;
 
             std::cout << "Delta cone gate:" << std::endl;

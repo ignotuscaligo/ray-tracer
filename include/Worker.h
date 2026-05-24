@@ -3,6 +3,7 @@
 #include "AnimationQuery.h"
 #include "Buffer.h"
 #include "Camera.h"
+#include "EmittingQueue.h"
 #include "Hit.h"
 #include "Image.h"
 #include "LightQueue.h"
@@ -64,6 +65,12 @@ public:
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
+    // EmittingQueue holds bounce-hits awaiting daughter spawn. processPhotons
+    // pushes here in parallel with hitQueue; processEmissions pulls back with
+    // back-pressure gated on photonQueue free space (no spawn if there isn't
+    // room for N daughters). Decouples raycasting from daughter generation and
+    // bounds the steady-state PhotonQueue occupancy.
+    std::shared_ptr<EmittingQueue> emittingQueue;
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
@@ -87,6 +94,7 @@ public:
 private:
     bool processLights();
     bool processPhotons();
+    bool processEmissions();
     bool processHits();
     bool processFinalHits();
 

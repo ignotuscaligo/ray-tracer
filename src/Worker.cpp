@@ -83,7 +83,7 @@ void Worker::exec()
 {
     try
     {
-        if (!photonQueue || !hitQueue || !finalHitQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+        if (!photonQueue || !hitQueue || !finalHitQueue || !emittingQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
         {
             std::cout << m_index << ": ABORT: missing required references!" << std::endl;
             m_running = false;
@@ -97,23 +97,46 @@ void Worker::exec()
                 continue;
             }
 
-            // Gate light emission on enough headroom for worst-case fan-out: each
-            // fetched photon can spawn up to ~32 daughters per bounce (Lambertian
-            // default), and we want a comfortable multi-batch buffer beyond that.
-            if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 64)
+            bool drainedAnything = false;
+
+            // Gate light emission on headroom in the PhotonQueue. With the dual-source
+            // pipeline below, fan-out is back-pressured via EmittingQueue rather than
+            // happening in-line at bounce time, so we no longer need the 64x worst-case
+            // headroom that the old immediate-spawn loop required.
+            if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 2)
             {
                 if (!processLights())
                 {
                     break;
                 }
+                drainedAnything = true;
             }
 
+            // Stage 1: raycast pending photons. NO fullness check on PhotonQueue pull —
+            // photons in flight are eagerly traced regardless of whether daughters can
+            // be spawned. The resulting bounce-hits are pushed into both hitQueue (for
+            // the camera-visibility check / splat path) AND emittingQueue (for daughter
+            // spawn). The two queues read the same hit independently downstream.
             if (photonQueue->available() > 0)
             {
                 if (!processPhotons())
                 {
                     break;
                 }
+                drainedAnything = true;
+            }
+
+            // Stage 2: spawn daughters from pending bounce-hits, ONLY if the PhotonQueue
+            // has space for the full N daughters of the next hit. processEmissions
+            // queries daughterPhotonCount() on the next hit's material, checks capacity,
+            // and either pops + spawns or leaves the hit in place for next iteration.
+            if (emittingQueue->available() > 0)
+            {
+                if (!processEmissions())
+                {
+                    break;
+                }
+                drainedAnything = true;
             }
 
             if (hitQueue->available() > 0)
@@ -122,6 +145,7 @@ void Worker::exec()
                 {
                     break;
                 }
+                drainedAnything = true;
             }
 
             if (finalHitQueue->available() > 0)
@@ -130,9 +154,13 @@ void Worker::exec()
                 {
                     break;
                 }
+                drainedAnything = true;
             }
 
-            std::this_thread::yield();
+            if (!drainedAnything)
+            {
+                std::this_thread::yield();
+            }
         }
     }
     catch (const std::exception& e)
@@ -267,85 +295,51 @@ bool Worker::processPhotons()
 
     if (!m_hitBuffer.empty())
     {
+        // Push every bounce-hit to hitQueue (camera-visibility / splat path).
         auto hitsBlock = hitQueue->initialize(m_hitBuffer.size());
-
         for (size_t i = 0; i < hitsBlock.size(); ++i)
         {
             hitsBlock[i] = m_hitBuffer[i];
         }
-
         hitQueue->ready(hitsBlock);
 
-        size_t bouncedPhotonCount = 0;
-
+        // Push the same bounce-hits to the EmittingQueue (daughter-spawn path)
+        // but only for hits below the bounce threshold. Terminal hits don't need
+        // daughters — they only contribute via the splat path.
+        size_t bounceableCount = 0;
         for (auto& photonHit : m_hitBuffer)
         {
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
-                ++bouncedPhotonCount;
+                ++bounceableCount;
             }
         }
-
-        if (bouncedPhotonCount > 0)
+        if (bounceableCount > 0)
         {
-            // Per-material fan-out: each hit's material decides how many daughter
-            // photons to spawn. Delta (mirror) returns 1, Lambertian returns ~32,
-            // Microfacet scales by roughness. The Worker sums N across all hits in
-            // the batch up front so we make exactly one photon-queue allocation.
-            //
-            // Energy conservation is handled inside Material::bounce by splitting
-            // the incoming color by 1/N per daughter — total outgoing energy per
-            // hit stays equal to incoming * material_albedo, regardless of N.
-            size_t totalDaughters = 0;
+            auto emittingBlock = emittingQueue->initialize(bounceableCount);
+            const size_t allocated = emittingBlock.size();
+            if (allocated < bounceableCount)
+            {
+                // EmittingQueue is full — drop the overflow. With back-pressure on the
+                // PhotonQueue side, the EmittingQueue should drain steadily; sustained
+                // overflow means EmittingQueue is undersized relative to fan-out.
+                std::cout << m_index << ": emitting queue overflow! requested "
+                          << bounceableCount << " got " << allocated << std::endl;
+            }
+            size_t outIndex = 0;
             for (auto& photonHit : m_hitBuffer)
             {
+                if (outIndex >= allocated)
+                {
+                    break;
+                }
                 if (photonHit.photon.bounces < m_bounceThreshold)
                 {
-                    std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-                    totalDaughters += material ? material->daughterPhotonCount() : 1;
+                    emittingBlock[outIndex] = photonHit;
+                    ++outIndex;
                 }
             }
-
-            auto bouncedPhotonsBlock = photonQueue->initialize(totalDaughters);
-            size_t photonIndex = 0;
-
-            if (bouncedPhotonsBlock.size() != totalDaughters)
-            {
-                std::cout << m_index << ": photon queue overflow! requested "
-                          << totalDaughters << " got " << bouncedPhotonsBlock.size() << std::endl;
-            }
-
-            const size_t allocated = bouncedPhotonsBlock.size();
-
-            for (auto& photonHit : m_hitBuffer)
-            {
-                if (photonHit.photon.bounces < m_bounceThreshold)
-                {
-                    std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-                    const size_t n = material ? material->daughterPhotonCount() : 1;
-
-                    size_t startIndex = photonIndex;
-                    size_t endIndex = startIndex + n;
-
-                    // Defensive clamp: if the photon queue overflowed and gave us a
-                    // shorter block, truncate this hit's fan-out and stop processing
-                    // further hits rather than running off the end of the buffer.
-                    if (endIndex > allocated)
-                    {
-                        endIndex = allocated;
-                    }
-                    if (startIndex >= endIndex)
-                    {
-                        break;
-                    }
-
-                    material->bounce(bouncedPhotonsBlock, startIndex, endIndex, photonHit, m_generator);
-
-                    photonIndex += n;
-                }
-            }
-
-            photonQueue->ready(bouncedPhotonsBlock);
+            emittingQueue->ready(emittingBlock);
         }
     }
 
@@ -356,6 +350,123 @@ bool Worker::processPhotons()
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
     photonDuration += workDuration.count();
+
+    return true;
+}
+
+bool Worker::processEmissions()
+{
+    auto workStart = std::chrono::system_clock::now();
+
+    // Pull a single batch from the EmittingQueue. We then make a back-pressure
+    // decision per-hit: only spawn daughters for hits whose material's
+    // daughterPhotonCount fits in the PhotonQueue's currently free space. Hits
+    // we can't service this iteration are re-pushed to the back of the queue.
+    auto emissionsBlock = emittingQueue->fetch(m_fetchSize);
+
+    if (emissionsBlock.size() == 0)
+    {
+        emittingQueue->release(emissionsBlock);
+        auto workEnd = std::chrono::system_clock::now();
+        emitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
+        return true;
+    }
+
+    // Two-pass: first pass walks the batch, classifying each hit as "spawn now"
+    // (fits in remaining PhotonQueue capacity) or "requeue" (doesn't fit). We
+    // accumulate the total daughter count needed for the spawn-now set so we
+    // can make one PhotonQueue allocation.
+    std::vector<size_t> spawnIndices;
+    std::vector<size_t> requeueIndices;
+    spawnIndices.reserve(emissionsBlock.size());
+    requeueIndices.reserve(emissionsBlock.size());
+
+    size_t totalDaughters = 0;
+    // Snapshot freeSpace once at the top. It can race with other workers'
+    // allocations, but the photonQueue->initialize call below clamps to actual
+    // remaining capacity so over-counting only causes a short allocation, not
+    // corruption. Under-counting causes a hit to be requeued unnecessarily,
+    // which is harmless — it'll be picked up next iteration.
+    size_t budget = photonQueue->freeSpace();
+
+    for (size_t i = 0; i < emissionsBlock.size(); ++i)
+    {
+        const PhotonHit& photonHit = emissionsBlock[i];
+        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+        const size_t n = material ? material->daughterPhotonCount() : 1;
+
+        if (n <= budget)
+        {
+            spawnIndices.push_back(i);
+            totalDaughters += n;
+            budget -= n;
+        }
+        else
+        {
+            requeueIndices.push_back(i);
+        }
+    }
+
+    if (totalDaughters > 0)
+    {
+        auto bouncedBlock = photonQueue->initialize(totalDaughters);
+        const size_t allocated = bouncedBlock.size();
+        size_t photonIndex = 0;
+
+        if (allocated < totalDaughters)
+        {
+            // Race lost vs another worker. Surplus hits get dropped to requeue.
+            std::cout << m_index << ": photon queue allocation short on emit: requested "
+                      << totalDaughters << " got " << allocated << std::endl;
+        }
+
+        for (size_t spawnIdx : spawnIndices)
+        {
+            const PhotonHit& photonHit = emissionsBlock[spawnIdx];
+            std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+            const size_t n = material ? material->daughterPhotonCount() : 1;
+
+            size_t startIndex = photonIndex;
+            size_t endIndex = startIndex + n;
+
+            if (endIndex > allocated)
+            {
+                // PhotonQueue exhausted mid-batch — requeue the remaining hits.
+                requeueIndices.push_back(spawnIdx);
+                continue;
+            }
+
+            material->bounce(bouncedBlock, startIndex, endIndex, photonHit, m_generator);
+            photonIndex += n;
+        }
+
+        photonQueue->ready(bouncedBlock);
+    }
+
+    // Requeue: any hit we couldn't service this round goes back to the
+    // EmittingQueue so the next worker iteration tries again. Order is not
+    // preserved (and doesn't need to be — photon bounces commute).
+    if (!requeueIndices.empty())
+    {
+        auto requeueBlock = emittingQueue->initialize(requeueIndices.size());
+        const size_t allocated = requeueBlock.size();
+        if (allocated < requeueIndices.size())
+        {
+            std::cout << m_index << ": emitting queue full on requeue, dropping "
+                      << (requeueIndices.size() - allocated) << " hit(s)" << std::endl;
+        }
+        for (size_t i = 0; i < allocated; ++i)
+        {
+            requeueBlock[i] = emissionsBlock[requeueIndices[i]];
+        }
+        emittingQueue->ready(requeueBlock);
+    }
+
+    emittingQueue->release(emissionsBlock);
+
+    auto workEnd = std::chrono::system_clock::now();
+    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
+    emitDuration += workDuration.count();
 
     return true;
 }
