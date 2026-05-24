@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "Camera.h"
 #include "LambertianMaterial.h"
+#include "MirrorMaterial.h"
 #include "EnumFlag.h"
 #include "Image.h"
 #include "LightQueue.h"
@@ -569,6 +570,10 @@ int main(int argc, char** argv)
                 if (type == "Diffuse" || type == "Lambertian")
                 {
                     materialLibrary->add(std::make_shared<LambertianMaterial>(name, color));
+                }
+                else if (type == "Mirror")
+                {
+                    materialLibrary->add(std::make_shared<MirrorMaterial>(name, color));
                 }
                 else
                 {

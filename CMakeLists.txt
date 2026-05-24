@@ -153,6 +153,9 @@ target_sources(ray-tracer-lib
         include/LambertianMaterial.h
         src/LambertianMaterial.cpp
 
+        include/MirrorMaterial.h
+        src/MirrorMaterial.cpp
+
         include/ObjReader.h
         src/ObjReader.cpp
 
