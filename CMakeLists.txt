@@ -156,6 +156,9 @@ target_sources(ray-tracer-lib
         include/MirrorMaterial.h
         src/MirrorMaterial.cpp
 
+        include/MicrofacetMaterial.h
+        src/MicrofacetMaterial.cpp
+
         include/ObjReader.h
         src/ObjReader.cpp
 

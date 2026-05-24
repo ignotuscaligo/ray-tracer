@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "Camera.h"
 #include "LambertianMaterial.h"
+#include "MicrofacetMaterial.h"
 #include "MirrorMaterial.h"
 #include "EnumFlag.h"
 #include "Image.h"
@@ -574,6 +575,15 @@ int main(int argc, char** argv)
                 else if (type == "Mirror")
                 {
                     materialLibrary->add(std::make_shared<MirrorMaterial>(name, color));
+                }
+                else if (type == "Microfacet" || type == "GGX")
+                {
+                    double roughness = MicrofacetMaterial::kDefaultRoughness;
+                    if (material.contains("$roughness"))
+                    {
+                        roughness = material["$roughness"].get<double>();
+                    }
+                    materialLibrary->add(std::make_shared<MicrofacetMaterial>(name, color, roughness));
                 }
                 else
                 {
