@@ -559,7 +559,7 @@ bool Worker::processFinalHits()
             // sketched in the vision doc (track which bouncehits reach the camera, re-
             // emit photons from the source toward those paths). When that lands, this
             // widening reverts to 1.0 — both code paths describe the same physical model.
-            constexpr double kDeltaConeRadius = 50.0;
+            constexpr double kDeltaConeRadius = 1.0;
             const double pixelOffset = angularOffset / (pixelAngularSize * kDeltaConeRadius);
             if (pixelOffset >= 1.0)
             {
