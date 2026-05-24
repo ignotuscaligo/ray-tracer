@@ -28,6 +28,18 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
     const size_t n = (endIndex > startIndex) ? (endIndex - startIndex) : 1;
     const float invN = 1.0f / static_cast<float>(n);
 
+    // Primary-bounce-first daughter generation:
+    //   daughter index 0 = sampleMode() — deterministic BRDF peak (cosine peak for
+    //                      Lambertian, perfect reflection for Mirror/Microfacet)
+    //   daughter indices 1..N-1 = sample() — drawn from the BRDF distribution
+    //
+    // This guarantees every bounce produces at least one photon along the
+    // dominant outgoing direction, which is the photon-mapping-correct fix for
+    // chrome-sphere starvation: without it, mirror surfaces only ever receive
+    // light from the rare cosine-sample that happened to point at them. With
+    // primary-mode-first, every diffuse hit produces a photon directly along
+    // its normal, which is the maximum-likelihood direction to reach a nearby
+    // specular surface and bounce off into the camera cone.
     for (size_t i = startIndex; i < endIndex; ++i)
     {
         // Carry forward all photon state (time, color, anything added later) by copy,
@@ -35,7 +47,10 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
         photonBlock[i] = photonHit.photon;
         photonBlock[i].bounces = photonHit.photon.bounces + 1;
 
-        BSDFSample s = sample(incident, normal, generator);
+        const bool primary = (i == startIndex);
+        BSDFSample s = primary
+            ? sampleMode(incident, normal, generator)
+            : sample(incident, normal, generator);
 
         if (!s.valid)
         {

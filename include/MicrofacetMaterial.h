@@ -29,6 +29,7 @@ public:
     MicrofacetMaterial(const std::string& name, const Color& albedo = {1.0f, 1.0f, 1.0f}, double roughness = kDefaultRoughness);
 
     BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
+    BSDFSample sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
     Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
     double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
 

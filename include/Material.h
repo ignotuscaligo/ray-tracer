@@ -46,6 +46,19 @@ public:
     // the outward surface normal.
     virtual BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const = 0;
 
+    // Deterministic BRDF "mode" direction — the peak of the sampling distribution. Used
+    // for the primary-bounce-first daughter (index 0) in the fan-out:
+    //   Lambertian -> along normal (cosine peak)
+    //   Mirror     -> perfect reflection (only direction)
+    //   Microfacet -> perfect reflection (GGX peak; coincides with mirror as alpha -> 0)
+    // The throughput weight returned should match what a Monte Carlo sample at this
+    // direction would carry. Default implementation falls through to sample() — subclasses
+    // override for a deterministic peak direction.
+    virtual BSDFSample sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& generator) const
+    {
+        return sample(incident, normal, generator);
+    }
+
     // Evaluate the BRDF f(wi, wo) for a specific pair of directions. Both `wi` and `wo`
     // point away from the surface in this convention (wi is the direction the incoming
     // photon came FROM, wo is the direction energy is leaving toward — e.g. the camera).

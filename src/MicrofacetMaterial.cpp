@@ -167,6 +167,48 @@ BSDFSample MicrofacetMaterial::sample(const Vector& incident, const Vector& norm
     return s;
 }
 
+BSDFSample MicrofacetMaterial::sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& /*generator*/) const
+{
+    // GGX D peaks at h = normal, which means the BRDF lobe peaks at
+    // wo = reflect(wi, normal) — perfect-reflection direction. As alpha -> 0
+    // this collapses to the pure mirror direction; for larger alpha the lobe
+    // widens around it.
+    const Vector wi = -incident;
+    const double cosThetaI = Vector::dot(wi, normal);
+
+    BSDFSample s;
+    if (cosThetaI <= 0.0)
+    {
+        s.valid = false;
+        return s;
+    }
+
+    const Vector wo = Vector::normalized(Vector::reflected(incident, normal));
+    const double cosThetaO = Vector::dot(wo, normal);
+    if (cosThetaO <= 0.0)
+    {
+        s.valid = false;
+        return s;
+    }
+
+    // h = (wi + wo).normalized; for perfect reflection, h = normal.
+    // F at peak uses cos(wi, h) = cos(wi, n) = cosThetaI.
+    const Color F = schlickFresnel(m_albedo, cosThetaI);
+    const double G2 = smithG2(cosThetaI, cosThetaO, m_alpha);
+
+    // Throughput weight = f * cos(theta_o) / pdf
+    // At the peak (h = n), this reduces to F * G2 * cos_i / (cos_i * cos_h)
+    // with cos_h = 1, so weight = F * G2.
+    const double weightScalar = G2;
+
+    s.direction = wo;
+    s.weight = F * static_cast<float>(weightScalar);
+    s.pdf = ggxD(1.0, m_alpha) * 1.0 / (4.0 * cosThetaI);
+    s.isDelta = false;
+    s.valid = true;
+    return s;
+}
+
 Color MicrofacetMaterial::evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const
 {
     const double cosThetaI = Vector::dot(wi, normal);
@@ -199,10 +241,11 @@ Color MicrofacetMaterial::evaluate(const Vector& wi, const Vector& wo, const Vec
 
 size_t MicrofacetMaterial::daughterPhotonCount() const
 {
-    // Rough microfacet (alpha=1) gets 32 daughters; perfect-mirror limit (alpha~0)
-    // collapses to 1. The lobe width is what determines how many directional samples
-    // are needed to avoid clumpy artifacts — narrower lobe, fewer samples.
-    const long n = std::lround(32.0 * m_alpha);
+    // Rough microfacet (alpha=1) gets 9 daughters matching Lambertian's
+    // hemisphere coverage; perfect-mirror limit (alpha~0) collapses to 1.
+    // Lobe width is what determines how many directional samples are needed
+    // to avoid clumpy artifacts — narrower lobe, fewer samples.
+    const long n = std::lround(9.0 * m_alpha);
     return static_cast<size_t>(std::max<long>(1, n));
 }
 

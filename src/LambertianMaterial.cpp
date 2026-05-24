@@ -74,6 +74,23 @@ BSDFSample LambertianMaterial::sample(const Vector& /*incident*/, const Vector& 
     return s;
 }
 
+BSDFSample LambertianMaterial::sampleMode(const Vector& /*incident*/, const Vector& normal, RandomGenerator& /*generator*/) const
+{
+    // Cosine-weighted hemisphere peaks along the normal (cos(theta) is maximal
+    // at theta=0). Throughput at the peak is the same as for any cosine sample:
+    // f * cos(theta) / pdf = (albedo/pi) * 1 / (1/pi) = albedo. Treating this
+    // deterministic direction as if it were drawn from the cosine pdf at its
+    // mode gives the same per-daughter weight as a Monte Carlo sample would,
+    // which is what the 1/N energy split in Material::bounce expects.
+    BSDFSample s;
+    s.direction = normal;
+    s.weight = m_albedo;
+    s.pdf = 1.0 / Utility::pi;
+    s.isDelta = false;
+    s.valid = true;
+    return s;
+}
+
 Color LambertianMaterial::evaluate(const Vector& /*wi*/, const Vector& wo, const Vector& normal) const
 {
     if (Vector::dot(wo, normal) <= 0.0)
