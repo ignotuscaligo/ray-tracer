@@ -22,7 +22,7 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
 
     for (size_t i = startIndex; i < endIndex; ++i)
     {
-        // Carry forward all photon state (time, wavelength, anything added later) by copy,
+        // Carry forward all photon state (time, color, anything added later) by copy,
         // then overwrite the fields that the bounce actually changes.
         photonBlock[i] = photonHit.photon;
         photonBlock[i].bounces = photonHit.photon.bounces + 1;
