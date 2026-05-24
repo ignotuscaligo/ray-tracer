@@ -197,6 +197,15 @@ Color MicrofacetMaterial::evaluate(const Vector& wi, const Vector& wo, const Vec
     return F * static_cast<float>(scalar);
 }
 
+size_t MicrofacetMaterial::daughterPhotonCount() const
+{
+    // Rough microfacet (alpha=1) gets 32 daughters; perfect-mirror limit (alpha~0)
+    // collapses to 1. The lobe width is what determines how many directional samples
+    // are needed to avoid clumpy artifacts — narrower lobe, fewer samples.
+    const long n = std::lround(32.0 * m_alpha);
+    return static_cast<size_t>(std::max<long>(1, n));
+}
+
 double MicrofacetMaterial::pdf(const Vector& wi, const Vector& wo, const Vector& normal) const
 {
     const double cosThetaI = Vector::dot(wi, normal);

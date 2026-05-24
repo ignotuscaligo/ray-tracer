@@ -19,6 +19,9 @@ public:
     Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
     double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
 
+    // Lambertian wants wide hemisphere fan-out. 32 is the default; tunable later.
+    size_t daughterPhotonCount() const override { return 32; }
+
 private:
     Color m_albedo;
 };

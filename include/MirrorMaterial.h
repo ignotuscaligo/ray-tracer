@@ -20,6 +20,9 @@ public:
     double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
     bool isDelta() const override { return true; }
 
+    // Delta BRDF — only one valid outgoing direction.
+    size_t daughterPhotonCount() const override { return 1; }
+
 private:
     Color m_albedo;
 };

@@ -58,6 +58,17 @@ public:
 
     virtual bool isDelta() const { return false; }
 
+    // Number of daughter photons to spawn per surface hit (per-material fan-out).
+    // Delta materials (mirror) return 1 — there is only one valid outgoing direction.
+    // Diffuse / wide-lobe BRDFs (Lambertian) return a large value to populate the
+    // hemisphere; narrow-lobe BRDFs (rough microfacet) scale by lobe width (roughness).
+    //
+    // The Worker's processPhotons stage queries this per-hit and allocates N daughter
+    // slots, then calls bounce() with endIndex = startIndex + N. Energy is split 1/N
+    // across the daughters inside bounce() — total outgoing energy per hit stays
+    // equal to incoming_energy * material_albedo (no double-counting).
+    virtual size_t daughterPhotonCount() const = 0;
+
     // ===== Pipeline integration =====
 
     // Default implementation that draws a sample per output slot and applies the throughput

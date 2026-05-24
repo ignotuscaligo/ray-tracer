@@ -32,6 +32,11 @@ public:
     Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
     double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
 
+    // Scale fan-out by roughness: a near-mirror lobe needs only a handful of samples
+    // (the cone is narrow), while a near-diffuse rough surface benefits from full
+    // Lambertian-like fan-out. Formula: max(1, round(32 * alpha)).
+    size_t daughterPhotonCount() const override;
+
 private:
     Color m_albedo;
     double m_alpha;
