@@ -4,3 +4,6 @@
 build/
 renders/
 CMakeUserPresets.json
+
+# ImGui runtime layout file, written next to the editor binary / CWD.
+imgui.ini
