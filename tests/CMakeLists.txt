@@ -6,16 +6,23 @@ find_package(Catch2 3 REQUIRED)
 
 add_executable(tests)
 
+find_package(Threads REQUIRED)
+
 target_link_libraries(tests
     PRIVATE
         ray-tracer-lib
         Catch2::Catch2WithMain
         glm::glm
+        Threads::Threads
 )
 
-# Editor non-GUI logic (OBJ->vertex extraction, orbit camera math) is tested
-# here. We compile only the GL-free editor sources (ObjLoader.cpp, OrbitCamera.h)
-# so the test binary needs no OpenGL context or linkage.
+# Editor non-GUI logic is tested here. We compile only the GL-free editor
+# sources (ObjLoader.cpp, OrbitCamera.h, PngExport.cpp, AutomationServer.cpp) so
+# the test binary needs no OpenGL context or linkage and stays headless-clean.
+# The GL-touching code (EditorApp, RasterMesh GL upload) is deliberately
+# excluded; it is exercised by running the editor through the automation port
+# (see editor/AUTOMATION.md), not by this headless target. PNG::PNG and
+# nlohmann_json are already pulled in transitively via ray-tracer-lib.
 target_include_directories(tests
     PRIVATE
         ${CMAKE_SOURCE_DIR}/editor
@@ -33,7 +40,11 @@ target_sources(tests
         test_main.cpp
         test_OrbitCamera.cpp
         test_RasterMesh.cpp
+        test_PngExport.cpp
+        test_AutomationServer.cpp
         ${CMAKE_SOURCE_DIR}/editor/ObjLoader.cpp
+        ${CMAKE_SOURCE_DIR}/editor/PngExport.cpp
+        ${CMAKE_SOURCE_DIR}/editor/AutomationServer.cpp
 )
 
 include(CTest)
