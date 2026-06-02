@@ -266,6 +266,7 @@ target_sources(editor
         editor/OrbitCamera.h
         editor/RasterMesh.h
         editor/RasterMesh.cpp
+        editor/ObjLoader.cpp
         editor/GlHeaders.h
         editor/Shaders.h
 

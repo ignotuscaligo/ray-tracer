@@ -10,6 +10,15 @@ target_link_libraries(tests
     PRIVATE
         ray-tracer-lib
         Catch2::Catch2WithMain
+        glm::glm
+)
+
+# Editor non-GUI logic (OBJ->vertex extraction, orbit camera math) is tested
+# here. We compile only the GL-free editor sources (ObjLoader.cpp, OrbitCamera.h)
+# so the test binary needs no OpenGL context or linkage.
+target_include_directories(tests
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/editor
 )
 
 set_target_properties(tests
@@ -22,6 +31,9 @@ target_sources(tests
     PRIVATE
         test_Bounds.cpp
         test_main.cpp
+        test_OrbitCamera.cpp
+        test_RasterMesh.cpp
+        ${CMAKE_SOURCE_DIR}/editor/ObjLoader.cpp
 )
 
 include(CTest)
