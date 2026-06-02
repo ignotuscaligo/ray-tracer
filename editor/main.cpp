@@ -91,13 +91,40 @@ int main(int argc, char** argv)
         return runRenderTest(argc, argv);
     }
 
+    // Parse optional flags:
+    //   --automation-port <N>   enable the localhost (127.0.0.1) command port
+    //   --script <file.json>    run a list of commands non-interactively, exit
+    //   <path.obj>              initial mesh to load (first non-flag arg)
+    uint16_t automationPort = 0;
+    std::string scriptPath;
+    std::string meshPath;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+        if (arg == "--automation-port" && i + 1 < argc)
+        {
+            automationPort = static_cast<uint16_t>(std::atoi(argv[++i]));
+        }
+        else if (arg == "--script" && i + 1 < argc)
+        {
+            scriptPath = argv[++i];
+        }
+        else if (!arg.empty() && arg[0] != '-' && meshPath.empty())
+        {
+            meshPath = arg;
+        }
+    }
+
     EditorApp app;
 
-    // Allow an explicit OBJ path on the command line; otherwise the app falls
-    // back to a bundled mesh (see EditorApp).
-    if (argc > 1)
+    if (!meshPath.empty())
     {
-        app.setInitialMeshPath(argv[1]);
+        app.setInitialMeshPath(meshPath);
+    }
+    if (automationPort != 0)
+    {
+        app.setAutomationPort(automationPort);
     }
 
     try
@@ -106,6 +133,16 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "Failed to initialize editor.\n");
             return 1;
+        }
+
+        // Script mode: a GL context exists (initialize created the window), so
+        // load_mesh / render / screenshot all work. Run the commands, then exit
+        // without entering the interactive loop.
+        if (!scriptPath.empty())
+        {
+            int code = app.runScript(scriptPath);
+            app.shutdown();
+            return code;
         }
 
         app.run();

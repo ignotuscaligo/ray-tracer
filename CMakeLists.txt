@@ -269,6 +269,10 @@ target_sources(editor
         editor/ObjLoader.cpp
         editor/GlHeaders.h
         editor/Shaders.h
+        editor/PngExport.h
+        editor/PngExport.cpp
+        editor/AutomationServer.h
+        editor/AutomationServer.cpp
 
         # Dear ImGui glfw + opengl3 backends (compiled from the Conan package).
         "${IMGUI_BINDINGS_DIR}/imgui_impl_glfw.cpp"

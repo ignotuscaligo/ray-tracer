@@ -11,7 +11,10 @@
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 struct GLFWwindow;
+class AutomationServer;
 
 // Top-level editor application. Owns the GLFW window + GL context, the ImGui
 // context, the raster viewport (offscreen FBO + mesh + orbit camera), and the
@@ -22,12 +25,59 @@ public:
     EditorApp();
     ~EditorApp();
 
+    // Render lifecycle state (public so the automation handlers and the
+    // get_state introspection can name it).
+    enum class RenderState
+    {
+        Idle,
+        Running,
+        Done,
+        Failed
+    };
+
     // Sets a mesh path to load on startup. If unset, a bundled fallback is used.
     void setInitialMeshPath(const std::string& path);
+
+    // Enable the localhost automation command port (127.0.0.1 only). Off by
+    // default; call before initialize(). port 0 leaves it disabled.
+    void setAutomationPort(uint16_t port);
 
     bool initialize();
     void run();
     void shutdown();
+
+    // ===== Automation command handlers (run on the main/GL thread) ==========
+    // Each maps a parsed request JSON to a response JSON. These are public so
+    // the --script runner and tests can invoke them directly without going
+    // through the socket. They assume a current GL context (except where noted)
+    // and must only be called on the main thread.
+
+    // Dispatch a single command object {"cmd": "...", ...} to the right handler.
+    nlohmann::json handleCommand(const nlohmann::json& request);
+
+    nlohmann::json cmdPing(const nlohmann::json& req);
+    nlohmann::json cmdGetState(const nlohmann::json& req);
+    nlohmann::json cmdLoadMesh(const nlohmann::json& req);
+    nlohmann::json cmdSetCamera(const nlohmann::json& req);
+    nlohmann::json cmdSetRenderSettings(const nlohmann::json& req);
+    nlohmann::json cmdRender(const nlohmann::json& req);
+    nlohmann::json cmdScreenshot(const nlohmann::json& req);
+
+    // Load an OBJ into the viewport (GL upload + reframe camera). Returns an
+    // error string on failure, empty on success.
+    std::string loadMeshFromPath(const std::string& path);
+
+    // Capture pixels to a PNG. target is "window" | "viewport" | "render".
+    // Returns empty on success, else an error string. Requires a GL context.
+    std::string captureScreenshot(const std::string& path, const std::string& target);
+
+    // Block (pumping the render poll) until the current render finishes or the
+    // timeout elapses. Returns true if a render completed. Main-thread only.
+    bool waitForRenderToFinish(double timeoutSeconds);
+
+    // Run a list of command objects (the --script path), printing each
+    // response to stdout. Returns process exit code (0 = all ok).
+    int runScript(const std::string& scriptPath);
 
 private:
     void drawUi();
@@ -72,13 +122,6 @@ private:
     bool m_cursorOverViewport = false;
 
     // Phase 3: render-to-image state.
-    enum class RenderState
-    {
-        Idle,
-        Running,
-        Done,
-        Failed
-    };
     std::thread m_renderThread;
     std::atomic<RenderState> m_renderState{RenderState::Idle};
     std::atomic<bool> m_renderTextureDirty{false};
@@ -91,4 +134,13 @@ private:
     std::string m_scenePath;  // scene JSON to render (defaults to MirrorTest.json if found)
     int m_renderResolution = 256;
     int m_renderPhotonsMillions = 4;
+
+    // Automation command port (127.0.0.1 only). Null/0 when disabled.
+    std::unique_ptr<AutomationServer> m_automation;
+    uint16_t m_automationPort = 0;
+
+    // Last framebuffer size, tracked each frame so the "window" screenshot
+    // target and get_state can report it without a GL query mid-handler.
+    int m_lastWindowWidth = 0;
+    int m_lastWindowHeight = 0;
 };

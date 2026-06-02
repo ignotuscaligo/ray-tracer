@@ -1,6 +1,8 @@
 #include "EditorApp.h"
 
+#include "AutomationServer.h"
 #include "GlHeaders.h"
+#include "PngExport.h"
 #include "Shaders.h"
 
 #include "Image.h"
@@ -16,9 +18,13 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
+
+using nlohmann::json;
 
 namespace
 {
@@ -112,6 +118,11 @@ void EditorApp::setInitialMeshPath(const std::string& path)
     m_meshPath = path;
 }
 
+void EditorApp::setAutomationPort(uint16_t port)
+{
+    m_automationPort = port;
+}
+
 bool EditorApp::initialize()
 {
     if (!glfwInit())
@@ -185,18 +196,10 @@ bool EditorApp::initialize()
 
     if (!m_meshPath.empty())
     {
-        MeshData data = loadObjMeshData(m_meshPath);
-        if (data.valid)
+        std::string err = loadMeshFromPath(m_meshPath);
+        if (!err.empty())
         {
-            m_mesh.upload(data);
-            m_camera.frameBounds(data.minBound, data.maxBound);
-            m_meshLabel = std::filesystem::path(m_meshPath).filename().string() +
-                          " (" + std::to_string(data.triangleCount()) + " tris)";
-        }
-        else
-        {
-            m_meshLabel = "load failed: " + data.error;
-            std::fprintf(stderr, "%s\n", data.error.c_str());
+            std::fprintf(stderr, "%s\n", err.c_str());
         }
     }
 
@@ -209,7 +212,39 @@ bool EditorApp::initialize()
 
     resizeFbo(800, 600);
 
+    // Start the localhost automation port if requested (127.0.0.1 only).
+    if (m_automationPort != 0)
+    {
+        m_automation = std::make_unique<AutomationServer>();
+        if (!m_automation->start(m_automationPort,
+                                 [this](const json& req) { return handleCommand(req); }))
+        {
+            std::fprintf(stderr, "Automation port failed to start; continuing without it.\n");
+            m_automation.reset();
+        }
+    }
+
     return true;
+}
+
+// Shared mesh-loading path used by startup, the automation load_mesh command,
+// and the script runner. Requires a current GL context (calls m_mesh.upload).
+// Returns an empty string on success, else an error description.
+std::string EditorApp::loadMeshFromPath(const std::string& path)
+{
+    MeshData data = loadObjMeshData(path);
+    if (!data.valid)
+    {
+        m_meshLabel = "load failed: " + data.error;
+        return data.error;
+    }
+
+    m_mesh.upload(data);
+    m_camera.frameBounds(data.minBound, data.maxBound);
+    m_meshPath = path;
+    m_meshLabel = std::filesystem::path(path).filename().string() + " (" +
+                  std::to_string(data.triangleCount()) + " tris)";
+    return {};
 }
 
 void EditorApp::resizeFbo(int width, int height)
@@ -492,6 +527,359 @@ void EditorApp::uploadRenderTexture()
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+// ===== Automation command handlers (main/GL thread) =======================
+
+namespace
+{
+const char* renderStateName(EditorApp::RenderState s)
+{
+    switch (s)
+    {
+        case EditorApp::RenderState::Idle: return "idle";
+        case EditorApp::RenderState::Running: return "rendering";
+        case EditorApp::RenderState::Done: return "done";
+        case EditorApp::RenderState::Failed: return "failed";
+    }
+    return "unknown";
+}
+}  // namespace
+
+nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
+{
+    const std::string cmd = request.value("cmd", std::string{});
+    if (cmd == "ping") return cmdPing(request);
+    if (cmd == "get_state") return cmdGetState(request);
+    if (cmd == "load_mesh") return cmdLoadMesh(request);
+    if (cmd == "set_camera") return cmdSetCamera(request);
+    if (cmd == "set_render_settings") return cmdSetRenderSettings(request);
+    if (cmd == "render") return cmdRender(request);
+    if (cmd == "screenshot") return cmdScreenshot(request);
+    if (cmd == "quit")
+    {
+        if (m_automation) m_automation->requestQuit();
+        return json{{"ok", true}, {"quitting", true}};
+    }
+    return json{{"ok", false}, {"error", "unknown command: " + cmd}};
+}
+
+nlohmann::json EditorApp::cmdPing(const nlohmann::json&)
+{
+    return json{{"ok", true}, {"pong", true}, {"version", "editor-automation/1"}};
+}
+
+nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
+{
+    const glm::vec3 eye = m_camera.eye();
+    json j;
+    j["ok"] = true;
+    j["mesh_path"] = m_meshPath;
+    j["mesh_label"] = m_meshLabel;
+    j["camera"] = {
+        {"eye", {eye.x, eye.y, eye.z}},
+        {"target", {m_camera.target.x, m_camera.target.y, m_camera.target.z}},
+        {"fov_y_degrees", glm::degrees(m_camera.fovYRadians)},
+        {"yaw", m_camera.yaw},
+        {"pitch", m_camera.pitch},
+        {"distance", m_camera.distance},
+    };
+    j["render_settings"] = {
+        {"resolution", m_renderResolution},
+        {"photons_millions", m_renderPhotonsMillions},
+        {"scene_path", m_scenePath},
+    };
+    j["render_status"] = renderStateName(m_renderState.load());
+    j["render_message"] = m_renderStatus;
+    j["render_width"] = m_renderWidth;
+    j["render_height"] = m_renderHeight;
+    j["viewport"] = {{"width", m_fboWidth}, {"height", m_fboHeight}};
+    j["window"] = {{"width", m_lastWindowWidth}, {"height", m_lastWindowHeight}};
+    return j;
+}
+
+nlohmann::json EditorApp::cmdLoadMesh(const nlohmann::json& req)
+{
+    if (!req.contains("path") || !req["path"].is_string())
+    {
+        return json{{"ok", false}, {"error", "load_mesh requires string 'path'"}};
+    }
+    const std::string path = req["path"].get<std::string>();
+    if (!std::filesystem::exists(path))
+    {
+        return json{{"ok", false}, {"error", "file not found: " + path}};
+    }
+    std::string err = loadMeshFromPath(path);
+    if (!err.empty())
+    {
+        return json{{"ok", false}, {"error", err}};
+    }
+    return json{{"ok", true}, {"mesh_path", m_meshPath}, {"mesh_label", m_meshLabel}};
+}
+
+nlohmann::json EditorApp::cmdSetCamera(const nlohmann::json& req)
+{
+    auto readVec3 = [](const json& arr, glm::vec3& out) -> bool {
+        if (!arr.is_array() || arr.size() != 3) return false;
+        out = glm::vec3(arr[0].get<float>(), arr[1].get<float>(), arr[2].get<float>());
+        return true;
+    };
+
+    if (req.contains("target"))
+    {
+        glm::vec3 t;
+        if (!readVec3(req["target"], t))
+            return json{{"ok", false}, {"error", "target must be [x,y,z]"}};
+        m_camera.target = t;
+    }
+    if (req.contains("eye"))
+    {
+        // Derive yaw/pitch/distance from an explicit eye relative to target so
+        // the orbit parameterization stays consistent.
+        glm::vec3 e;
+        if (!readVec3(req["eye"], e))
+            return json{{"ok", false}, {"error", "eye must be [x,y,z]"}};
+        const glm::vec3 d = e - m_camera.target;
+        const float dist = glm::length(d);
+        if (dist > 1e-6f)
+        {
+            m_camera.distance = dist;
+            m_camera.pitch = std::asin(glm::clamp(d.y / dist, -1.0f, 1.0f));
+            m_camera.yaw = std::atan2(d.x, d.z);
+            if (m_camera.pitch > OrbitCamera::kPitchLimit) m_camera.pitch = OrbitCamera::kPitchLimit;
+            if (m_camera.pitch < -OrbitCamera::kPitchLimit) m_camera.pitch = -OrbitCamera::kPitchLimit;
+        }
+    }
+    if (req.contains("fov"))
+    {
+        m_camera.fovYRadians = glm::radians(req["fov"].get<float>());
+    }
+    if (req.contains("orbit_yaw") || req.contains("orbit_pitch"))
+    {
+        const float dy = req.value("orbit_yaw", 0.0f);
+        const float dp = req.value("orbit_pitch", 0.0f);
+        m_camera.orbit(dy, dp);
+    }
+    if (req.contains("dolly"))
+    {
+        m_camera.dolly(req["dolly"].get<float>());
+    }
+
+    const glm::vec3 eye = m_camera.eye();
+    return json{{"ok", true},
+                {"camera", {{"eye", {eye.x, eye.y, eye.z}},
+                            {"target", {m_camera.target.x, m_camera.target.y, m_camera.target.z}},
+                            {"fov_y_degrees", glm::degrees(m_camera.fovYRadians)},
+                            {"yaw", m_camera.yaw},
+                            {"pitch", m_camera.pitch},
+                            {"distance", m_camera.distance}}}};
+}
+
+nlohmann::json EditorApp::cmdSetRenderSettings(const nlohmann::json& req)
+{
+    if (req.contains("resolution"))
+    {
+        int r = req["resolution"].get<int>();
+        if (r < 16 || r > 4096)
+            return json{{"ok", false}, {"error", "resolution out of range [16,4096]"}};
+        m_renderResolution = r;
+    }
+    if (req.contains("photons"))
+    {
+        // Accept photons in millions to match the UI slider semantics.
+        int p = req["photons"].get<int>();
+        if (p < 1) p = 1;
+        m_renderPhotonsMillions = p;
+    }
+    if (req.contains("scene_path"))
+    {
+        m_scenePath = req["scene_path"].get<std::string>();
+    }
+    return json{{"ok", true},
+                {"render_settings", {{"resolution", m_renderResolution},
+                                     {"photons_millions", m_renderPhotonsMillions},
+                                     {"scene_path", m_scenePath}}}};
+}
+
+nlohmann::json EditorApp::cmdRender(const nlohmann::json& req)
+{
+    if (m_scenePath.empty())
+    {
+        return json{{"ok", false}, {"error", "no scene file set (scene_path)"}};
+    }
+    if (m_renderState.load() == RenderState::Running)
+    {
+        return json{{"ok", false}, {"error", "render already in progress"}};
+    }
+
+    startRender();
+
+    const bool wait = req.value("wait", true);
+    if (!wait)
+    {
+        return json{{"ok", true}, {"status", "rendering"}, {"waited", false}};
+    }
+
+    const double timeout = req.value("timeout", 600.0);
+    const bool finished = waitForRenderToFinish(timeout);
+    const RenderState st = m_renderState.load();
+    if (!finished)
+    {
+        return json{{"ok", false}, {"error", "render timed out"}, {"status", renderStateName(st)}};
+    }
+    if (st == RenderState::Failed)
+    {
+        return json{{"ok", false}, {"error", m_renderError}, {"status", "failed"}};
+    }
+    return json{{"ok", true},
+                {"status", "done"},
+                {"waited", true},
+                {"render_width", m_renderWidth},
+                {"render_height", m_renderHeight}};
+}
+
+bool EditorApp::waitForRenderToFinish(double timeoutSeconds)
+{
+    const auto start = std::chrono::steady_clock::now();
+    while (true)
+    {
+        // pollRender() uploads the texture + updates status when Done. It must
+        // run on the main thread (GL), which is where this handler executes.
+        pollRender();
+        const RenderState st = m_renderState.load();
+        if (st == RenderState::Done || st == RenderState::Failed)
+        {
+            return true;
+        }
+        const double elapsed =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        if (elapsed > timeoutSeconds)
+        {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
+nlohmann::json EditorApp::cmdScreenshot(const nlohmann::json& req)
+{
+    if (!req.contains("path") || !req["path"].is_string())
+    {
+        return json{{"ok", false}, {"error", "screenshot requires string 'path'"}};
+    }
+    const std::string path = req["path"].get<std::string>();
+    const std::string target = req.value("target", std::string{"window"});
+
+    std::string err = captureScreenshot(path, target);
+    if (!err.empty())
+    {
+        return json{{"ok", false}, {"error", err}};
+    }
+    return json{{"ok", true}, {"path", path}, {"target", target}};
+}
+
+std::string EditorApp::captureScreenshot(const std::string& path, const std::string& target)
+{
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> pixels;
+
+    if (target == "window")
+    {
+        glfwGetFramebufferSize(m_window, &width, &height);
+        if (width <= 0 || height <= 0) return "window has zero size";
+        pixels.resize(static_cast<size_t>(width) * height * 4);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        PngExport::flipVertical(pixels, width, height);  // GL origin is bottom-left
+    }
+    else if (target == "viewport")
+    {
+        if (m_fbo == 0 || m_fboWidth <= 0) return "viewport FBO not ready";
+        width = m_fboWidth;
+        height = m_fboHeight;
+        pixels.resize(static_cast<size_t>(width) * height * 4);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        PngExport::flipVertical(pixels, width, height);
+    }
+    else if (target == "render")
+    {
+        // The path-traced result lives in m_renderRgba (already in display
+        // orientation, top-left origin) — no GL read or flip needed.
+        if (m_renderRgba.empty() || m_renderWidth <= 0)
+            return "no render available (run 'render' first)";
+        width = m_renderWidth;
+        height = m_renderHeight;
+        pixels = m_renderRgba;
+    }
+    else
+    {
+        return "unknown target '" + target + "' (want window|viewport|render)";
+    }
+
+    if (!PngExport::writeRgba(path, width, height, pixels))
+    {
+        return "failed to write PNG to " + path;
+    }
+    return {};
+}
+
+int EditorApp::runScript(const std::string& scriptPath)
+{
+    std::ifstream in(scriptPath);
+    if (!in)
+    {
+        std::fprintf(stderr, "Could not open script: %s\n", scriptPath.c_str());
+        return 2;
+    }
+
+    json script;
+    try
+    {
+        in >> script;
+    }
+    catch (const std::exception& e)
+    {
+        std::fprintf(stderr, "Invalid script JSON: %s\n", e.what());
+        return 2;
+    }
+
+    // Accept either a bare array of commands or {"commands": [...]}.
+    const json* commands = nullptr;
+    if (script.is_array())
+    {
+        commands = &script;
+    }
+    else if (script.is_object() && script.contains("commands") && script["commands"].is_array())
+    {
+        commands = &script["commands"];
+    }
+    else
+    {
+        std::fprintf(stderr, "Script must be an array or {\"commands\": [...]}\n");
+        return 2;
+    }
+
+    int exitCode = 0;
+    for (const auto& command : *commands)
+    {
+        json response = handleCommand(command);
+        std::printf("%s\n", response.dump().c_str());
+        std::fflush(stdout);
+        if (!response.value("ok", false))
+        {
+            exitCode = 1;
+        }
+        if (m_automation && m_automation->shouldQuit())
+        {
+            break;
+        }
+    }
+    return exitCode;
+}
+
 void EditorApp::run()
 {
     while (!glfwWindowShouldClose(m_window))
@@ -499,6 +887,16 @@ void EditorApp::run()
         glfwPollEvents();
 
         pollRender();
+
+        // Execute any queued automation commands on this (main/GL) thread.
+        if (m_automation)
+        {
+            m_automation->drain();
+            if (m_automation->shouldQuit())
+            {
+                break;
+            }
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -515,6 +913,8 @@ void EditorApp::run()
 
         int displayW, displayH;
         glfwGetFramebufferSize(m_window, &displayW, &displayH);
+        m_lastWindowWidth = displayW;
+        m_lastWindowHeight = displayH;
         glViewport(0, 0, displayW, displayH);
         glClearColor(0.06f, 0.06f, 0.07f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -527,6 +927,14 @@ void EditorApp::run()
 
 void EditorApp::shutdown()
 {
+    // Stop accepting automation commands before tearing down GL state, so a
+    // late command can't touch a destroyed context.
+    if (m_automation)
+    {
+        m_automation->stop();
+        m_automation.reset();
+    }
+
     if (m_renderThread.joinable())
     {
         m_renderThread.join();
