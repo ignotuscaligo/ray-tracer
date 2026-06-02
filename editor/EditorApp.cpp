@@ -399,6 +399,12 @@ void EditorApp::startRender()
     const int resolution = m_renderResolution;
     const size_t photons = static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
 
+    // TODO (Phase 4 — progressive preview, not yet wired): renderFrame already
+    // accepts a Renderer::ProgressCallback and the Buffer is pollable mid-render.
+    // To show accumulation, capture result.buffer here, and on a UI timer call
+    // Renderer::tonemapBufferToImage on a snapshot + re-upload m_renderTex while
+    // RenderState::Running. Camera moves would reset/restart the render. Left as
+    // a clean follow-up rather than half-wired.
     m_renderThread = std::thread([this, scenePath, resolution, photons]() {
         try
         {
