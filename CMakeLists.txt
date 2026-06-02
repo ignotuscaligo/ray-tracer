@@ -19,6 +19,12 @@ find_package(nlohmann_json REQUIRED)
 find_package(PNG REQUIRED)
 find_package(tinyobjloader REQUIRED)
 
+# GUI editor dependencies. These are only needed by the `editor` target, but
+# find_package is cheap and harmless for the lib/exe builds.
+find_package(imgui REQUIRED)
+find_package(glfw3 REQUIRED)
+find_package(glm REQUIRED)
+
 # Detect host architecture so we only feed AVX hints to x86 builds.
 # -march=native is meaningful on x86 (enables AVX intrinsics that the
 # Vector.cpp fast path relies on). On Apple Silicon (arm64) -march=native is
@@ -201,6 +207,14 @@ target_sources(ray-tracer-lib
         include/Mesh.h
 
         include/EnumFlag.h
+
+        include/RenderSettings.h
+
+        include/SceneLoader.h
+        src/SceneLoader.cpp
+
+        include/Renderer.h
+        src/Renderer.cpp
 )
 
 # ===== Executable
@@ -222,5 +236,64 @@ target_sources(ray-tracer
     PRIVATE
         src/main.cpp
 )
+
+# ===== GUI Editor
+
+# The Dear ImGui Conan package ships the platform/renderer backend sources under
+# res/bindings (it does not pre-compile them, because the backend choice is the
+# consumer's). We compile exactly the glfw + opengl3 pair from the package's
+# resource directory, located via the CMakeDeps-exported package folder.
+set(IMGUI_BINDINGS_DIR "${imgui_PACKAGE_FOLDER_RELEASE}/res/bindings")
+if (NOT EXISTS "${IMGUI_BINDINGS_DIR}/imgui_impl_glfw.cpp")
+    # Fall back to the multi-config variable name if the release-specific one
+    # is not set (older/newer CMakeDeps layouts).
+    set(IMGUI_BINDINGS_DIR "${imgui_PACKAGE_FOLDER}/res/bindings")
+endif()
+
+add_executable(editor)
+
+set_target_properties(editor
+    PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+)
+
+target_sources(editor
+    PRIVATE
+        editor/main.cpp
+        editor/EditorApp.h
+        editor/EditorApp.cpp
+        editor/OrbitCamera.h
+        editor/RasterMesh.h
+        editor/RasterMesh.cpp
+        editor/GlHeaders.h
+        editor/Shaders.h
+
+        # Dear ImGui glfw + opengl3 backends (compiled from the Conan package).
+        "${IMGUI_BINDINGS_DIR}/imgui_impl_glfw.cpp"
+        "${IMGUI_BINDINGS_DIR}/imgui_impl_opengl3.cpp"
+)
+
+target_include_directories(editor
+    PRIVATE
+        editor/
+        "${IMGUI_BINDINGS_DIR}"
+)
+
+target_link_libraries(editor
+    PRIVATE
+        ray-tracer-lib
+        imgui::imgui
+        glfw
+        glm::glm
+)
+
+# macOS: OpenGL is provided by the system OpenGL framework. glfw (via Conan)
+# pulls in Cocoa/IOKit/CoreVideo transitively, but linking OpenGL explicitly is
+# required for the gl3 entry points used by the raster viewport.
+if (APPLE)
+    find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+    target_link_libraries(editor PRIVATE ${OPENGL_FRAMEWORK})
+endif()
 
 add_subdirectory(tests)

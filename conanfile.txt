@@ -3,6 +3,9 @@ libpng/1.6.43
 nlohmann_json/3.11.3
 tinyobjloader/2.0.0-rc10
 catch2/3.5.4
+imgui/1.92.4
+glfw/3.4
+glm/1.0.1
 
 [generators]
 CMakeDeps
@@ -10,3 +13,12 @@ CMakeToolchain
 
 [layout]
 cmake_layout
+
+# The imgui Conan package ships the platform/renderer backend sources
+# (imgui_impl_glfw.*, imgui_impl_opengl3.*) under res/bindings rather than
+# compiling them into the library, because the choice of backend is up to the
+# consumer. Copy them into editor/imgui_backends/ so the editor target can
+# compile exactly the glfw + opengl3 pair it needs.
+[imports]
+./res/bindings, imgui_impl_glfw.* -> ../editor/imgui_backends
+./res/bindings, imgui_impl_opengl3.* -> ../editor/imgui_backends
