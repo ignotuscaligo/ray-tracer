@@ -331,6 +331,22 @@ void EditorApp::renderViewport()
 
 void EditorApp::drawUi()
 {
+    // Give each window an explicit, non-overlapping initial layout. Without this
+    // all three windows default to (0,0) and stack on top of each other: the
+    // Viewport window (which shows the live FBO) ends up hidden behind the
+    // controls panel — so the window looks like a black viewport — and the
+    // Render window gets crushed to a sliver on the left edge, which makes its
+    // help text wrap one character per line. FirstUseEver lets the user freely
+    // move/resize afterwards (and respects any saved imgui.ini layout).
+    const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+    const ImVec2 origin = mainViewport->WorkPos;
+    const ImVec2 size = mainViewport->WorkSize;
+    const float controlsWidth = 360.0f;
+    const float renderHeight = 260.0f;
+
+    ImGui::SetNextWindowPos(origin, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(controlsWidth, size.y), ImGuiCond_FirstUseEver);
+
     // Controls + scene panel.
     ImGui::Begin("Ray Tracer Editor");
     ImGui::TextWrapped("GUI model/scene editor for the photon path tracer.");
@@ -370,6 +386,12 @@ void EditorApp::drawUi()
     }
     ImGui::End();
 
+    // Raster viewport panel — fills the area to the right of the controls,
+    // leaving room for the Render panel at the bottom.
+    ImGui::SetNextWindowPos(ImVec2(origin.x + controlsWidth, origin.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(size.x - controlsWidth, size.y - renderHeight),
+                             ImGuiCond_FirstUseEver);
+
     // Raster viewport panel.
     ImGui::Begin("Viewport");
     {
@@ -388,6 +410,12 @@ void EditorApp::drawUi()
         }
     }
     ImGui::End();
+
+    // Path-traced render output panel — sits beneath the viewport, wide enough
+    // that its help text wraps normally instead of one character per line.
+    ImGui::SetNextWindowPos(ImVec2(origin.x + controlsWidth, origin.y + size.y - renderHeight),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(size.x - controlsWidth, renderHeight), ImGuiCond_FirstUseEver);
 
     // Path-traced render output panel.
     ImGui::Begin("Render");
