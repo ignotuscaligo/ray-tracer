@@ -112,12 +112,21 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 1: raycast pending photons. NO fullness check on PhotonQueue pull —
-            // photons in flight are eagerly traced regardless of whether daughters can
-            // be spawned. The resulting bounce-hits are pushed into both hitQueue (for
-            // the camera-visibility check / splat path) AND emittingQueue (for daughter
-            // spawn). The two queues read the same hit independently downstream.
-            if (photonQueue->available() > 0)
+            // Stage 1: raycast pending photons. The spec says "NO fullness check on
+            // PhotonQueue pull" — meaning we don't refuse to pull source photons just
+            // because spawning their bounce daughters might overflow. But we DO gate
+            // on EmittingQueue free space: raycasting a batch of N photons produces up
+            // to N bounce-hits that must be pushable into the EmittingQueue. Without
+            // this gate, EmittingQueue saturates because emit pops 1 + pushes 9
+            // (fan-out) while raycast pops 1 + pushes 1, so the upstream producer must
+            // throttle when the downstream consumer can't accept the batch output.
+            //
+            // hitQueue (visibility-check / splat path) also receives the bounce-hits;
+            // it's typically drained faster than EmittingQueue (no fan-out on its
+            // consumer side) so it rarely becomes the bottleneck — but the gate uses
+            // min(emittingQueue, hitQueue) free space just to be safe.
+            const size_t producerHeadroom = std::min(emittingQueue->freeSpace(), hitQueue->freeSpace());
+            if (photonQueue->available() > 0 && producerHeadroom > m_fetchSize * 2)
             {
                 if (!processPhotons())
                 {
