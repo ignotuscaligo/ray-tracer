@@ -1,0 +1,113 @@
+{
+    "$meshes": [
+        "meshes/MaterialTestSpheres.obj",
+        "meshes/cube.obj"
+    ],
+    "$materials": {
+        "Target": {
+            "$type": "Lambertian",
+            "$color": [
+                0.95,
+                0.15,
+                0.15
+            ]
+        },
+        "Mirror": {
+            "$type": "Mirror",
+            "$color": [
+                0.95,
+                0.95,
+                0.95
+            ]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 10,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize": 5000000,
+        "$emittingQueueSize": 20000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 720,
+        "$height": 720,
+        "$photonsPerLight": 200000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "bombardment-200M",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 60.0,
+            "$position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            }
+        },
+        "Spot": {
+            "$type": "SpotLight",
+            "$position": [
+                -150,
+                250,
+                400
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    90,
+                    0,
+                    0
+                ]
+            },
+            "$color": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "$brightness": 200000,
+            "$innerRadius": 0,
+            "$angle": 0.45
+        },
+        "TargetSphere": {
+            "$type": "MeshVolume",
+            "$material": "Target",
+            "$mesh": "SphereDiffuse",
+            "$position": [
+                -60,
+                -60,
+                370
+            ]
+        },
+        "MirrorPlate": {
+            "$type": "MeshVolume",
+            "$material": "Mirror",
+            "$mesh": "Cube",
+            "$position": [
+                0,
+                0,
+                400
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0,
+                    -45,
+                    90
+                ]
+            }
+        }
+    }
+}

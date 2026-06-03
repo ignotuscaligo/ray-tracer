@@ -1,0 +1,173 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Lambertian",
+            "$color": [0.8, 0.2, 0.2]
+        },
+        "RightWall": {
+            "$type": "Lambertian",
+            "$color": [0.2, 0.8, 0.2]
+        },
+        "Wall": {
+            "$type": "Lambertian",
+            "$color": [0.8, 0.8, 0.8]
+        },
+        "Rough040": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.4
+        },
+        "Rough020": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.2
+        },
+        "Rough010": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.1
+        },
+        "Rough005": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.05
+        },
+        "Rough0025": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.025
+        },
+        "Rough00125": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.0125
+        },
+        "Rough000625": {
+            "$type": "Microfacet",
+            "$color": [0.9, 0.9, 0.9],
+            "$roughness": 0.00625
+        },
+        "MirrorRef": {
+            "$type": "Mirror",
+            "$color": [0.95, 0.95, 0.95]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 10,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize": 5000000,
+        "$emittingQueueSize": 20000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 768,
+        "$height": 768,
+        "$photonsPerLight": 20000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "roughness-sweep",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 60.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "Light": {
+            "$type": "OmniLight",
+            "$position": [0, 280, 0],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0, 0, 0]
+            },
+            "$color": [1.0, 1.0, 1.0],
+            "$brightness": 50000
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            },
+            "Sphere040": {
+                "$type": "SphereVolume",
+                "$material": "Rough040",
+                "$center": [-140.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere020": {
+                "$type": "SphereVolume",
+                "$material": "Rough020",
+                "$center": [-100.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere010": {
+                "$type": "SphereVolume",
+                "$material": "Rough010",
+                "$center": [-60.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere005": {
+                "$type": "SphereVolume",
+                "$material": "Rough005",
+                "$center": [-20.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere0025": {
+                "$type": "SphereVolume",
+                "$material": "Rough0025",
+                "$center": [20.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere00125": {
+                "$type": "SphereVolume",
+                "$material": "Rough00125",
+                "$center": [60.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "Sphere000625": {
+                "$type": "SphereVolume",
+                "$material": "Rough000625",
+                "$center": [100.0, 28.0, 30.0],
+                "$radius": 28.0
+            },
+            "SphereMirror": {
+                "$type": "SphereVolume",
+                "$material": "MirrorRef",
+                "$center": [140.0, 28.0, 30.0],
+                "$radius": 28.0
+            }
+        }
+    }
+}
