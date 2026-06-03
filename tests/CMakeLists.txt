@@ -39,6 +39,7 @@ target_sources(tests
         test_Bounds.cpp
         test_Sphere.cpp
         test_CameraExposure.cpp
+        test_Emitter.cpp
         test_main.cpp
         test_OrbitCamera.cpp
         test_RasterMesh.cpp

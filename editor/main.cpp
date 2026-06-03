@@ -85,6 +85,16 @@ int runRenderTest(int argc, char** argv)
                     WorkerDebug::droppedFinal(),
                     WorkerDebug::droppedTotal());
 
+        // Wave 3 memory evidence: high-water-mark slot occupancy of each queue.
+        // The emitter queue now holds compact producers (a fraction of a
+        // PhotonHit each) and the photon queue no longer needs N-daughter
+        // contiguous headroom per bounce-hit.
+        std::printf("peak-occupancy: photon=%zu hit=%zu emitter=%zu final=%zu\n",
+                    result.peakPhotonQueue,
+                    result.peakHitQueue,
+                    result.peakEmitterQueue,
+                    result.peakFinalQueue);
+
         std::printf("render-test: wrote %s\n", outPath.c_str());
         return 0;
     }

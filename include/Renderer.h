@@ -16,6 +16,17 @@ struct RenderResult
     // Tonemapped 16-bit image (gamma-corrected, flipped to image orientation) —
     // identical to what the executable writes to PNG.
     std::shared_ptr<Image> image;
+
+    // Peak (high-water-mark) slot occupancy of each pipeline queue over the whole
+    // render. Wave 3 evidence: with lazy emitter fan-out the photon queue no
+    // longer needs N-daughter contiguous headroom per bounce-hit, and the emitter
+    // queue holds compact producers rather than N-multiplied PhotonHits, so the
+    // daughter-path memory pressure drops versus the eager path. Reported by the
+    // render-test CLI.
+    size_t peakPhotonQueue = 0;
+    size_t peakHitQueue = 0;
+    size_t peakEmitterQueue = 0;
+    size_t peakFinalQueue = 0;
 };
 
 namespace Renderer
