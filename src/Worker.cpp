@@ -27,17 +27,18 @@ std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
 // because a destination WorkQueue was full increments one of these by the
 // number of items dropped. They prove the lossy-drop bug exists (Step A) and
 // must read zero once claim-output-first back-pressure lands (Step B).
-//   - g_droppedEmitting: bounce-hits dropped at the emitting-queue producer in
-//     processPhotons when the returned block came back short.
+//   - g_droppedEmitting: bounce-hits dropped at the emitting-queue producer
+//     in processPhotons (raycast path) and any short-alloc there.
 //   - g_droppedRequeue: emitting hits dropped when processEmissions could not
 //     re-enqueue hits it declined to service this iteration.
-//   - g_droppedHit: bounce-hits silently truncated at the hitQueue producer in
-//     processPhotons when the returned block was shorter than requested.
-//   - g_droppedFinal: camera-visible hits dropped at the finalHitQueue producer
-//     in processHits when its returned block was short.
+//   - g_droppedHit: bounce-hits silently truncated at the hitQueue producer
+//     in processPhotons when the returned block was shorter than requested.
 std::atomic<size_t> g_droppedEmitting{0};
 std::atomic<size_t> g_droppedRequeue{0};
 std::atomic<size_t> g_droppedHit{0};
+// g_droppedFinal: valid camera-visible hits dropped at the finalHitQueue
+// producer in processHits when its returned block was short (finalHitQueue is
+// the smallest queue, so it saturates too). These never reach the splat sink.
 std::atomic<size_t> g_droppedFinal{0};
 
 }
@@ -146,21 +147,17 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 1: raycast pending photons. The spec says "NO fullness check on
-            // PhotonQueue pull" — meaning we don't refuse to pull source photons just
-            // because spawning their bounce daughters might overflow. But we DO gate
-            // on EmittingQueue free space: raycasting a batch of N photons produces up
-            // to N bounce-hits that must be pushable into the EmittingQueue. Without
-            // this gate, EmittingQueue saturates because emit pops 1 + pushes 9
-            // (fan-out) while raycast pops 1 + pushes 1, so the upstream producer must
-            // throttle when the downstream consumer can't accept the batch output.
+            // Stage 1: raycast pending photons. Claim-output-first: a batch of
+            // fetchSize photons produces up to fetchSize bounce-hits that must be
+            // pushed to BOTH the hitQueue (splat path) and the EmittingQueue
+            // (daughter path). processPhotons first flushes any per-worker overflow
+            // from a prior iteration, and only fetches new source photons when both
+            // overflow buffers are empty — so nothing is ever dropped, only deferred.
             //
-            // hitQueue (visibility-check / splat path) also receives the bounce-hits;
-            // it's typically drained faster than EmittingQueue (no fan-out on its
-            // consumer side) so it rarely becomes the bottleneck — but the gate uses
-            // min(emittingQueue, hitQueue) free space just to be safe.
-            const size_t producerHeadroom = std::min(emittingQueue->freeSpace(), hitQueue->freeSpace());
-            if (photonQueue->available() > 0 && producerHeadroom > m_fetchSize * 2)
+            // We run the stage if there is work to do (new photons OR pending
+            // overflow). The internal logic decides whether it can fetch.
+            const bool photonOverflowPending = !m_hitOverflow.empty() || !m_emittingOverflow.empty();
+            if (photonQueue->available() > 0 || photonOverflowPending)
             {
                 if (!processPhotons())
                 {
@@ -182,7 +179,11 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            if (hitQueue->available() > 0)
+            // Stage 3: camera-visibility check. Like Stage 1 this is claim-output-
+            // first — visible hits must be pushed to the finalHitQueue, and any
+            // that don't fit are parked in m_finalOverflow and retried before the
+            // next fetch. Run while there is hitQueue work OR pending overflow.
+            if (hitQueue->available() > 0 || !m_finalOverflow.empty())
             {
                 if (!processHits())
                 {
@@ -221,6 +222,18 @@ std::exception_ptr Worker::exception()
 void Worker::setBounceThreshold(size_t bounceThreshold)
 {
     m_bounceThreshold = bounceThreshold;
+}
+
+void Worker::syncOverflowGauge()
+{
+    m_pendingOverflowGauge.store(
+        m_hitOverflow.size() + m_emittingOverflow.size() + m_finalOverflow.size(),
+        std::memory_order_relaxed);
+}
+
+size_t Worker::pendingOverflow() const
+{
+    return m_pendingOverflowGauge.load(std::memory_order_relaxed);
 }
 
 bool Worker::processLights()
@@ -280,9 +293,57 @@ bool Worker::processLights()
     return true;
 }
 
+bool Worker::flushIntoQueue(std::vector<PhotonHit>& items, WorkQueue<PhotonHit>& queue)
+{
+    if (items.empty())
+    {
+        return true;
+    }
+
+    // initialize() clamps to the queue's remaining capacity, so the returned
+    // block tells us exactly how many items the queue can accept right now.
+    auto block = queue.initialize(items.size());
+    const size_t placed = block.size();
+
+    for (size_t i = 0; i < placed; ++i)
+    {
+        block[i] = items[i];
+    }
+    queue.ready(block);
+
+    if (placed == items.size())
+    {
+        items.clear();
+        return true;
+    }
+
+    // Partial placement: keep the unplaced tail for a later iteration. Nothing
+    // is dropped — this is the back-pressure hold.
+    items.erase(items.begin(), items.begin() + placed);
+    return false;
+}
+
 bool Worker::processPhotons()
 {
     auto workStart = std::chrono::system_clock::now();
+
+    // Claim-output-first: before consuming any new source photons, drain any
+    // bounce-hits parked from a previous iteration into their queues. If either
+    // overflow can't fully drain, do NOT fetch new photons this round — that
+    // would grow the overflow without bound. Leave the source photons in the
+    // photonQueue (we simply don't fetch) and let the worker run other stages,
+    // which frees downstream room. This is what makes the stage lossless.
+    if (!m_hitOverflow.empty() || !m_emittingOverflow.empty())
+    {
+        flushIntoQueue(m_hitOverflow, *hitQueue);
+        flushIntoQueue(m_emittingOverflow, *emittingQueue);
+        syncOverflowGauge();
+
+        auto workEnd = std::chrono::system_clock::now();
+        photonDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
+        return true;
+    }
+
     auto photonsBlock = photonQueue->fetch(m_fetchSize);
 
     m_hitBuffer.clear();
@@ -338,61 +399,35 @@ bool Worker::processPhotons()
 
     if (!m_hitBuffer.empty())
     {
-        // Push every bounce-hit to hitQueue (camera-visibility / splat path).
-        auto hitsBlock = hitQueue->initialize(m_hitBuffer.size());
-        if (hitsBlock.size() < m_hitBuffer.size())
-        {
-            // hitQueue full: the returned block is shorter than requested, so
-            // the surplus bounce-hits never reach the splat path — silently lost.
-            g_droppedHit.fetch_add(m_hitBuffer.size() - hitsBlock.size());
-        }
-        for (size_t i = 0; i < hitsBlock.size(); ++i)
-        {
-            hitsBlock[i] = m_hitBuffer[i];
-        }
-        hitQueue->ready(hitsBlock);
-
-        // Push the same bounce-hits to the EmittingQueue (daughter-spawn path)
-        // but only for hits below the bounce threshold. Terminal hits don't need
-        // daughters — they only contribute via the splat path.
-        size_t bounceableCount = 0;
+        // Every bounce-hit goes to hitQueue (splat path). The two paths are
+        // independent downstream consumers, so we stage each into its own
+        // overflow buffer and flush. Whatever doesn't fit stays parked and is
+        // retried on the next iteration before any new photons are fetched —
+        // nothing is dropped.
         for (auto& photonHit : m_hitBuffer)
         {
+            m_hitOverflow.push_back(photonHit);
+
+            // Bounce-hits below the threshold also feed the EmittingQueue
+            // (daughter-spawn path). Terminal hits only contribute via the splat
+            // path, so they're excluded from the emitting set.
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
-                ++bounceableCount;
+                m_emittingOverflow.push_back(photonHit);
             }
         }
-        if (bounceableCount > 0)
-        {
-            auto emittingBlock = emittingQueue->initialize(bounceableCount);
-            const size_t allocated = emittingBlock.size();
-            if (allocated < bounceableCount)
-            {
-                // EmittingQueue is full — drop the overflow. With back-pressure on the
-                // PhotonQueue side, the EmittingQueue should drain steadily; sustained
-                // overflow means EmittingQueue is undersized relative to fan-out.
-                g_droppedEmitting.fetch_add(bounceableCount - allocated);
-            }
-            size_t outIndex = 0;
-            for (auto& photonHit : m_hitBuffer)
-            {
-                if (outIndex >= allocated)
-                {
-                    break;
-                }
-                if (photonHit.photon.bounces < m_bounceThreshold)
-                {
-                    emittingBlock[outIndex] = photonHit;
-                    ++outIndex;
-                }
-            }
-            emittingQueue->ready(emittingBlock);
-        }
+
+        flushIntoQueue(m_hitOverflow, *hitQueue);
+        flushIntoQueue(m_emittingOverflow, *emittingQueue);
     }
+
+    syncOverflowGauge();
 
     photonsProcessed += photonsBlock.size();
 
+    // We have fully captured this batch's output into the queues + overflow
+    // buffers, so the source photons can be released. They are not lost: their
+    // bounce-hits are either enqueued or parked in the persistent overflow.
     photonQueue->release(photonsBlock);
 
     auto workEnd = std::chrono::system_clock::now();
@@ -461,12 +496,10 @@ bool Worker::processEmissions()
         const size_t allocated = bouncedBlock.size();
         size_t photonIndex = 0;
 
-        if (allocated < totalDaughters)
-        {
-            // Race lost vs another worker. Surplus hits get dropped to requeue.
-            std::cout << m_index << ": photon queue allocation short on emit: requested "
-                      << totalDaughters << " got " << allocated << std::endl;
-        }
+        // If allocated < totalDaughters (a race was lost vs another worker's
+        // allocation), the spawn loop below detects the shortfall per-hit and
+        // appends the unserviced hits to requeueIndices — they are NOT dropped
+        // here, they go back to the EmittingQueue for a later iteration.
 
         for (size_t spawnIdx : spawnIndices)
         {
@@ -492,27 +525,39 @@ bool Worker::processEmissions()
     }
 
     // Requeue: any hit we couldn't service this round goes back to the
-    // EmittingQueue so the next worker iteration tries again. Order is not
-    // preserved (and doesn't need to be — photon bounces commute).
+    // EmittingQueue so a later iteration tries again. Order is not preserved
+    // (and doesn't need to be — photon bounces commute).
+    //
+    // Lossless requeue: copy the un-serviced hits OUT of the fetched block
+    // first, then release the block (which frees at least requeueIndices.size()
+    // slots), then re-enqueue. We must copy before releasing because release
+    // makes the slots available to other workers, who could overwrite them.
+    // Any remainder that still doesn't fit (lost a race) is parked in the
+    // persistent m_emittingOverflow and flushed by processPhotons — never
+    // dropped.
     if (!requeueIndices.empty())
     {
-        auto requeueBlock = emittingQueue->initialize(requeueIndices.size());
-        const size_t allocated = requeueBlock.size();
-        if (allocated < requeueIndices.size())
+        std::vector<PhotonHit> requeueHits;
+        requeueHits.reserve(requeueIndices.size());
+        for (size_t idx : requeueIndices)
         {
-            // EmittingQueue full on requeue: hits we declined to service this
-            // iteration cannot be put back, so they are lost along with every
-            // daughter photon they would have spawned.
-            g_droppedRequeue.fetch_add(requeueIndices.size() - allocated);
+            requeueHits.push_back(emissionsBlock[idx]);
         }
-        for (size_t i = 0; i < allocated; ++i)
-        {
-            requeueBlock[i] = emissionsBlock[requeueIndices[i]];
-        }
-        emittingQueue->ready(requeueBlock);
-    }
 
-    emittingQueue->release(emissionsBlock);
+        emittingQueue->release(emissionsBlock);
+
+        flushIntoQueue(requeueHits, *emittingQueue);
+        if (!requeueHits.empty())
+        {
+            m_emittingOverflow.insert(
+                m_emittingOverflow.end(), requeueHits.begin(), requeueHits.end());
+        }
+        syncOverflowGauge();
+    }
+    else
+    {
+        emittingQueue->release(emissionsBlock);
+    }
 
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
@@ -524,6 +569,20 @@ bool Worker::processEmissions()
 bool Worker::processHits()
 {
     auto workStart = std::chrono::system_clock::now();
+
+    // Claim-output-first: flush any camera-visible hits parked from a prior
+    // iteration into the finalHitQueue before fetching more hitQueue work. If
+    // the overflow can't fully drain, don't fetch — leave hitQueue items in
+    // place and let processFinalHits drain the sink to free room. Lossless.
+    if (!m_finalOverflow.empty())
+    {
+        flushIntoQueue(m_finalOverflow, *finalHitQueue);
+        syncOverflowGauge();
+
+        auto workEnd = std::chrono::system_clock::now();
+        hitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
+        return true;
+    }
 
     auto hitsBlock = hitQueue->fetch(m_fetchSize);
 
@@ -592,22 +651,14 @@ bool Worker::processHits()
 
     if (!m_hitBuffer.empty())
     {
-        auto validHitsBlock = finalHitQueue->initialize(m_hitBuffer.size());
-
-        if (validHitsBlock.size() < m_hitBuffer.size())
-        {
-            // finalHitQueue full: surplus camera-visible hits are discarded and
-            // never splatted to the Buffer.
-            g_droppedFinal.fetch_add(m_hitBuffer.size() - validHitsBlock.size());
-        }
-
-        for (size_t i = 0; i < validHitsBlock.size(); ++i)
-        {
-            validHitsBlock[i] = m_hitBuffer[i];
-        }
-
-        finalHitQueue->ready(validHitsBlock);
+        // Stage the camera-visible hits into the persistent overflow buffer and
+        // flush. Whatever doesn't fit stays parked and is retried before the
+        // next fetch — never dropped.
+        m_finalOverflow.insert(m_finalOverflow.end(), m_hitBuffer.begin(), m_hitBuffer.end());
+        flushIntoQueue(m_finalOverflow, *finalHitQueue);
     }
+
+    syncOverflowGauge();
 
     hitsProcessed += hitsBlock.size();
 

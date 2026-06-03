@@ -126,7 +126,22 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     std::exception_ptr workerException;
     bool aborted = false;
 
-    while (photonsAllocated > 0 || hitsAllocated > 0 || emittingAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0)
+    // Per-worker claim-output-first overflow: hits a worker has dequeued/produced
+    // but not yet been able to enqueue downstream. This work lives outside the
+    // shared queues, so it MUST be part of the completion test — otherwise the
+    // loop could observe every queue empty while a worker still holds parked hits
+    // and stop the pipeline before those hits are splatted.
+    auto pendingOverflowTotal = [&workers]() {
+        size_t total = 0;
+        for (auto& worker : workers)
+        {
+            total += worker->pendingOverflow();
+        }
+        return total;
+    };
+    size_t overflowPending = pendingOverflowTotal();
+
+    while (photonsAllocated > 0 || hitsAllocated > 0 || emittingAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0 || overflowPending > 0)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
@@ -135,6 +150,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         hitsAllocated = hitQueue->allocated();
         emittingAllocated = emittingQueue->allocated();
         finalHitsAllocated = finalHitQueue->allocated();
+        overflowPending = pendingOverflowTotal();
 
         for (auto& worker : workers)
         {

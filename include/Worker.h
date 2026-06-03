@@ -59,6 +59,15 @@ public:
 
     void setBounceThreshold(size_t bounceThreshold);
 
+    // Total number of hits this worker is holding in its claim-output-first
+    // overflow buffers (work that is enqueued nowhere yet but not dropped).
+    // The Renderer must include this in its drain-completion test, otherwise it
+    // could observe all queues empty while a worker still holds parked hits and
+    // stop the pipeline before that work is splatted. Reads plain size_t members
+    // updated only by this worker's own thread; a stale read just keeps the
+    // drain loop spinning one more 250ms tick, which is harmless.
+    size_t pendingOverflow() const;
+
     std::shared_ptr<Camera> camera;
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<LightQueue> lightQueue;
@@ -98,6 +107,14 @@ private:
     bool processHits();
     bool processFinalHits();
 
+    // Claim-output-first helper. Push as many of `items` into `queue` as the
+    // queue's clamped allocation allows; whatever does not fit stays in `items`
+    // (erased-from-front for what was placed). Returns true if the buffer was
+    // fully drained. Used to make every producer site lossless: a stage holds
+    // its un-enqueued output in a persistent per-worker overflow buffer and
+    // retries on a later iteration instead of dropping.
+    bool flushIntoQueue(std::vector<PhotonHit>& items, WorkQueue<PhotonHit>& queue);
+
     size_t m_index = 0;
     size_t m_fetchSize = 0;
 
@@ -113,6 +130,25 @@ private:
     std::vector<Hit> m_castBuffer;
     std::vector<PhotonHit> m_hitBuffer;
     std::vector<PhotonHit> m_volumeHitBuffer;
+
+    // Persistent per-worker overflow buffers (claim-output-first back-pressure).
+    // When a producer queue cannot accept a batch's full output, the surplus is
+    // parked here and flushed on a later iteration — never dropped. processPhotons
+    // refuses to fetch new source photons while either of its overflows is
+    // non-empty, which bounds these to at most one batch worth of hits.
+    //   - m_hitOverflow:      bounce-hits awaiting the hitQueue (splat path)
+    //   - m_emittingOverflow: bounceable bounce-hits awaiting the EmittingQueue
+    //   - m_finalOverflow:    camera-visible hits awaiting the finalHitQueue
+    std::vector<PhotonHit> m_hitOverflow;
+    std::vector<PhotonHit> m_emittingOverflow;
+    std::vector<PhotonHit> m_finalOverflow;
+
+    // Cross-thread-visible mirror of the three overflow buffer sizes above.
+    // Written only by this worker's thread (after every mutation via
+    // syncOverflowGauge), read by the Renderer drain loop. Atomic so the read
+    // is well-defined; relaxed ordering is fine since it's only a liveness hint.
+    std::atomic<size_t> m_pendingOverflowGauge{0};
+    void syncOverflowGauge();
 
     std::exception_ptr m_exception;
 };
