@@ -13,8 +13,9 @@ ParallelLight::ParallelLight()
 void ParallelLight::radius(double radius)
 {
     m_radius = radius;
-    m_area = Utility::pi * m_radius * m_radius;
-    updateParameters();
+    // Collimated beam has no true solid angle; use the emitter disc area as the
+    // emission extent (documented radiometric simplification — see Light.h).
+    m_emissionSolidAngle = Utility::pi * m_radius * m_radius;
 }
 
 double ParallelLight::radius() const
@@ -22,10 +23,10 @@ double ParallelLight::radius() const
     return m_radius;
 }
 
-void ParallelLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
+void ParallelLight::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
 {
     Vector direction = forward();
-    Color photonColor = m_color * m_lumens * photonBrightness;
+    Color photonColor = m_color * static_cast<float>(photonFlux);
 
     for (auto& photon : photonBlock)
     {

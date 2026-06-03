@@ -1,9 +1,12 @@
 #include "LightQueue.h"
 
-void LightQueue::setPhotonCount(const std::string& name, size_t count)
+void LightQueue::registerLight(const std::string& name, size_t count, double luminousFlux)
 {
     std::scoped_lock<std::mutex> lock(m_mutex);
-    m_brightness.insert_or_assign(name, 1.0 / static_cast<double>(count));
+    // Count-independent: store the light's total luminous flux Phi directly. Each
+    // photon will carry Phi as its weight. No 1/count here — the divide by N is
+    // applied once at image-conversion time.
+    m_flux.insert_or_assign(name, luminousFlux);
     m_photons.insert_or_assign(name, count);
     m_remaining.fetch_add(count);
 }
@@ -35,13 +38,13 @@ size_t LightQueue::fetchPhotons(const std::string& name, size_t count)
     return fetched;
 }
 
-double LightQueue::getPhotonBrightness(const std::string& name) const
+double LightQueue::getPhotonFlux(const std::string& name) const
 {
     std::scoped_lock<std::mutex> lock(m_mutex);
-    if (m_brightness.count(name) == 0)
+    if (m_flux.count(name) == 0)
     {
         return 0.0;
     }
 
-    return m_brightness.at(name);
+    return m_flux.at(name);
 }

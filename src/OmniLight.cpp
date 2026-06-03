@@ -6,13 +6,13 @@ OmniLight::OmniLight()
     : Light()
 {
     registerType<OmniLight>();
-    m_area = Utility::pi * 4.0;
+    // Isotropic point source: emits into the full 4*pi steradian sphere.
+    m_emissionSolidAngle = Utility::pi * 4.0;
 }
 
 void OmniLight::innerRadius(double innerRadius)
 {
     m_innerRadius = innerRadius;
-    updateParameters();
 }
 
 double OmniLight::innerRadius() const
@@ -20,9 +20,12 @@ double OmniLight::innerRadius() const
     return m_innerRadius;
 }
 
-void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
+void OmniLight::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
 {
-    Color photonColor = m_color * m_lumens * photonBrightness;
+    // photonFlux is the count-independent per-photon weight (the light's total
+    // luminous flux Phi, in lumens). No 1/count factor here — the single divide
+    // by photon count happens once at image conversion.
+    Color photonColor = m_color * static_cast<float>(photonFlux);
 
     for (auto& photon : photonBlock)
     {

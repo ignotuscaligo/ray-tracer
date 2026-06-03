@@ -11,7 +11,6 @@ SpotLight::SpotLight()
 void SpotLight::innerRadius(double innerRadius)
 {
     m_innerRadius = innerRadius;
-    updateParameters();
 }
 
 double SpotLight::innerRadius() const
@@ -31,16 +30,16 @@ void SpotLight::angle(double angle)
 
     double coneHeight = std::sin(coneAngle / 2.0);
     double capHeight = 1.0 - coneHeight;
-    m_area = Utility::pi2 * capHeight;
+    // Spherical-cap solid angle (steradians) the cone emits into; used as the
+    // emission extent Omega in Phi = I * Omega.
+    m_emissionSolidAngle = Utility::pi2 * capHeight;
 
     if (m_angle > Utility::pi)
     {
-        m_area = Utility::pi4 - m_area;
+        m_emissionSolidAngle = Utility::pi4 - m_emissionSolidAngle;
     }
 
     m_angleGenerator.maxAngle = m_angle / 2.0;
-
-    updateParameters();
 }
 
 double SpotLight::angle() const
@@ -48,11 +47,11 @@ double SpotLight::angle() const
     return m_angle;
 }
 
-void SpotLight::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
+void SpotLight::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
 {
     Vector direction = forward();
 
-    Color photonColor = m_color * m_lumens * photonBrightness;
+    Color photonColor = m_color * static_cast<float>(photonFlux);
 
     for (auto& photon : photonBlock)
     {

@@ -15,7 +15,7 @@ public:
     void angle(double angle);
     double angle() const;
 
-    void emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const override;
+    void emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const override;
 
 private:
     double m_innerRadius = 0;

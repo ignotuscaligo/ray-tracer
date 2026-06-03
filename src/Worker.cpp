@@ -254,11 +254,11 @@ bool Worker::processLights()
             continue;
         }
 
-        double photonBrightness = lightQueue->getPhotonBrightness(object->name());
+        double photonFlux = lightQueue->getPhotonFlux(object->name());
 
         auto photons = photonQueue->initialize(photonCount);
 
-        std::static_pointer_cast<Light>(object)->emit(photons, photonBrightness, m_generator);
+        std::static_pointer_cast<Light>(object)->emit(photons, photonFlux, m_generator);
 
         // Stamp each freshly-emitted photon with a random time within the camera's
         // global exposure window (vision doc pillar 2 — "Photons with attached emission

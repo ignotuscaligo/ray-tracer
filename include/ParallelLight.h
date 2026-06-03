@@ -11,9 +11,8 @@ public:
     void radius(double radius);
     double radius() const;
 
-    void emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const override;
+    void emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const override;
 
 private:
     double m_radius = 0;
-    double m_area = 0;
 };

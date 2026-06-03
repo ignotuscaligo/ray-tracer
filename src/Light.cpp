@@ -4,13 +4,11 @@ Light::Light()
     : Object()
 {
     registerType<Light>();
-    updateParameters();
 }
 
 void Light::color(const Color& color)
 {
     m_color = color;
-    updateParameters();
 }
 
 Color Light::color() const
@@ -18,27 +16,35 @@ Color Light::color() const
     return m_color;
 }
 
+void Light::intensityCandela(double intensity)
+{
+    m_intensityCandela = intensity;
+}
+
+double Light::intensityCandela() const
+{
+    return m_intensityCandela;
+}
+
 void Light::brightness(double brightness)
 {
-    m_brightness = brightness;
-    updateParameters();
+    // Legacy alias: historical "$brightness" now maps directly onto luminous
+    // intensity (candela). See Light.h for the unit-of-record rationale.
+    m_intensityCandela = brightness;
 }
 
 double Light::brightness() const
 {
-    return m_brightness;
+    return m_intensityCandela;
 }
 
-void Light::emit(WorkQueue<Photon>::Block photonBlock, double photonBrightness, RandomGenerator& generator) const
+double Light::luminousFlux() const
 {
+    // Phi = I * Omega. m_emissionSolidAngle is 4*pi for an isotropic source and
+    // the cone/disc extent for directional lights.
+    return m_intensityCandela * m_emissionSolidAngle;
 }
 
-void Light::updateParameters()
+void Light::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
 {
-    m_lumens = m_brightness;
-
-    if (m_area > 0.0)
-    {
-        m_lumens = m_brightness * m_area;
-    }
 }
