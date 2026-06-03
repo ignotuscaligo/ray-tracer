@@ -1,7 +1,6 @@
 {
     "$meshes": [
-        "meshes/CornellBox.obj",
-        "meshes/MaterialTestSpheres.obj"
+        "meshes/CornellBox.obj"
     ],
     "$materials": {
         "LeftWall": {
@@ -69,8 +68,8 @@
         "$startFrame": 0,
         "$endFrame": 0,
         "$renderPath": "renders",
-        "$renderName": "MirrorTest",
-        "$bounceThreshold": 4
+        "$renderName": "milestone-fanout-spec-cone",
+        "$bounceThreshold": 2
     },
     "$scene": {
         "Camera": {
@@ -88,8 +87,7 @@
                     0.0,
                     0.0
                 ]
-            },
-            "$exposureWindow": [0.0, 0.0]
+            }
         },
         "Light": {
             "$type": "OmniLight",
@@ -141,19 +139,34 @@
                 "$mesh": "Back"
             },
             "DiffuseSphere": {
-                "$type": "MeshVolume",
+                "$type": "SphereVolume",
                 "$material": "DiffuseSphere",
-                "$mesh": "SphereDiffuse"
+                "$center": [
+                    -90.0,
+                    60.0,
+                    30.0
+                ],
+                "$radius": 55.0
             },
             "MirrorSphere": {
-                "$type": "MeshVolume",
+                "$type": "SphereVolume",
                 "$material": "MirrorSphere",
-                "$mesh": "SphereMirror"
+                "$center": [
+                    0.0,
+                    90.0,
+                    70.0
+                ],
+                "$radius": 55.0
             },
             "RoughSphere": {
-                "$type": "MeshVolume",
+                "$type": "SphereVolume",
                 "$material": "RoughSphere",
-                "$mesh": "SphereRough"
+                "$center": [
+                    90.0,
+                    60.0,
+                    30.0
+                ],
+                "$radius": 55.0
             }
         }
     }
