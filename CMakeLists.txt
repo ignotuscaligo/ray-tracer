@@ -148,6 +148,9 @@ target_sources(ray-tracer-lib
         include/Plane.h
         src/Plane.cpp
 
+        include/Sphere.h
+        src/Sphere.cpp
+
         include/Pyramid.h
         src/Pyramid.cpp
 
@@ -156,6 +159,9 @@ target_sources(ray-tracer-lib
 
         include/PlaneVolume.h
         src/PlaneVolume.cpp
+
+        include/SphereVolume.h
+        src/SphereVolume.cpp
 
         include/Camera.h
         src/Camera.cpp

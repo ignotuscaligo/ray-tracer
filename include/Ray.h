@@ -4,6 +4,7 @@
 #include "Hit.h"
 #include "Triangle.h"
 #include "Plane.h"
+#include "Sphere.h"
 #include "Vector.h"
 
 #include <optional>
@@ -21,3 +22,4 @@ bool rayIntersectsBounds(const Ray& ray, const Bounds& bounds) noexcept;
 
 std::optional<Hit> rayIntersectsTriangle(const Ray& ray, const Triangle& triangle) noexcept;
 std::optional<Hit> rayIntersectsPlane(const Ray& ray, const Plane& plane) noexcept;
+std::optional<Hit> rayIntersectsSphere(const Ray& ray, const Sphere& sphere) noexcept;
