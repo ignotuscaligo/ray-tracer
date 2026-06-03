@@ -36,6 +36,34 @@ public:
     void verticalFieldOfView(double verticalFieldOfView);
     double verticalFieldOfView() const;
 
+    // --- Wave 2: physically-based photographic exposure controls ---
+    //
+    // The image-conversion step maps physical luminance L (cd/m^2) to a [0,1]
+    // pixel value using the standard saturation-based exposure relation:
+    //
+    //   L_max = (N^2 * K) / (t * S)        pixel = L / L_max
+    //
+    // where N = aperture f-number, t = shutter time (seconds), S = ISO, and K is
+    // the reflected-light meter calibration constant (~12.5). Changing N, t, or S
+    // by one photographic stop changes L_max — and therefore image brightness —
+    // by exactly a factor of 2, like a real camera.
+    void fNumber(double fNumber);
+    double fNumber() const;
+
+    void shutterTime(double seconds);
+    double shutterTime() const;
+
+    void iso(double iso);
+    double iso() const;
+
+    // Saturation luminance L_max = (N^2 * K) / (t * S). A scene luminance equal to
+    // L_max maps to a pixel value of 1.0 (full white before gamma).
+    double saturationLuminance() const;
+
+    // Meter calibration constant K in the exposure relation. Standard reflected-
+    // light value is 12.5.
+    static constexpr double kMeterCalibration = 12.5;
+
     void setFromRenderConfiguration(size_t width, size_t height);
 
     std::optional<PixelCoords> coordForPoint(const Vector& point) const;
@@ -75,4 +103,10 @@ private:
     double m_verticalFieldOfView;
     double m_horizontalFieldOfView;
     ExposureWindow m_globalExposureWindow;
+
+    // Photographic exposure controls. Defaults chosen so MirrorTest at its default
+    // intensity renders at a neutral (not blown-out, not black) exposure.
+    double m_fNumber = 8.0;
+    double m_shutterTime = 0.01;  // seconds
+    double m_iso = 100.0;
 };

@@ -58,6 +58,47 @@ double Camera::verticalFieldOfView() const
     return m_verticalFieldOfView;
 }
 
+void Camera::fNumber(double fNumber)
+{
+    m_fNumber = fNumber;
+}
+
+double Camera::fNumber() const
+{
+    return m_fNumber;
+}
+
+void Camera::shutterTime(double seconds)
+{
+    m_shutterTime = seconds;
+}
+
+double Camera::shutterTime() const
+{
+    return m_shutterTime;
+}
+
+void Camera::iso(double iso)
+{
+    m_iso = iso;
+}
+
+double Camera::iso() const
+{
+    return m_iso;
+}
+
+double Camera::saturationLuminance() const
+{
+    // L_max = (N^2 * K) / (t * S). Guard against degenerate (zero) controls.
+    const double denom = m_shutterTime * m_iso;
+    if (denom <= 0.0)
+    {
+        return 0.0;
+    }
+    return (m_fNumber * m_fNumber * kMeterCalibration) / denom;
+}
+
 void Camera::setFromRenderConfiguration(size_t width, size_t height)
 {
     if (width == 0 || height == 0)

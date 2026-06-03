@@ -37,9 +37,16 @@ using ProgressCallback = std::function<bool(size_t remainingWork)>;
 // Throws if a worker raises an exception.
 RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress = nullptr);
 
-// Tonemap a raw energy Buffer into a 16-bit Image, applying the same gamma curve
-// and pixel flip the executable uses. Exposed separately so progressive preview
-// can tonemap an in-flight Buffer snapshot.
-void tonemapBufferToImage(const Buffer& buffer, Image& image);
+// Tonemap a raw energy Buffer into a 16-bit Image. Wave 2: applies the two-step
+// physical conversion — (a) raw accumulated photon energy -> physical luminance
+// via the single 1/photonsEmitted normalization plus footprint factor, then
+// (b) luminance -> [0,1] via the camera's saturation exposure L_max — followed by
+// the existing gamma curve and pixel flip.
+//
+//   photonsEmitted       = photons emitted per light (N); the ONE place count enters.
+//   saturationLuminance  = camera L_max = (N_f^2 * K) / (t * S).
+//
+// Exposed separately so progressive preview can tonemap an in-flight snapshot.
+void tonemapBufferToImage(const Buffer& buffer, Image& image, double photonsEmitted, double saturationLuminance);
 
 }

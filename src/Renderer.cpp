@@ -18,10 +18,39 @@
 namespace Renderer
 {
 
-void tonemapBufferToImage(const Buffer& buffer, Image& image)
+// Global footprint calibration constant standing in for the per-pixel footprint
+// factor (solid angle / projected pixel area) that converts accumulated photon
+// flux into physical luminance. SIMPLIFICATION: it is uniform across the frame
+// rather than computed per pixel from FOV/depth. Its value is chosen so the
+// reference MirrorTest scene, at its default light intensity and the camera's
+// default (neutral) exposure, renders at roughly the prior look. See
+// luminanceFromBuffer() for how it enters.
+//
+// raw buffer holds sum_over_hits(Phi); dividing by total photons N gives a
+// Monte-Carlo flux estimate; multiplying by this footprint factor yields an
+// estimate of physical luminance L (cd/m^2).
+constexpr double kFootprintCalibration = 64.0;
+
+// Convert one raw accumulated buffer channel into physical luminance. This is the
+// ONE place the photon count enters the pipeline (the single 1/N normalization),
+// combined with the per-pixel footprint factor.
+//   L = rawChannel * (1 / photonsEmitted) * footprint
+static double luminanceFromBuffer(double rawChannel, double photonsEmitted)
+{
+    if (photonsEmitted <= 0.0)
+    {
+        return 0.0;
+    }
+    return rawChannel * (kFootprintCalibration / photonsEmitted);
+}
+
+void tonemapBufferToImage(const Buffer& buffer, Image& image, double photonsEmitted, double saturationLuminance)
 {
     const size_t width = image.width();
     const size_t height = image.height();
+
+    // pixel = L / L_max. Guard a degenerate L_max.
+    const double invLmax = (saturationLuminance > 0.0) ? (1.0 / saturationLuminance) : 0.0;
 
     Pixel workingPixel;
 
@@ -31,9 +60,21 @@ void tonemapBufferToImage(const Buffer& buffer, Image& image)
         {
             const Color color = buffer.fetchColor({x, y});
 
-            const float gammaRed = std::pow(color.red, 1.0f / Color::gamma);
-            const float gammaGreen = std::pow(color.green, 1.0f / Color::gamma);
-            const float gammaBlue = std::pow(color.blue, 1.0f / Color::gamma);
+            // Step a: raw accumulated energy -> physical luminance (the single
+            // divide-by-photon-count + footprint factor).
+            const double lumR = luminanceFromBuffer(color.red, photonsEmitted);
+            const double lumG = luminanceFromBuffer(color.green, photonsEmitted);
+            const double lumB = luminanceFromBuffer(color.blue, photonsEmitted);
+
+            // Step b: luminance -> [0,1] via the photographic saturation exposure.
+            const double exposedR = lumR * invLmax;
+            const double exposedG = lumG * invLmax;
+            const double exposedB = lumB * invLmax;
+
+            // Existing gamma / sRGB-ish tonemap, then clamp to 16-bit.
+            const float gammaRed = std::pow(static_cast<float>(exposedR), 1.0f / Color::gamma);
+            const float gammaGreen = std::pow(static_cast<float>(exposedG), 1.0f / Color::gamma);
+            const float gammaBlue = std::pow(static_cast<float>(exposedB), 1.0f / Color::gamma);
 
             workingPixel.red = std::min(static_cast<int>(gammaRed * 65535), 65535);
             workingPixel.green = std::min(static_cast<int>(gammaGreen * 65535), 65535);
@@ -108,12 +149,16 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     buffer->clear();
     image->clear();
 
-    // Seed the light queue.
+    // Seed the light queue. Wave 2: each light registers its total luminous flux
+    // Phi (lumens), computed from its physical intensity (candela) and emission
+    // solid angle. The per-photon carried weight is Phi (count-independent); the
+    // divide by photonsPerLight happens once at conversion below.
     for (const auto& object : scene.objects)
     {
         if (object->hasType<Light>())
         {
-            lightQueue->setPhotonCount(object->name(), settings.photonsPerLight);
+            const double flux = std::static_pointer_cast<Light>(object)->luminousFlux();
+            lightQueue->registerLight(object->name(), settings.photonsPerLight, flux);
         }
     }
 
@@ -192,7 +237,12 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     // this).
     (void)aborted;
 
-    tonemapBufferToImage(*buffer, *image);
+    // Wave 2: convert raw energy -> image with the physical pipeline. The single
+    // 1/N normalization (N = photonsPerLight) and the camera's saturation
+    // exposure L_max both enter here, once.
+    const double photonsEmitted = static_cast<double>(settings.photonsPerLight);
+    const double saturationLuminance = scene.camera ? scene.camera->saturationLuminance() : 0.0;
+    tonemapBufferToImage(*buffer, *image, photonsEmitted, saturationLuminance);
 
     return result;
 }

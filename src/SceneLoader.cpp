@@ -232,6 +232,20 @@ public:
 
         object->verticalFieldOfView(verticalFieldOfView);
 
+        // Wave 2: physically-based photographic exposure controls. Omitted keys
+        // keep the Camera's neutral defaults (f/8, 1/100s, ISO 100).
+        double fNumber = object->fNumber();
+        setFromJsonIfPresent(fNumber, jsonContainer, "$fNumber");
+        object->fNumber(fNumber);
+
+        double shutterTime = object->shutterTime();
+        setFromJsonIfPresent(shutterTime, jsonContainer, "$shutterTime");
+        object->shutterTime(shutterTime);
+
+        double iso = object->iso();
+        setFromJsonIfPresent(iso, jsonContainer, "$iso");
+        object->iso(iso);
+
         if (jsonContainer.contains("$exposureWindow"))
         {
             json& window = jsonContainer["$exposureWindow"];
@@ -292,10 +306,15 @@ public:
 
         object->color(color);
 
-        double brightness = 0.0;
-        setFromJsonIfPresent(brightness, jsonContainer, "$brightness");
+        // Wave 2: lights are defined photometrically in luminous INTENSITY
+        // (candela = lumens/steradian) via "$intensityCandela". For back-compat,
+        // legacy "$brightness" maps onto intensity directly (same numeric value).
+        // Precedence: $intensityCandela > $brightness.
+        double intensity = 0.0;
+        setFromJsonIfPresent(intensity, jsonContainer, "$brightness");
+        setFromJsonIfPresent(intensity, jsonContainer, "$intensityCandela");
 
-        object->brightness(brightness);
+        object->intensityCandela(intensity);
     }
 
     void setParametersForOmniLight(std::shared_ptr<OmniLight> object, json jsonContainer)

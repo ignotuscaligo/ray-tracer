@@ -75,6 +75,9 @@
         "Camera": {
             "$type": "Camera",
             "$verticalFieldOfView": 60.0,
+            "$fNumber": 8.0,
+            "$shutterTime": 0.01,
+            "$iso": 100.0,
             "$position": [
                 0.0,
                 150,
@@ -109,7 +112,7 @@
                 1.0,
                 1.0
             ],
-            "$brightness": 50000
+            "$intensityCandela": 50000
         },
         "CornellBox": {
             "$type": "Object",
