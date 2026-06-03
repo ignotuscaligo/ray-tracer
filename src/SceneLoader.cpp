@@ -8,6 +8,7 @@
 #include "ParallelLight.h"
 #include "PlaneVolume.h"
 #include "Quaternion.h"
+#include "SphereVolume.h"
 #include "SpotLight.h"
 #include "Utility.h"
 
@@ -269,6 +270,19 @@ public:
         setParametersForVolume(object, jsonContainer);
     }
 
+    void setParametersForSphereVolume(std::shared_ptr<SphereVolume> object, json jsonContainer)
+    {
+        setParametersForVolume(object, jsonContainer);
+
+        Vector center = object->center();
+        setVectorFromJsonIfPresent(center, jsonContainer, "$center");
+        object->center(center);
+
+        double radius = object->radius();
+        setFromJsonIfPresent(radius, jsonContainer, "$radius");
+        object->radius(radius);
+    }
+
     void setParametersForLight(std::shared_ptr<Light> object, json jsonContainer)
     {
         setParametersForObject(object, jsonContainer);
@@ -346,6 +360,12 @@ public:
         {
             std::shared_ptr<PlaneVolume> object = std::make_shared<PlaneVolume>();
             setParametersForPlaneVolume(object, jsonContainer);
+            return object;
+        }
+        else if (type == "SphereVolume")
+        {
+            std::shared_ptr<SphereVolume> object = std::make_shared<SphereVolume>();
+            setParametersForSphereVolume(object, jsonContainer);
             return object;
         }
         else if (type == "OmniLight")
