@@ -127,4 +127,14 @@ size_t deltaHitsAccepted();
 size_t deltaHitsRejectedBackface();
 size_t deltaHitsRejectedConeOffset();
 void resetDeltaHitCounters();
+
+// Drop counters: number of pipeline items discarded because a destination
+// WorkQueue was full. Queried after the render drains. Must be zero once
+// claim-output-first back-pressure is in place.
+size_t droppedEmitting();
+size_t droppedRequeue();
+size_t droppedHit();
+size_t droppedFinal();
+size_t droppedTotal();
+void resetDropCounters();
 }

@@ -23,6 +23,23 @@ std::atomic<size_t> g_deltaHitsAccepted{0};
 std::atomic<size_t> g_deltaHitsRejectedBackface{0};
 std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
 
+// Drop counters. Every site where the forward photon pipeline discards work
+// because a destination WorkQueue was full increments one of these by the
+// number of items dropped. They prove the lossy-drop bug exists (Step A) and
+// must read zero once claim-output-first back-pressure lands (Step B).
+//   - g_droppedEmitting: bounce-hits dropped at the emitting-queue producer in
+//     processPhotons when the returned block came back short.
+//   - g_droppedRequeue: emitting hits dropped when processEmissions could not
+//     re-enqueue hits it declined to service this iteration.
+//   - g_droppedHit: bounce-hits silently truncated at the hitQueue producer in
+//     processPhotons when the returned block was shorter than requested.
+//   - g_droppedFinal: camera-visible hits dropped at the finalHitQueue producer
+//     in processHits when its returned block was short.
+std::atomic<size_t> g_droppedEmitting{0};
+std::atomic<size_t> g_droppedRequeue{0};
+std::atomic<size_t> g_droppedHit{0};
+std::atomic<size_t> g_droppedFinal{0};
+
 }
 
 namespace WorkerDebug
@@ -37,6 +54,23 @@ void resetDeltaHitCounters()
     g_deltaHitsAccepted.store(0);
     g_deltaHitsRejectedBackface.store(0);
     g_deltaHitsRejectedConeOffset.store(0);
+}
+
+size_t droppedEmitting() { return g_droppedEmitting.load(); }
+size_t droppedRequeue() { return g_droppedRequeue.load(); }
+size_t droppedHit() { return g_droppedHit.load(); }
+size_t droppedFinal() { return g_droppedFinal.load(); }
+size_t droppedTotal()
+{
+    return g_droppedEmitting.load() + g_droppedRequeue.load()
+         + g_droppedHit.load() + g_droppedFinal.load();
+}
+void resetDropCounters()
+{
+    g_droppedEmitting.store(0);
+    g_droppedRequeue.store(0);
+    g_droppedHit.store(0);
+    g_droppedFinal.store(0);
 }
 }
 
@@ -306,6 +340,12 @@ bool Worker::processPhotons()
     {
         // Push every bounce-hit to hitQueue (camera-visibility / splat path).
         auto hitsBlock = hitQueue->initialize(m_hitBuffer.size());
+        if (hitsBlock.size() < m_hitBuffer.size())
+        {
+            // hitQueue full: the returned block is shorter than requested, so
+            // the surplus bounce-hits never reach the splat path — silently lost.
+            g_droppedHit.fetch_add(m_hitBuffer.size() - hitsBlock.size());
+        }
         for (size_t i = 0; i < hitsBlock.size(); ++i)
         {
             hitsBlock[i] = m_hitBuffer[i];
@@ -332,8 +372,7 @@ bool Worker::processPhotons()
                 // EmittingQueue is full — drop the overflow. With back-pressure on the
                 // PhotonQueue side, the EmittingQueue should drain steadily; sustained
                 // overflow means EmittingQueue is undersized relative to fan-out.
-                std::cout << m_index << ": emitting queue overflow! requested "
-                          << bounceableCount << " got " << allocated << std::endl;
+                g_droppedEmitting.fetch_add(bounceableCount - allocated);
             }
             size_t outIndex = 0;
             for (auto& photonHit : m_hitBuffer)
@@ -461,8 +500,10 @@ bool Worker::processEmissions()
         const size_t allocated = requeueBlock.size();
         if (allocated < requeueIndices.size())
         {
-            std::cout << m_index << ": emitting queue full on requeue, dropping "
-                      << (requeueIndices.size() - allocated) << " hit(s)" << std::endl;
+            // EmittingQueue full on requeue: hits we declined to service this
+            // iteration cannot be put back, so they are lost along with every
+            // daughter photon they would have spawned.
+            g_droppedRequeue.fetch_add(requeueIndices.size() - allocated);
         }
         for (size_t i = 0; i < allocated; ++i)
         {
@@ -552,6 +593,13 @@ bool Worker::processHits()
     if (!m_hitBuffer.empty())
     {
         auto validHitsBlock = finalHitQueue->initialize(m_hitBuffer.size());
+
+        if (validHitsBlock.size() < m_hitBuffer.size())
+        {
+            // finalHitQueue full: surplus camera-visible hits are discarded and
+            // never splatted to the Buffer.
+            g_droppedFinal.fetch_add(m_hitBuffer.size() - validHitsBlock.size());
+        }
 
         for (size_t i = 0; i < validHitsBlock.size(); ++i)
         {

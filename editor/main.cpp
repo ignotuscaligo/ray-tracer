@@ -20,6 +20,7 @@
 #include "PngWriter.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
+#include "Worker.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -69,8 +70,20 @@ int runRenderTest(int argc, char** argv)
                     scenePath.c_str(), scene.settings.imageWidth,
                     scene.settings.imageHeight, scene.settings.photonsPerLight);
 
+        WorkerDebug::resetDropCounters();
+
         RenderResult result = Renderer::renderFrame(scene);
         PngWriter::writeImage(outPath, *result.image, "render-test");
+
+        // Surface the forward-pipeline drop totals after the queues have drained.
+        // Nonzero values mean photons/bounce-hits were discarded under queue
+        // saturation; the back-pressure fix must drive these to zero.
+        std::printf("dropped: emitting=%zu requeue=%zu hit=%zu final=%zu total=%zu\n",
+                    WorkerDebug::droppedEmitting(),
+                    WorkerDebug::droppedRequeue(),
+                    WorkerDebug::droppedHit(),
+                    WorkerDebug::droppedFinal(),
+                    WorkerDebug::droppedTotal());
 
         std::printf("render-test: wrote %s\n", outPath.c_str());
         return 0;
