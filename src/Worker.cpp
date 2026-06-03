@@ -118,7 +118,7 @@ void Worker::exec()
 {
     try
     {
-        if (!photonQueue || !hitQueue || !finalHitQueue || !emittingQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+        if (!photonQueue || !hitQueue || !finalHitQueue || !emitterQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
         {
             std::cout << m_index << ": ABORT: missing required references!" << std::endl;
             m_running = false;
@@ -135,7 +135,7 @@ void Worker::exec()
             bool drainedAnything = false;
 
             // Gate light emission on headroom in the PhotonQueue. With the dual-source
-            // pipeline below, fan-out is back-pressured via EmittingQueue rather than
+            // pipeline below, fan-out is back-pressured via the EmitterQueue rather than
             // happening in-line at bounce time, so we no longer need the 64x worst-case
             // headroom that the old immediate-spawn loop required.
             if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 2)
@@ -149,14 +149,15 @@ void Worker::exec()
 
             // Stage 1: raycast pending photons. Claim-output-first: a batch of
             // fetchSize photons produces up to fetchSize bounce-hits that must be
-            // pushed to BOTH the hitQueue (splat path) and the EmittingQueue
-            // (daughter path). processPhotons first flushes any per-worker overflow
-            // from a prior iteration, and only fetches new source photons when both
-            // overflow buffers are empty — so nothing is ever dropped, only deferred.
+            // pushed to the hitQueue (splat path) AND, for bounceable hits, one
+            // compact Emitter each to the EmitterQueue (lazy daughter path).
+            // processPhotons first flushes any per-worker overflow from a prior
+            // iteration, and only fetches new source photons when both overflow
+            // buffers are empty — so nothing is ever dropped, only deferred.
             //
             // We run the stage if there is work to do (new photons OR pending
             // overflow). The internal logic decides whether it can fetch.
-            const bool photonOverflowPending = !m_hitOverflow.empty() || !m_emittingOverflow.empty();
+            const bool photonOverflowPending = !m_hitOverflow.empty() || !m_emitterOverflow.empty();
             if (photonQueue->available() > 0 || photonOverflowPending)
             {
                 if (!processPhotons())
@@ -166,11 +167,14 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 2: spawn daughters from pending bounce-hits, ONLY if the PhotonQueue
-            // has space for the full N daughters of the next hit. processEmissions
-            // queries daughterPhotonCount() on the next hit's material, checks capacity,
-            // and either pops + spawns or leaves the hit in place for next iteration.
-            if (emittingQueue->available() > 0)
+            // Stage 2: LAZY daughter fan-out. Pull compact emitters from the
+            // EmitterQueue, RESERVE photon-queue space first (claim-output-first),
+            // and generate only as many daughters as fit into the reservation.
+            // An emitter with daughters still remaining goes back in the queue;
+            // when its count hits zero it is done. No emitter is dropped — if no
+            // space can be reserved this round it is left in / returned to the
+            // queue for a later iteration (lossless).
+            if (emitterQueue->available() > 0 || !m_emitterOverflow.empty())
             {
                 if (!processEmissions())
                 {
@@ -227,7 +231,7 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
 void Worker::syncOverflowGauge()
 {
     m_pendingOverflowGauge.store(
-        m_hitOverflow.size() + m_emittingOverflow.size() + m_finalOverflow.size(),
+        m_hitOverflow.size() + m_emitterOverflow.size() + m_finalOverflow.size(),
         std::memory_order_relaxed);
 }
 
@@ -293,36 +297,6 @@ bool Worker::processLights()
     return true;
 }
 
-bool Worker::flushIntoQueue(std::vector<PhotonHit>& items, WorkQueue<PhotonHit>& queue)
-{
-    if (items.empty())
-    {
-        return true;
-    }
-
-    // initialize() clamps to the queue's remaining capacity, so the returned
-    // block tells us exactly how many items the queue can accept right now.
-    auto block = queue.initialize(items.size());
-    const size_t placed = block.size();
-
-    for (size_t i = 0; i < placed; ++i)
-    {
-        block[i] = items[i];
-    }
-    queue.ready(block);
-
-    if (placed == items.size())
-    {
-        items.clear();
-        return true;
-    }
-
-    // Partial placement: keep the unplaced tail for a later iteration. Nothing
-    // is dropped — this is the back-pressure hold.
-    items.erase(items.begin(), items.begin() + placed);
-    return false;
-}
-
 bool Worker::processPhotons()
 {
     auto workStart = std::chrono::system_clock::now();
@@ -333,10 +307,10 @@ bool Worker::processPhotons()
     // would grow the overflow without bound. Leave the source photons in the
     // photonQueue (we simply don't fetch) and let the worker run other stages,
     // which frees downstream room. This is what makes the stage lossless.
-    if (!m_hitOverflow.empty() || !m_emittingOverflow.empty())
+    if (!m_hitOverflow.empty() || !m_emitterOverflow.empty())
     {
         flushIntoQueue(m_hitOverflow, *hitQueue);
-        flushIntoQueue(m_emittingOverflow, *emittingQueue);
+        flushIntoQueue(m_emitterOverflow, *emitterQueue);
         syncOverflowGauge();
 
         auto workEnd = std::chrono::system_clock::now();
@@ -408,17 +382,26 @@ bool Worker::processPhotons()
         {
             m_hitOverflow.push_back(photonHit);
 
-            // Bounce-hits below the threshold also feed the EmittingQueue
-            // (daughter-spawn path). Terminal hits only contribute via the splat
-            // path, so they're excluded from the emitting set.
+            // Bounce-hits below the threshold also feed the EmitterQueue
+            // (daughter path). Terminal hits only contribute via the splat path,
+            // so they're excluded from the emitter set. Wave 3: instead of
+            // pushing the full PhotonHit and eagerly materializing N daughters at
+            // emission time, we push ONE compact Emitter carrying the hit's
+            // generation state + the material's daughter count. The daughters are
+            // materialized lazily in processEmissions, only into reserved space.
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
-                m_emittingOverflow.push_back(photonHit);
+                std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+                const size_t n = material ? material->daughterPhotonCount() : 1;
+                if (n > 0)
+                {
+                    m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(n));
+                }
             }
         }
 
         flushIntoQueue(m_hitOverflow, *hitQueue);
-        flushIntoQueue(m_emittingOverflow, *emittingQueue);
+        flushIntoQueue(m_emitterOverflow, *emitterQueue);
     }
 
     syncOverflowGauge();
@@ -441,122 +424,129 @@ bool Worker::processEmissions()
 {
     auto workStart = std::chrono::system_clock::now();
 
-    // Pull a single batch from the EmittingQueue. We then make a back-pressure
-    // decision per-hit: only spawn daughters for hits whose material's
-    // daughterPhotonCount fits in the PhotonQueue's currently free space. Hits
-    // we can't service this iteration are re-pushed to the back of the queue.
-    auto emissionsBlock = emittingQueue->fetch(m_fetchSize);
-
-    if (emissionsBlock.size() == 0)
+    // Claim-output-first, mirror of processPhotons: before pulling more emitters,
+    // drain any parked from a prior iteration (new emitters that didn't fit, or
+    // partially-consumed emitters returned for another pass). If the overflow
+    // can't fully drain, do NOT fetch this round — let other stages free room.
+    if (!m_emitterOverflow.empty())
     {
-        emittingQueue->release(emissionsBlock);
+        flushIntoQueue(m_emitterOverflow, *emitterQueue);
+        syncOverflowGauge();
+
         auto workEnd = std::chrono::system_clock::now();
         emitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
         return true;
     }
 
-    // Two-pass: first pass walks the batch, classifying each hit as "spawn now"
-    // (fits in remaining PhotonQueue capacity) or "requeue" (doesn't fit). We
-    // accumulate the total daughter count needed for the spawn-now set so we
-    // can make one PhotonQueue allocation.
-    std::vector<size_t> spawnIndices;
-    std::vector<size_t> requeueIndices;
-    spawnIndices.reserve(emissionsBlock.size());
-    requeueIndices.reserve(emissionsBlock.size());
+    auto emitterBlock = emitterQueue->fetch(m_fetchSize);
 
-    size_t totalDaughters = 0;
-    // Snapshot freeSpace once at the top. It can race with other workers'
-    // allocations, but the photonQueue->initialize call below clamps to actual
-    // remaining capacity so over-counting only causes a short allocation, not
-    // corruption. Under-counting causes a hit to be requeued unnecessarily,
-    // which is harmless — it'll be picked up next iteration.
-    size_t budget = photonQueue->freeSpace();
-
-    for (size_t i = 0; i < emissionsBlock.size(); ++i)
+    if (emitterBlock.size() == 0)
     {
-        const PhotonHit& photonHit = emissionsBlock[i];
-        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-        const size_t n = material ? material->daughterPhotonCount() : 1;
+        emitterQueue->release(emitterBlock);
+        auto workEnd = std::chrono::system_clock::now();
+        emitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
+        return true;
+    }
 
-        if (n <= budget)
+    // Total daughters this batch of emitters still owes. A well-formed emitter
+    // always has a valid material (it was built from a real hit), so we count its
+    // full remaining; a (defensively handled) emitter with a missing material can
+    // make no progress and is retired without reserving slots, so it does not
+    // contribute to `owed`. This keeps `owed` equal to the number of slots the
+    // fill loop below can actually consume, which guarantees we fill exactly the
+    // slots we reserve (see the ready() note).
+    size_t owed = 0;
+    for (auto& emitter : emitterBlock)
+    {
+        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(emitter.material);
+        if (material)
         {
-            spawnIndices.push_back(i);
-            totalDaughters += n;
-            budget -= n;
+            owed += emitter.remaining();
         }
         else
         {
-            requeueIndices.push_back(i);
+            emitter.advance(emitter.remaining()); // retire — unreachable in practice
         }
     }
 
-    if (totalDaughters > 0)
+    // RESERVE photon-queue space FIRST (claim-output-first preserves Wave 1's
+    // losslessness — daughters are only ever materialized into space we already
+    // hold, never speculatively). Reserve min(owed, freeSpace); initialize()
+    // clamps again to the true remaining capacity, so a lost race just yields a
+    // shorter block. Because the fill loop produces exactly min(owed, reserved)
+    // daughters and reserved <= owed, every reserved slot gets filled.
+    const size_t want = std::min(owed, photonQueue->freeSpace());
+    auto reserved = photonQueue->initialize(want);
+    const size_t reservedSlots = reserved.size();
+
+    // Fill the reserved block by walking emitters in order, generating as many of
+    // each emitter's REMAINING daughters as fit. An emitter generates its
+    // daughters in ascending global-index order across pulls (Emitter::generated
+    // tracks the cursor), so the lazy fan-out produces exactly the same daughters
+    // as the eager path — only chunked across reserved-space pulls. Any emitter
+    // not fully drained this pass is requeued; exhausted emitters are dropped.
+    size_t slot = 0;
+    std::vector<Emitter> requeue;
+
+    for (size_t i = 0; i < emitterBlock.size(); ++i)
     {
-        auto bouncedBlock = photonQueue->initialize(totalDaughters);
-        const size_t allocated = bouncedBlock.size();
-        size_t photonIndex = 0;
+        Emitter& emitter = emitterBlock[i];
 
-        // If allocated < totalDaughters (a race was lost vs another worker's
-        // allocation), the spawn loop below detects the shortfall per-hit and
-        // appends the unserviced hits to requeueIndices — they are NOT dropped
-        // here, they go back to the EmittingQueue for a later iteration.
-
-        for (size_t spawnIdx : spawnIndices)
+        if (slot < reservedSlots && !emitter.done())
         {
-            const PhotonHit& photonHit = emissionsBlock[spawnIdx];
-            std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-            const size_t n = material ? material->daughterPhotonCount() : 1;
+            const size_t room = reservedSlots - slot;
+            const size_t produce = std::min<size_t>(emitter.remaining(), room);
 
-            size_t startIndex = photonIndex;
-            size_t endIndex = startIndex + n;
+            std::shared_ptr<Material> material = materialLibrary->fetchByIndex(emitter.material);
+            // material is non-null here: null-material emitters were retired above
+            // (done()), so they never enter this branch.
+            material->generateDaughters(
+                reserved,
+                /*blockStart=*/slot,
+                /*globalStart=*/emitter.generated(),
+                /*count=*/produce,
+                /*totalDaughters=*/emitter.total(),
+                emitter.incident,
+                emitter.normal,
+                emitter.position,
+                emitter.color,
+                emitter.time,
+                emitter.bounces,
+                m_generator);
 
-            if (endIndex > allocated)
-            {
-                // PhotonQueue exhausted mid-batch — requeue the remaining hits.
-                requeueIndices.push_back(spawnIdx);
-                continue;
-            }
-
-            material->bounce(bouncedBlock, startIndex, endIndex, photonHit, m_generator);
-            photonIndex += n;
+            emitter.advance(static_cast<std::uint32_t>(produce));
+            slot += produce;
         }
 
-        photonQueue->ready(bouncedBlock);
+        if (!emitter.done())
+        {
+            requeue.push_back(emitter);
+        }
     }
 
-    // Requeue: any hit we couldn't service this round goes back to the
-    // EmittingQueue so a later iteration tries again. Order is not preserved
-    // (and doesn't need to be — photon bounces commute).
-    //
-    // Lossless requeue: copy the un-serviced hits OUT of the fetched block
-    // first, then release the block (which frees at least requeueIndices.size()
-    // slots), then re-enqueue. We must copy before releasing because release
-    // makes the slots available to other workers, who could overwrite them.
-    // Any remainder that still doesn't fit (lost a race) is parked in the
-    // persistent m_emittingOverflow and flushed by processPhotons — never
-    // dropped.
-    if (!requeueIndices.empty())
+    // Publish the reserved daughters. By the reservation invariant slot ==
+    // reservedSlots, so the whole reserved block is filled and ready()'d intact
+    // (its endIndex matches what initialize() registered — required by the
+    // WorkQueue ready bookkeeping).
+    if (reservedSlots > 0)
     {
-        std::vector<PhotonHit> requeueHits;
-        requeueHits.reserve(requeueIndices.size());
-        for (size_t idx : requeueIndices)
-        {
-            requeueHits.push_back(emissionsBlock[idx]);
-        }
+        photonQueue->ready(reserved);
+    }
 
-        emittingQueue->release(emissionsBlock);
+    // Lossless requeue: the un-finished emitters live in `requeue` (copies).
+    // Release the fetched block, then re-enqueue. Anything that still doesn't fit
+    // is parked in the persistent overflow and flushed by the claim-output-first
+    // head of this function — never dropped.
+    emitterQueue->release(emitterBlock);
 
-        flushIntoQueue(requeueHits, *emittingQueue);
-        if (!requeueHits.empty())
+    if (!requeue.empty())
+    {
+        flushIntoQueue(requeue, *emitterQueue);
+        if (!requeue.empty())
         {
-            m_emittingOverflow.insert(
-                m_emittingOverflow.end(), requeueHits.begin(), requeueHits.end());
+            m_emitterOverflow.insert(m_emitterOverflow.end(), requeue.begin(), requeue.end());
         }
         syncOverflowGauge();
-    }
-    else
-    {
-        emittingQueue->release(emissionsBlock);
     }
 
     auto workEnd = std::chrono::system_clock::now();

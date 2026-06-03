@@ -2,7 +2,7 @@
 
 #include "AnimationQuery.h"
 #include "Color.h"
-#include "EmittingQueue.h"
+#include "EmitterQueue.h"
 #include "LightQueue.h"
 #include "Light.h"
 #include "Photon.h"
@@ -99,7 +99,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
     std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(settings.photonQueueSize);
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(settings.hitQueueSize);
-    std::shared_ptr<EmittingQueue> emittingQueue = std::make_shared<EmittingQueue>(settings.emittingQueueSize);
+    std::shared_ptr<EmitterQueue> emitterQueue = std::make_shared<EmitterQueue>(settings.emittingQueueSize);
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(settings.finalQueueSize);
 
     // Continuous-time animation oracle. Default is static; if the scene contains
@@ -130,7 +130,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->objects = scene.objects;
         worker->photonQueue = photonQueue;
         worker->hitQueue = hitQueue;
-        worker->emittingQueue = emittingQueue;
+        worker->emitterQueue = emitterQueue;
         worker->finalHitQueue = finalHitQueue;
         worker->buffer = buffer;
         worker->image = image;
@@ -165,7 +165,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     size_t photonsToEmit = lightQueue->remainingPhotons();
     size_t photonsAllocated = photonQueue->allocated();
     size_t hitsAllocated = hitQueue->allocated();
-    size_t emittingAllocated = emittingQueue->allocated();
+    size_t emittingAllocated = emitterQueue->allocated();
     size_t finalHitsAllocated = finalHitQueue->allocated();
 
     std::exception_ptr workerException;
@@ -193,7 +193,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         photonsToEmit = lightQueue->remainingPhotons();
         photonsAllocated = photonQueue->allocated();
         hitsAllocated = hitQueue->allocated();
-        emittingAllocated = emittingQueue->allocated();
+        emittingAllocated = emitterQueue->allocated();
         finalHitsAllocated = finalHitQueue->allocated();
         overflowPending = pendingOverflowTotal();
 
@@ -243,6 +243,12 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     const double photonsEmitted = static_cast<double>(settings.photonsPerLight);
     const double saturationLuminance = scene.camera ? scene.camera->saturationLuminance() : 0.0;
     tonemapBufferToImage(*buffer, *image, photonsEmitted, saturationLuminance);
+
+    // Wave 3 memory evidence: high-water-mark occupancy of each queue.
+    result.peakPhotonQueue = photonQueue->largestAllocated();
+    result.peakHitQueue = hitQueue->largestAllocated();
+    result.peakEmitterQueue = emitterQueue->largestAllocated();
+    result.peakFinalQueue = finalHitQueue->largestAllocated();
 
     return result;
 }

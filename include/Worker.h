@@ -3,7 +3,8 @@
 #include "AnimationQuery.h"
 #include "Buffer.h"
 #include "Camera.h"
-#include "EmittingQueue.h"
+#include "Emitter.h"
+#include "EmitterQueue.h"
 #include "Hit.h"
 #include "Image.h"
 #include "LightQueue.h"
@@ -74,12 +75,15 @@ public:
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
     std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
-    // EmittingQueue holds bounce-hits awaiting daughter spawn. processPhotons
-    // pushes here in parallel with hitQueue; processEmissions pulls back with
-    // back-pressure gated on photonQueue free space (no spawn if there isn't
-    // room for N daughters). Decouples raycasting from daughter generation and
-    // bounds the steady-state PhotonQueue occupancy.
-    std::shared_ptr<EmittingQueue> emittingQueue;
+    // EmitterQueue holds compact daughter-photon PRODUCERS (Wave 3) awaiting lazy
+    // fan-out. processPhotons pushes one Emitter per bounceable hit here, in
+    // parallel with the full-hit push to hitQueue. processEmissions pulls an
+    // emitter back, RESERVES photon-queue space first (claim-output-first), and
+    // generates only as many daughters as fit, requeuing the emitter while it
+    // still has daughters left. This replaces Wave 2's eager all-N fan-out: the
+    // photon queue no longer needs N contiguous slots per hit, and this queue
+    // stores a compact producer instead of N-multiplied PhotonHits.
+    std::shared_ptr<EmitterQueue> emitterQueue;
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
@@ -113,7 +117,40 @@ private:
     // fully drained. Used to make every producer site lossless: a stage holds
     // its un-enqueued output in a persistent per-worker overflow buffer and
     // retries on a later iteration instead of dropping.
-    bool flushIntoQueue(std::vector<PhotonHit>& items, WorkQueue<PhotonHit>& queue);
+    //
+    // Templated over the element type so the same lossless-flush logic serves
+    // both the PhotonHit paths (hit / final-hit overflow) and the Emitter path
+    // (emitter overflow).
+    template <typename T>
+    bool flushIntoQueue(std::vector<T>& items, WorkQueue<T>& queue)
+    {
+        if (items.empty())
+        {
+            return true;
+        }
+
+        // initialize() clamps to the queue's remaining capacity, so the returned
+        // block tells us exactly how many items the queue can accept right now.
+        auto block = queue.initialize(items.size());
+        const size_t placed = block.size();
+
+        for (size_t i = 0; i < placed; ++i)
+        {
+            block[i] = items[i];
+        }
+        queue.ready(block);
+
+        if (placed == items.size())
+        {
+            items.clear();
+            return true;
+        }
+
+        // Partial placement: keep the unplaced tail for a later iteration. Nothing
+        // is dropped — this is the back-pressure hold.
+        items.erase(items.begin(), items.begin() + placed);
+        return false;
+    }
 
     size_t m_index = 0;
     size_t m_fetchSize = 0;
@@ -136,11 +173,11 @@ private:
     // parked here and flushed on a later iteration — never dropped. processPhotons
     // refuses to fetch new source photons while either of its overflows is
     // non-empty, which bounds these to at most one batch worth of hits.
-    //   - m_hitOverflow:      bounce-hits awaiting the hitQueue (splat path)
-    //   - m_emittingOverflow: bounceable bounce-hits awaiting the EmittingQueue
-    //   - m_finalOverflow:    camera-visible hits awaiting the finalHitQueue
+    //   - m_hitOverflow:     bounce-hits awaiting the hitQueue (splat path)
+    //   - m_emitterOverflow: compact Emitters awaiting the EmitterQueue (daughter path)
+    //   - m_finalOverflow:   camera-visible hits awaiting the finalHitQueue
     std::vector<PhotonHit> m_hitOverflow;
-    std::vector<PhotonHit> m_emittingOverflow;
+    std::vector<Emitter> m_emitterOverflow;
     std::vector<PhotonHit> m_finalOverflow;
 
     // Cross-thread-visible mirror of the three overflow buffer sizes above.
