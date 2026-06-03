@@ -88,6 +88,39 @@ public:
     // weight. Subclasses can override for batched optimization but don't have to.
     virtual void bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, size_t endIndex, const PhotonHit& photonHit, RandomGenerator& generator) const;
 
+    // ===== Lazy daughter generation (Wave 3) =====
+    //
+    // Generate a CONTIGUOUS SUB-RANGE of an emitter's daughter set into a photon
+    // block, writing `count` daughters at photonBlock[blockStart .. blockStart+count).
+    // The daughters produced are the ones at GLOBAL daughter indices
+    // [globalStart, globalStart + count) out of `totalDaughters` total.
+    //
+    // This is the single primitive behind both the eager Wave 2 fan-out (bounce()
+    // delegates to it with globalStart = 0, count = totalDaughters) and the Wave 3
+    // lazy emitter, which calls it repeatedly with advancing globalStart as photon-
+    // queue space is reserved. Equivalence is exact-by-construction:
+    //   - global index 0 uses sampleMode() (BRDF peak); indices 1..N-1 use sample().
+    //     Keying on the GLOBAL index, not the block offset, means a daughter is
+    //     produced from the same call regardless of how the N are chunked.
+    //   - the energy split is 1/totalDaughters (invN), independent of chunking.
+    //   - daughters are emitted in ascending global-index order, so the worker RNG
+    //     is consumed for a given emitter in the same order as the eager path.
+    //
+    // Subclasses do not need to override this; the default samples per slot exactly
+    // as bounce() did.
+    virtual void generateDaughters(WorkQueue<Photon>::Block photonBlock,
+                                   size_t blockStart,
+                                   size_t globalStart,
+                                   size_t count,
+                                   size_t totalDaughters,
+                                   const Vector& incident,
+                                   const Vector& normal,
+                                   const Vector& position,
+                                   const Color& parentColor,
+                                   float parentTime,
+                                   int parentBounces,
+                                   RandomGenerator& generator) const;
+
     // Default implementation evaluates the BRDF against the camera direction and modulates
     // by the photon's color. Delta materials return black (a delta bounce has zero
     // probability of landing exactly on the camera, so direct splat contribution is zero).

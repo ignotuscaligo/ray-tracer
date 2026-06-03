@@ -17,21 +17,54 @@ std::string Material::name() const
 
 void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, size_t endIndex, const PhotonHit& photonHit, RandomGenerator& generator) const
 {
-    const Vector& incident = photonHit.photon.ray.direction;
-    const Vector& normal = photonHit.hit.normal;
-
-    // Energy split across N daughters. Each sample()'s `weight` already encodes
-    // f*cos/pdf — the standard Monte Carlo throughput — so averaging across N
-    // independent samples (the 1/N factor) gives the correct expected outgoing
-    // energy = incoming * albedo. Without 1/N, N daughters would carry N*incoming
-    // *albedo and inflate the scene's total energy by a factor of N per bounce.
+    // Eager fan-out is now just "generate the whole daughter set at once": global
+    // indices [0, N) written contiguously into [startIndex, endIndex). This keeps
+    // the Wave 2 behaviour identical while routing through the same primitive the
+    // Wave 3 lazy emitter uses, so the eager and lazy paths cannot diverge.
     const size_t n = (endIndex > startIndex) ? (endIndex - startIndex) : 1;
+    generateDaughters(photonBlock,
+                      /*blockStart=*/startIndex,
+                      /*globalStart=*/0,
+                      /*count=*/n,
+                      /*totalDaughters=*/n,
+                      photonHit.photon.ray.direction,
+                      photonHit.hit.normal,
+                      photonHit.hit.position,
+                      photonHit.photon.color,
+                      photonHit.photon.time,
+                      photonHit.photon.bounces,
+                      generator);
+}
+
+void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
+                                 size_t blockStart,
+                                 size_t globalStart,
+                                 size_t count,
+                                 size_t totalDaughters,
+                                 const Vector& incident,
+                                 const Vector& normal,
+                                 const Vector& position,
+                                 const Color& parentColor,
+                                 float parentTime,
+                                 int parentBounces,
+                                 RandomGenerator& generator) const
+{
+    // Energy split across the FULL daughter set N (= totalDaughters), not the
+    // size of this chunk. Each sample()'s `weight` already encodes f*cos/pdf —
+    // the standard Monte Carlo throughput — so averaging across N independent
+    // samples (the 1/N factor) gives the correct expected outgoing energy =
+    // incoming * albedo. Keying invN on the chunk size would inflate energy when
+    // the fan-out is split across multiple lazy pulls; keying on the total keeps
+    // it identical to the eager single-shot fan-out.
+    const size_t n = (totalDaughters > 0) ? totalDaughters : 1;
     const float invN = 1.0f / static_cast<float>(n);
 
-    // Primary-bounce-first daughter generation:
-    //   daughter index 0 = sampleMode() — deterministic BRDF peak (cosine peak for
-    //                      Lambertian, perfect reflection for Mirror/Microfacet)
-    //   daughter indices 1..N-1 = sample() — drawn from the BRDF distribution
+    // Primary-bounce-first daughter generation, keyed on the GLOBAL daughter
+    // index so a daughter is produced from the same call regardless of how the N
+    // are chunked across lazy pulls:
+    //   global index 0       = sampleMode() — deterministic BRDF peak (cosine peak
+    //                          for Lambertian, perfect reflection for Mirror/Microfacet)
+    //   global indices 1..N-1 = sample() — drawn from the BRDF distribution
     //
     // This guarantees every bounce produces at least one photon along the
     // dominant outgoing direction, which is the photon-mapping-correct fix for
@@ -40,14 +73,21 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
     // primary-mode-first, every diffuse hit produces a photon directly along
     // its normal, which is the maximum-likelihood direction to reach a nearby
     // specular surface and bounce off into the camera cone.
-    for (size_t i = startIndex; i < endIndex; ++i)
+    for (size_t k = 0; k < count; ++k)
     {
-        // Carry forward all photon state (time, color, anything added later) by copy,
-        // then overwrite the fields that the bounce actually changes.
-        photonBlock[i] = photonHit.photon;
-        photonBlock[i].bounces = photonHit.photon.bounces + 1;
+        const size_t globalIndex = globalStart + k;
+        const size_t slot = blockStart + k;
 
-        const bool primary = (i == startIndex);
+        // Carry forward parent photon state, then overwrite the fields the bounce
+        // actually changes. (The parent ray is fully overwritten below, so only
+        // color / time / bounces need carrying.)
+        Photon& out = photonBlock[slot];
+        out = Photon{};
+        out.color = parentColor;
+        out.time = parentTime;
+        out.bounces = parentBounces + 1;
+
+        const bool primary = (globalIndex == 0);
         BSDFSample s = primary
             ? sampleMode(incident, normal, generator)
             : sample(incident, normal, generator);
@@ -55,13 +95,13 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
         if (!s.valid)
         {
             // Mark output as no-energy so it gets dropped at the next processPhotons pass.
-            photonBlock[i].ray = {photonHit.hit.position, normal};
-            photonBlock[i].color = Color{0.0f, 0.0f, 0.0f};
+            out.ray = {position, normal};
+            out.color = Color{0.0f, 0.0f, 0.0f};
             continue;
         }
 
-        photonBlock[i].ray = {photonHit.hit.position, s.direction};
-        photonBlock[i].color = photonHit.photon.color * s.weight * invN;
+        out.ray = {position, s.direction};
+        out.color = parentColor * s.weight * invN;
     }
 }
 

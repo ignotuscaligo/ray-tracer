@@ -1,5 +1,6 @@
 #include "WorkQueue.h"
 
+#include "Emitter.h"
 #include "Photon.h"
 
 #include <algorithm>
@@ -277,3 +278,26 @@ template size_t WorkQueue<PhotonHit>::freeSpace() const;
 template size_t WorkQueue<PhotonHit>::allocated() const;
 template size_t WorkQueue<PhotonHit>::available() const;
 template size_t WorkQueue<PhotonHit>::largestAllocated() const;
+
+// Wave 3: compact daughter-photon producers. The EmitterQueue is a WorkQueue<Emitter>;
+// it replaces the Wave 2 EmittingQueue (WorkQueue<PhotonHit>) on the daughter path.
+template WorkQueue<Emitter>::Block::Block(size_t start, size_t end, std::vector<Emitter>& queue);
+template Emitter& WorkQueue<Emitter>::Block::Iterator::operator*();
+template bool WorkQueue<Emitter>::Block::Iterator::operator!=(const Iterator& rhs);
+template void WorkQueue<Emitter>::Block::Iterator::operator++();
+template typename WorkQueue<Emitter>::Block::Iterator WorkQueue<Emitter>::Block::begin() const;
+template typename WorkQueue<Emitter>::Block::Iterator WorkQueue<Emitter>::Block::end() const;
+template Emitter& WorkQueue<Emitter>::Block::operator[](size_t accessIndex);
+template Emitter& WorkQueue<Emitter>::Block::at(size_t accessIndex);
+template size_t WorkQueue<Emitter>::Block::size() const;
+template std::vector<Emitter> WorkQueue<Emitter>::Block::toVector() const;
+template WorkQueue<Emitter>::WorkQueue(size_t size);
+template typename WorkQueue<Emitter>::Block WorkQueue<Emitter>::initialize(size_t count);
+template void WorkQueue<Emitter>::ready(Block block);
+template typename WorkQueue<Emitter>::Block WorkQueue<Emitter>::fetch(size_t count);
+template void WorkQueue<Emitter>::release(Block block);
+template size_t WorkQueue<Emitter>::capacity() const;
+template size_t WorkQueue<Emitter>::freeSpace() const;
+template size_t WorkQueue<Emitter>::allocated() const;
+template size_t WorkQueue<Emitter>::available() const;
+template size_t WorkQueue<Emitter>::largestAllocated() const;
