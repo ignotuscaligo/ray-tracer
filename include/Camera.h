@@ -5,6 +5,7 @@
 
 #include <limits>
 #include <optional>
+#include <string>
 #include <utility>
 
 class Camera : public Object
@@ -66,6 +67,35 @@ public:
 
     void setFromRenderConfiguration(size_t width, size_t height);
 
+    // --- Wave 6: multi-camera + debug cameras ---
+    //
+    // A scene may declare multiple cameras. They share the photon pass / bounce
+    // cloud (one lighting solve) but each runs its own GATHER, producing its own
+    // image at its own resolution/exposure. These fields carry the per-camera
+    // attributes the Renderer + render-test CLI need:
+    //
+    //   outputName   — base name for this camera's PNG (out_<outputName>.png). When
+    //                  empty the CLI falls back to the single-camera output path.
+    //   hasResolutionOverride — true when the scene gave this camera its own
+    //                  $width/$height (so the global $renderConfiguration resolution
+    //                  is NOT imposed on it). Single-camera back-compat scenes leave
+    //                  this false and inherit the render-config resolution.
+    //   bounceFilter — if >= 0, the gather sums ONLY deposits whose bounce depth
+    //                  equals this value (Milestone 3 debug camera). -1 = no filter.
+    //   lightFilter  — if >= 0, the gather sums ONLY deposits whose light-id equals
+    //                  this value (Milestone 4 per-light debug camera). -1 = no filter.
+    void outputName(const std::string& name);
+    const std::string& outputName() const;
+
+    void setResolution(size_t width, size_t height);  // sets w/h AND marks override
+    bool hasResolutionOverride() const;
+
+    void bounceFilter(int bounce);
+    int bounceFilter() const;
+
+    void lightFilter(int lightIndex);
+    int lightFilter() const;
+
     std::optional<PixelCoords> coordForPoint(const Vector& point) const;
     // Continuous (floating-point) pixel-space coordinate of a world point. Pixel centers
     // are at integer values (matching pixelDirection's coord -> direction mapping). The
@@ -109,4 +139,10 @@ private:
     double m_fNumber = 8.0;
     double m_shutterTime = 0.01;  // seconds
     double m_iso = 100.0;
+
+    // Wave 6 multi-camera / debug-camera attributes.
+    std::string m_outputName;
+    bool m_hasResolutionOverride = false;
+    int m_bounceFilter = -1;  // -1 = no bounce-depth filter
+    int m_lightFilter = -1;   // -1 = no light-id filter
 };

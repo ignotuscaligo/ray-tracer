@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <string>
 
 namespace
@@ -51,14 +52,21 @@ int runRenderTest(int argc, char** argv)
     {
         LoadedScene scene = SceneLoader::loadFromFile(scenePath, /*logToStdout=*/false);
 
+        // The CLI resolution argument overrides the global render-config resolution
+        // and is imposed only on cameras that did NOT declare their own $width/$height.
+        // Multi-camera scenes that set per-camera resolutions keep them; single-camera
+        // scenes behave exactly as before (the CLI res wins).
         if (resolution > 0)
         {
             scene.settings.imageWidth = static_cast<size_t>(resolution);
             scene.settings.imageHeight = static_cast<size_t>(resolution);
-            if (scene.camera)
+            for (auto& cam : scene.cameras)
             {
-                scene.camera->setFromRenderConfiguration(
-                    scene.settings.imageWidth, scene.settings.imageHeight);
+                if (cam && !cam->hasResolutionOverride())
+                {
+                    cam->setFromRenderConfiguration(
+                        scene.settings.imageWidth, scene.settings.imageHeight);
+                }
             }
         }
         if (photonsMillions > 0)
@@ -73,7 +81,6 @@ int runRenderTest(int argc, char** argv)
         WorkerDebug::resetDropCounters();
 
         RenderResult result = Renderer::renderFrame(scene);
-        PngWriter::writeImage(outPath, *result.image, "render-test");
 
         // Surface the forward-pipeline drop totals after the queues have drained.
         // Nonzero values mean photons/bounce-hits were discarded under queue
@@ -116,17 +123,71 @@ int runRenderTest(int argc, char** argv)
                         result.hashGrid->cellSize());
         }
 
-        // Wave 4b gather evidence: the gather is the sole image source now. Report
-        // how many camera pixels found a surface, gathered >= 1 deposit, were left
-        // black as delta (mirror — 4c will ray-extend), or missed all geometry,
-        // plus the max footprint radius and mean deposits per gathered pixel.
-        const Gather::GatherResult& g = result.gather;
-        std::printf("gather: hit=%zu gathered=%zu delta-black=%zu miss=%zu "
-                    "max-radius=%.3f mean-deposits/gather=%.1f max-radiance=%.2f\n",
-                    g.pixelsHit, g.pixelsGathered, g.pixelsDelta, g.pixelsMiss,
-                    g.maxGatherRadius, g.meanDepositsPerGather, g.maxRadiance);
+        std::printf("photon-pass: %.2f s (shared across %zu camera(s))\n",
+                    result.photonPassSeconds, result.cameras.size());
 
-        std::printf("render-test: wrote %s\n", outPath.c_str());
+        // Wave 6 MULTI-CAMERA output. The photon pass / cloud / grid above were a
+        // single shared solve; each camera ran its own gather. Report per-camera
+        // gather diagnostics + timing + mean luminance, and write one PNG per camera.
+        //
+        // Output naming:
+        //   - 1 camera, no $outputName  -> the <out.png> path given on the CLI
+        //     (exact single-camera back-compat).
+        //   - otherwise                 -> <out-stem>_<name>.png next to <out.png>,
+        //     where <name> is the camera's $outputName (or cam<i> if unnamed).
+        const std::filesystem::path outBase(outPath);
+        const std::filesystem::path outDir = outBase.parent_path();
+        const std::string outStem = outBase.stem().string();
+        const std::string outExt =
+            outBase.has_extension() ? outBase.extension().string() : std::string(".png");
+
+        const bool singleUnnamed =
+            result.cameras.size() == 1 && result.cameras.front().outputName.empty();
+
+        for (size_t i = 0; i < result.cameras.size(); ++i)
+        {
+            const CameraRender& cr = result.cameras[i];
+            const Gather::GatherResult& g = cr.gather;
+
+            std::string name = cr.outputName;
+            if (name.empty())
+            {
+                name = "cam" + std::to_string(i);
+            }
+
+            std::filesystem::path camOut;
+            if (singleUnnamed)
+            {
+                camOut = outBase;
+            }
+            else
+            {
+                camOut = outDir / (outStem + "_" + name + outExt);
+            }
+
+            const size_t w = cr.camera ? cr.camera->width() : 0;
+            const size_t h = cr.camera ? cr.camera->height() : 0;
+            const int bf = cr.camera ? cr.camera->bounceFilter() : -1;
+            const int lf = cr.camera ? cr.camera->lightFilter() : -1;
+
+            std::printf(
+                "camera[%zu] name=%s res=%zux%zu bounceFilter=%d lightFilter=%d "
+                "gather-time=%.3f s mean-luminance=%.4f\n",
+                i, name.c_str(), w, h, bf, lf, cr.gatherSeconds, cr.meanLuminance);
+            std::printf(
+                "  gather: hit=%zu gathered=%zu delta-black=%zu miss=%zu "
+                "max-radius=%.3f mean-deposits/gather=%.1f max-radiance=%.2f\n",
+                g.pixelsHit, g.pixelsGathered, g.pixelsDelta, g.pixelsMiss,
+                g.maxGatherRadius, g.meanDepositsPerGather, g.maxRadiance);
+
+            if (cr.image)
+            {
+                PngWriter::writeImage(camOut, *cr.image, "render-test");
+                std::printf("  wrote %s\n", camOut.c_str());
+            }
+        }
+
+        std::printf("render-test: done (%zu image(s))\n", result.cameras.size());
         return 0;
     }
     catch (const std::exception& e)

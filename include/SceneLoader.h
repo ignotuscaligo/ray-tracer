@@ -21,7 +21,13 @@
 struct LoadedScene
 {
     std::vector<std::shared_ptr<Object>> objects;
+    // Back-compat single-camera handle: points at the FIRST camera in `cameras`
+    // (the primary camera). Existing single-camera code paths read this.
     std::shared_ptr<Camera> camera;
+    // Wave 6: ALL cameras declared in the scene, in declaration order. The photon
+    // pass runs once; the gather runs once per camera. For a single-camera scene
+    // this holds exactly one entry (== camera).
+    std::vector<std::shared_ptr<Camera>> cameras;
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<MeshLibrary> meshLibrary;
     RenderSettings settings;

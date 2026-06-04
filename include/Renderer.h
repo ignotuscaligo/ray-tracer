@@ -9,16 +9,47 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
+
+// Wave 6: per-camera output of a multi-camera render. The photon pass / bounce
+// cloud is shared; each camera contributes one of these (its own gather + image
+// at its own resolution/exposure). For a single-camera scene there is exactly one.
+struct CameraRender
+{
+    std::shared_ptr<Camera> camera;  // the camera that produced this image
+    std::string outputName;          // base name for the PNG (may be empty)
+    std::shared_ptr<Buffer> buffer;  // physical-luminance gather buffer (1/N normalized)
+    std::shared_ptr<Image> image;    // tonemapped 16-bit image for this camera
+    Gather::GatherResult gather;     // gather diagnostics for this camera
+
+    // Wall-clock time this camera's gather took (Milestone 2 timing). The shared
+    // photon pass time is reported once at the RenderResult level.
+    double gatherSeconds = 0.0;
+    // Mean luminance over the gather buffer (pre-exposure), for the brightness-
+    // stability sanity check as the per-pixel footprint shrinks with resolution.
+    double meanLuminance = 0.0;
+};
 
 // Result of a completed render pass for a single frame.
 struct RenderResult
 {
     // Raw energy accumulator (linear, unbounded). Useful for progressive preview
-    // and for callers that want to do their own tonemapping.
+    // and for callers that want to do their own tonemapping. For multi-camera
+    // renders this is the PRIMARY (first) camera's buffer; see `cameras` for all.
     std::shared_ptr<Buffer> buffer;
     // Tonemapped 16-bit image (gamma-corrected, flipped to image orientation) —
-    // identical to what the executable writes to PNG.
+    // identical to what the executable writes to PNG. Primary camera for multi-cam.
     std::shared_ptr<Image> image;
+
+    // Wave 6: one entry per camera in the scene (declaration order). The photon
+    // pass ran once and is shared; each entry holds that camera's own gather/image.
+    std::vector<CameraRender> cameras;
+
+    // Wall-clock seconds the SHARED photon pass + cloud + grid build took (the
+    // part amortized across all cameras). Per-camera gather time lives in each
+    // CameraRender::gatherSeconds.
+    double photonPassSeconds = 0.0;
 
     // Peak (high-water-mark) slot occupancy of each pipeline queue over the whole
     // render. Wave 3 evidence: with lazy emitter fan-out the photon queue no

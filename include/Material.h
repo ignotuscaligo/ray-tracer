@@ -119,6 +119,7 @@ public:
                                    const Color& parentColor,
                                    float parentTime,
                                    int parentBounces,
+                                   int parentLightId,
                                    RandomGenerator& generator) const;
 
     // Default implementation evaluates the BRDF against the camera direction and modulates

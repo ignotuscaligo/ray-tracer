@@ -87,6 +87,9 @@ struct GatherContext
     const AnimationQuery* animation;
     double invN;
     double pixelHalfAngle;
+    // Wave 6 debug-camera deposit filters. -1 disables a filter.
+    int bounceFilter = -1;
+    int lightFilter = -1;
 };
 
 // Density-estimate gather at a NON-DELTA surface hit: the unchanged Wave 4b estimate
@@ -125,9 +128,21 @@ Color gatherDensity(const GatherContext& ctx,
     // Density estimate: sum BRDF(d.incoming -> wo) * d.power over the deposits in the
     // footprint, then normalize by the disc area pi*r^2.
     Color radiance{0.0f, 0.0f, 0.0f};
+    size_t contributing = 0;
     for (std::size_t index : neighbors)
     {
         const BounceRecord& record = ctx.cloud[index];
+
+        // Wave 6 debug-camera filters: skip deposits that don't match the requested
+        // bounce depth / light-id. A disabled filter (-1) admits everything.
+        if (ctx.bounceFilter >= 0 && record.bounces != ctx.bounceFilter)
+        {
+            continue;
+        }
+        if (ctx.lightFilter >= 0 && record.lightId != ctx.lightFilter)
+        {
+            continue;
+        }
 
         // wi: direction the deposited photon came FROM (the BRDF's first argument).
         // record.incoming is the photon's travel direction (into the surface), so
@@ -141,12 +156,21 @@ Color gatherDensity(const GatherContext& ctx,
         // deposits from grazing/back-facing photons drop out naturally.
         const Color f = material->evaluate(wi, wo, hit.normal);
         radiance += f * record.power;
+        ++contributing;
+    }
+
+    // With a debug filter active a footprint may legitimately contain zero matching
+    // deposits even though the pixel saw geometry; that pixel contributes nothing
+    // and is not counted as gathered (keeps the diagnostics honest per-pass).
+    if (contributing == 0)
+    {
+        return Color{0.0f, 0.0f, 0.0f};
     }
 
     const double area = Utility::pi * r * r;
     const float scale = static_cast<float>(ctx.invN / area);
 
-    stats.depositsAccum += neighbors.size();
+    stats.depositsAccum += contributing;
     ++stats.gathered;
 
     return radiance * scale;
@@ -256,6 +280,7 @@ void gatherRows(size_t rowBegin,
                 const AnimationQuery* animation,
                 double invN,
                 double pixelHalfAngle,
+                const GatherFilters& filters,
                 Buffer& buffer,
                 PixelStats& stats)
 {
@@ -263,7 +288,7 @@ void gatherRows(size_t rowBegin,
     const Vector cameraPos = camera.position();
 
     const GatherContext ctx{objects, cloud, grid, materials, animation, invN,
-                            pixelHalfAngle};
+                            pixelHalfAngle, filters.bounceFilter, filters.lightFilter};
 
     std::vector<Hit> castBuffer;
     // Per-thread RNG for delta BRDF sampling. Mirror reflection is deterministic and
@@ -309,7 +334,8 @@ GatherResult run(const std::vector<std::shared_ptr<Object>>& objects,
                  const MaterialLibrary& materials,
                  const AnimationQuery* animation,
                  double photonsPerLight,
-                 size_t workerCount)
+                 size_t workerCount,
+                 const GatherFilters& filters)
 {
     GatherResult result;
     const size_t width = camera->width();
@@ -350,7 +376,8 @@ GatherResult run(const std::vector<std::shared_ptr<Object>>& objects,
 
         pool.emplace_back([&, rowBegin, rowEnd, t]() {
             gatherRows(rowBegin, rowEnd, objects, *camera, cloud, grid, materials,
-                       animation, invN, pixelHalfAngle, *result.buffer, perThread[t]);
+                       animation, invN, pixelHalfAngle, filters, *result.buffer,
+                       perThread[t]);
         });
     }
 

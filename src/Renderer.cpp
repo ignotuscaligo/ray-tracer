@@ -71,6 +71,10 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 {
     const RenderSettings& settings = scene.settings;
 
+    // Wave 6: the shared photon pass starts here. Time it so the per-camera gather
+    // cost (Milestone 2) can be reported separately from the one-time lighting solve.
+    const std::chrono::time_point photonPassStart = std::chrono::system_clock::now();
+
     RenderResult result;
     result.buffer = std::make_shared<Buffer>(settings.imageWidth, settings.imageHeight);
     result.image = std::make_shared<Image>(settings.imageWidth, settings.imageHeight);
@@ -292,26 +296,101 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     result.hashGrid = std::make_shared<HashGrid>(*bounceCloud, cellSize);
 
-    // Wave 4b GATHER: produce the image by querying the cloud (camera-first
-    // density estimate). This REPLACES the forward splat as the image source.
-    Gather::GatherResult gather = Gather::run(
-        scene.objects,
-        scene.camera,
-        *bounceCloud,
-        *result.hashGrid,
-        *scene.materialLibrary,
-        animationQuery.get(),
-        static_cast<double>(settings.photonsPerLight),
-        settings.workerCount);
+    // The shared photon pass + cloud + grid build is now complete. Everything below
+    // is per-camera gather work (amortized across cameras), so freeze the shared
+    // time here.
+    const std::chrono::time_point photonPassEnd = std::chrono::system_clock::now();
+    result.photonPassSeconds =
+        std::chrono::duration<double>(photonPassEnd - photonPassStart).count();
 
-    result.gather = gather;
-
-    // The gather buffer (physical luminance, already 1/N + footprint normalized)
-    // is the image source now. Tonemap it through the camera exposure.
-    if (gather.buffer)
+    // Wave 6 MULTI-CAMERA: the photon pass / bounce cloud / hash grid above are a
+    // SINGLE shared lighting solve. Now run the GATHER once per camera — each camera
+    // produces its own image at its own resolution/exposure (and, for debug cameras,
+    // its own deposit filter). A single-camera scene loops exactly once, matching the
+    // Wave 4b/4c behaviour. Fall back to the primary camera if the scene only set the
+    // back-compat `scene.camera` handle.
+    std::vector<std::shared_ptr<Camera>> cameras = scene.cameras;
+    if (cameras.empty() && scene.camera)
     {
-        result.buffer = gather.buffer;
-        tonemapBufferToImage(*gather.buffer, *image, photonsEmitted, saturationLuminance);
+        cameras.push_back(scene.camera);
+    }
+
+    result.cameras.reserve(cameras.size());
+
+    for (const auto& cam : cameras)
+    {
+        if (!cam)
+        {
+            continue;
+        }
+
+        CameraRender cr;
+        cr.camera = cam;
+        cr.outputName = cam->outputName();
+
+        const Gather::GatherFilters filters{cam->bounceFilter(), cam->lightFilter()};
+
+        const std::chrono::time_point gatherStart = std::chrono::system_clock::now();
+        Gather::GatherResult gather = Gather::run(
+            scene.objects,
+            cam,
+            *bounceCloud,
+            *result.hashGrid,
+            *scene.materialLibrary,
+            animationQuery.get(),
+            static_cast<double>(settings.photonsPerLight),
+            settings.workerCount,
+            filters);
+        const std::chrono::time_point gatherEnd = std::chrono::system_clock::now();
+
+        cr.gatherSeconds = std::chrono::duration<double>(gatherEnd - gatherStart).count();
+        cr.gather = gather;
+        cr.buffer = gather.buffer;
+
+        // Tonemap THIS camera's gather buffer through THIS camera's exposure into a
+        // fresh image at the camera's own resolution.
+        cr.image = std::make_shared<Image>(cam->width(), cam->height());
+        cr.image->clear();
+        if (gather.buffer)
+        {
+            tonemapBufferToImage(*gather.buffer, *cr.image, photonsEmitted,
+                                 cam->saturationLuminance());
+
+            // Mean pre-exposure luminance over the buffer — the Milestone 2
+            // brightness-stability check (should be ~constant across resolutions as
+            // the per-pixel footprint shrinks, validating the 1/(pi r^2) normalization).
+            double sum = 0.0;
+            const size_t w = cam->width();
+            const size_t h = cam->height();
+            for (size_t y = 0; y < h; ++y)
+            {
+                for (size_t x = 0; x < w; ++x)
+                {
+                    const Color c = gather.buffer->fetchColor({x, y});
+                    sum += (static_cast<double>(c.red) + c.green + c.blue) / 3.0;
+                }
+            }
+            const double pixels = static_cast<double>(w) * static_cast<double>(h);
+            cr.meanLuminance = (pixels > 0.0) ? (sum / pixels) : 0.0;
+        }
+
+        result.cameras.push_back(std::move(cr));
+    }
+
+    // Back-compat: surface the PRIMARY (first) camera's gather/buffer/image on the
+    // top-level RenderResult fields existing callers (editor, single-cam CLI) read.
+    if (!result.cameras.empty())
+    {
+        const CameraRender& primary = result.cameras.front();
+        result.gather = primary.gather;
+        if (primary.buffer)
+        {
+            result.buffer = primary.buffer;
+        }
+        if (primary.image)
+        {
+            result.image = primary.image;
+        }
     }
 
     return result;

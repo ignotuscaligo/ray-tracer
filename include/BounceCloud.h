@@ -34,6 +34,16 @@ struct BounceRecord
     Vector normal;
     std::size_t material = 0;
     float time = 0.0f;
+    // Wave 6: bounce depth of the photon at this deposit (0 = direct from the
+    // light, 1 = first indirect bounce, ...). Copied from Photon::bounces. Drives
+    // the bounce-number debug camera ($bounceFilter): a filtered gather sums only
+    // deposits with bounces == N.
+    int bounces = 0;
+    // Wave 6: index of the light this photon ORIGINATED from (stamped at emission,
+    // inherited by every daughter bounce). Drives the per-light debug camera
+    // ($lightFilter): a filtered gather sums only deposits with lightId == idx.
+    // -1 means "unattributed" (should not occur for light-emitted photons).
+    int lightId = -1;
 };
 
 // A persistent, thread-safe, append-only store of BounceRecords.

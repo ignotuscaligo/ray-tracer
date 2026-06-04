@@ -226,12 +226,19 @@ bool Worker::processLights()
 {
     auto workStart = std::chrono::system_clock::now();
 
+    // Wave 6: track each light's index in the scene light list (lights in object
+    // declaration order). The light-id is stamped onto every emitted photon below
+    // and inherited by daughters, so each deposit can be attributed to its source
+    // light by the per-light debug camera.
+    int lightIndex = -1;
     for (auto& object : objects)
     {
         if (!object->hasType<Light>())
         {
             continue;
         }
+
+        ++lightIndex;
 
         size_t photonCount = lightQueue->fetchPhotons(object->name(), m_fetchSize);
 
@@ -245,6 +252,14 @@ bool Worker::processLights()
         auto photons = photonQueue->initialize(photonCount);
 
         std::static_pointer_cast<Light>(object)->emit(photons, photonFlux, m_generator);
+
+        // Stamp the source light-id on every freshly-emitted photon (emit() resets
+        // bounces/ray/color but leaves lightId for us to set here, so emit()
+        // implementations don't each need to know their scene index).
+        for (auto& photon : photons)
+        {
+            photon.lightId = lightIndex;
+        }
 
         // Stamp each freshly-emitted photon with a random time within the camera's
         // global exposure window (vision doc pillar 2 — "Photons with attached emission
@@ -383,6 +398,8 @@ bool Worker::processPhotons()
                     photonHit.hit.normal,
                     photonHit.hit.material,
                     photonHit.photon.time,
+                    photonHit.photon.bounces,
+                    photonHit.photon.lightId,
                 });
             }
 
@@ -512,6 +529,7 @@ bool Worker::processEmissions()
                 emitter.color,
                 emitter.time,
                 emitter.bounces,
+                emitter.lightId,
                 m_generator);
 
             emitter.advance(static_cast<std::uint32_t>(produce));

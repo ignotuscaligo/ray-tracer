@@ -51,6 +51,7 @@ struct Emitter
         , color(photonHit.photon.color)
         , time(photonHit.photon.time)
         , bounces(photonHit.photon.bounces)
+        , lightId(photonHit.photon.lightId)
         , material(photonHit.hit.material)
         , m_total(totalDaughters)
         , m_generated(0)
@@ -69,6 +70,10 @@ struct Emitter
     float time = 0.0f;
     // Parent bounce depth; daughters are stamped bounces + 1.
     int bounces = 0;
+    // Wave 6: source light-id, carried verbatim from parent to every daughter so a
+    // multi-bounce deposit is still attributed to the light that emitted the
+    // original photon.
+    int lightId = -1;
     // Material-library index used to generate daughters and to recover albedo.
     size_t material = 0;
 

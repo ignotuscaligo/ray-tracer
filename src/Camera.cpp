@@ -112,6 +112,47 @@ void Camera::setFromRenderConfiguration(size_t width, size_t height)
     m_horizontalFieldOfView = m_verticalFieldOfView * m_aspectRatio;
 }
 
+void Camera::outputName(const std::string& name)
+{
+    m_outputName = name;
+}
+
+const std::string& Camera::outputName() const
+{
+    return m_outputName;
+}
+
+void Camera::setResolution(size_t width, size_t height)
+{
+    setFromRenderConfiguration(width, height);
+    m_hasResolutionOverride = true;
+}
+
+bool Camera::hasResolutionOverride() const
+{
+    return m_hasResolutionOverride;
+}
+
+void Camera::bounceFilter(int bounce)
+{
+    m_bounceFilter = bounce;
+}
+
+int Camera::bounceFilter() const
+{
+    return m_bounceFilter;
+}
+
+void Camera::lightFilter(int lightIndex)
+{
+    m_lightFilter = lightIndex;
+}
+
+int Camera::lightFilter() const
+{
+    return m_lightFilter;
+}
+
 std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
 {
     Pyramid frustum = Pyramid(position(), rotation(), m_verticalFieldOfView, m_horizontalFieldOfView);

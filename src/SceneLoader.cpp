@@ -257,6 +257,34 @@ public:
                 object->setGlobalExposureWindow(w);
             }
         }
+
+        // Wave 6: multi-camera + debug-camera attributes. All optional; a single-
+        // camera scene that sets none of these behaves exactly as before.
+        //   $outputName  — base name for this camera's PNG (out_<name>.png).
+        //   $width/$height — per-camera resolution override. When both are present
+        //                  the camera keeps its own resolution regardless of the
+        //                  global $renderConfiguration size (which is otherwise
+        //                  imposed at load time below).
+        //   $bounceFilter — gather only deposits with bounces == N (debug camera).
+        //   $lightFilter  — gather only deposits with light-id == idx (debug camera).
+        std::string outputName;
+        setFromJsonIfPresent(outputName, jsonContainer, "$outputName");
+        object->outputName(outputName);
+
+        if (jsonContainer.contains("$width") && jsonContainer.contains("$height"))
+        {
+            const size_t w = jsonContainer["$width"].get<size_t>();
+            const size_t h = jsonContainer["$height"].get<size_t>();
+            object->setResolution(w, h);
+        }
+
+        int bounceFilter = -1;
+        setFromJsonIfPresent(bounceFilter, jsonContainer, "$bounceFilter");
+        object->bounceFilter(bounceFilter);
+
+        int lightFilter = -1;
+        setFromJsonIfPresent(lightFilter, jsonContainer, "$lightFilter");
+        object->lightFilter(lightFilter);
     }
 
     void setParametersForVolume(std::shared_ptr<Volume> object, json jsonContainer)
@@ -637,18 +665,27 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         }
     }
 
+    // Wave 6: collect ALL cameras (in declaration order). The photon pass runs
+    // once; each camera then runs its own gather. A camera that declared its own
+    // $width/$height keeps that resolution; one that did not inherits the global
+    // $renderConfiguration resolution (single-camera back-compat). scene.camera is
+    // the first/primary camera so existing single-camera code keeps working.
     for (auto& object : scene.objects)
     {
         if (object->hasType<Camera>())
         {
-            if (scene.camera)
+            std::shared_ptr<Camera> camera = std::static_pointer_cast<Camera>(object);
+            if (!camera->hasResolutionOverride())
             {
-                throw std::runtime_error("Only one Camera is allowed in the scene");
+                camera->setFromRenderConfiguration(settings.imageWidth, settings.imageHeight);
             }
-
-            scene.camera = std::static_pointer_cast<Camera>(object);
-            scene.camera->setFromRenderConfiguration(settings.imageWidth, settings.imageHeight);
+            scene.cameras.push_back(camera);
         }
+    }
+
+    if (!scene.cameras.empty())
+    {
+        scene.camera = scene.cameras.front();
     }
 
     if (logToStdout)

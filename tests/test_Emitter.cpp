@@ -65,6 +65,7 @@ std::vector<Photon> generateLazy(const Material& material,
                                    emitter.color,
                                    emitter.time,
                                    emitter.bounces,
+                                   emitter.lightId,
                                    generator);
         emitter.advance(static_cast<std::uint32_t>(produce));
         slot += produce;

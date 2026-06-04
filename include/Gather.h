@@ -68,12 +68,24 @@ struct GatherResult
     double maxRadiance = 0.0;  // peak per-pixel luminance written (pre-exposure), cd/m^2
 };
 
+// Wave 6: debug-camera deposit filters. A gather can restrict which deposits
+// contribute, producing a per-bounce or per-light pass instead of the full image:
+//   bounceFilter — if >= 0, only deposits whose BounceRecord.bounces == bounceFilter
+//                  contribute (Milestone 3: direct N=0 vs first-bounce N=1).
+//   lightFilter  — if >= 0, only deposits whose BounceRecord.lightId == lightFilter
+//                  contribute (Milestone 4: per-light pass).
+// -1 disables the corresponding filter (the default full-image gather).
+struct GatherFilters
+{
+    int bounceFilter = -1;
+    int lightFilter = -1;
+};
+
 // Run the gather. `buffer` is sized to the camera resolution; on return it holds
 // per-pixel physical luminance (1/N normalized). `photonsPerLight` is N.
 // `workerCount` parallelizes the pixel loop across that many threads (clamped to
-// at least 1). `representativeCellSize` is unused by the gather itself (the grid
-// is already built) and is here only for documentation symmetry; the caller picks
-// the grid cell size when constructing the HashGrid.
+// at least 1). `filters` optionally restricts which deposits contribute (debug
+// cameras); the default {-1,-1} gathers every deposit (the Wave 4b/4c behaviour).
 GatherResult run(const std::vector<std::shared_ptr<Object>>& objects,
                  const std::shared_ptr<Camera>& camera,
                  const BounceCloud& cloud,
@@ -81,6 +93,7 @@ GatherResult run(const std::vector<std::shared_ptr<Object>>& objects,
                  const MaterialLibrary& materials,
                  const AnimationQuery* animation,
                  double photonsPerLight,
-                 size_t workerCount);
+                 size_t workerCount,
+                 const GatherFilters& filters = {});
 
 }  // namespace Gather

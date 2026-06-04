@@ -33,6 +33,7 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
                       photonHit.photon.color,
                       photonHit.photon.time,
                       photonHit.photon.bounces,
+                      photonHit.photon.lightId,
                       generator);
 }
 
@@ -47,6 +48,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
                                  const Color& parentColor,
                                  float parentTime,
                                  int parentBounces,
+                                 int parentLightId,
                                  RandomGenerator& generator) const
 {
     // Energy split across the FULL daughter set N (= totalDaughters), not the
@@ -86,6 +88,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.color = parentColor;
         out.time = parentTime;
         out.bounces = parentBounces + 1;
+        out.lightId = parentLightId;
 
         const bool primary = (globalIndex == 0);
         BSDFSample s = primary
