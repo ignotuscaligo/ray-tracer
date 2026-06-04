@@ -23,6 +23,14 @@ std::atomic<size_t> g_deltaHitsAccepted{0};
 std::atomic<size_t> g_deltaHitsRejectedBackface{0};
 std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
 
+// Firefly fix diagnostics. g_splatTotal counts every splat contribution that
+// reached the footprint-area stage; g_splatRadiusClamped counts those whose raw
+// footprint radius fell below m_minSplatRadius and was floored (these are the
+// would-be fireflies). The ratio shows how often the floor engages; a nonzero
+// count on a scene with close-to-camera geometry is the fix doing its job.
+std::atomic<size_t> g_splatTotal{0};
+std::atomic<size_t> g_splatRadiusClamped{0};
+
 // Drop counters. Every site where the forward photon pipeline discards work
 // because a destination WorkQueue was full increments one of these by the
 // number of items dropped. They prove the lossy-drop bug exists (Step A) and
@@ -55,6 +63,14 @@ void resetDeltaHitCounters()
     g_deltaHitsAccepted.store(0);
     g_deltaHitsRejectedBackface.store(0);
     g_deltaHitsRejectedConeOffset.store(0);
+}
+
+size_t splatTotal() { return g_splatTotal.load(); }
+size_t splatRadiusClamped() { return g_splatRadiusClamped.load(); }
+void resetSplatCounters()
+{
+    g_splatTotal.store(0);
+    g_splatRadiusClamped.store(0);
 }
 
 size_t droppedEmitting() { return g_droppedEmitting.load(); }
@@ -231,6 +247,11 @@ void Worker::setSplatTargets(const std::vector<SplatTarget>& targets)
     m_splatTargets = targets;
 }
 
+void Worker::setMinSplatRadius(double minSplatRadius)
+{
+    m_minSplatRadius = std::max(0.0, minSplatRadius);
+}
+
 void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material)
 {
     // M2/M3 direct camera splat. Project the non-delta hit into each target
@@ -349,7 +370,29 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
         const double pixelHalfAngle =
             0.5 * Utility::radians(cam->verticalFieldOfView()) /
             static_cast<double>(imageHeight);
-        const double r = cameraDistance * std::tan(pixelHalfAngle);
+        // Firefly fix: floor the footprint radius. The raw r is the pixel's
+        // world-space radius at this hit's depth; for an indirect photon landing
+        // close to the camera r collapses and 1/(pi r^2) explodes, spiking the
+        // pixel to white. Clamping r up to m_minSplatRadius caps that weight at
+        // 1/(pi r_min^2) so no single splat can dominate a pixel.
+        //
+        // NOTE on energy: this forward splat writes each contribution into ONE
+        // pixel (no gather, no kernel). Flooring r therefore lowers that pixel's
+        // weight WITHOUT redistributing the excess to neighbors — for the floored
+        // splats it is mildly energy-lossy, not the strictly energy-preserving
+        // spread a radius gather would give. The loss is bounded and confined to
+        // the would-be-fireflies (only splats with r < r_min are touched); a true
+        // spread would require splatting across the footprint's pixel disc, which
+        // is a larger change to the splat and is not needed for the cases this
+        // floor is meant to catch. m_minSplatRadius is a world-space length tied
+        // to the scene-depth pixel footprint (see setMinSplatRadius); 0 disables.
+        const double rawRadius = cameraDistance * std::tan(pixelHalfAngle);
+        const double r = Utility::flooredSplatRadius(rawRadius, m_minSplatRadius);
+        g_splatTotal.fetch_add(1, std::memory_order_relaxed);
+        if (r > rawRadius)
+        {
+            g_splatRadiusClamped.fetch_add(1, std::memory_order_relaxed);
+        }
         if (r <= 0.0)
         {
             continue;

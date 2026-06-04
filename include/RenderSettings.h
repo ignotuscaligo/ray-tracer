@@ -100,4 +100,23 @@ struct RenderSettings
     // Clamped to a sane floor so it can never go microscopic (which would defeat
     // the compression).
     double densityCellScale = 1.0;
+
+    // ===== Firefly fix: minimum splat-footprint radius =====
+    // The direct camera splat normalizes each photon by its pixel footprint area
+    // (pi * r^2, r = hitDepth * tan(pixelHalfAngle)). For an indirect photon that
+    // lands on geometry very close to the camera, r collapses and 1/(pi r^2)
+    // explodes, spiking a single pixel to white (a firefly) — this speckles the
+    // emissive panel and leaves stray bright dots on diffuse geometry.
+    //
+    // The fix floors r at r_min = splatMinRadiusScale * sceneDepthFootprint,
+    // where sceneDepthFootprint is the world-space radius a pixel projects to at
+    // scene-centroid depth (the same length that sizes the density grid). Tying
+    // r_min to that footprint makes it scale with scene/camera geometry rather
+    // than being an arbitrary constant. The floor is energy-preserving: a too-
+    // concentrated splat is spread over the minimum footprint, not discarded.
+    //
+    // Default 0.5: a hit at scene depth is unaffected (its r already equals the
+    // full footprint); only hits closer than half the scene depth — where the
+    // explosion happens — are floored. Set to 0 to disable (legacy behavior).
+    double splatMinRadiusScale = 0.5;
 };

@@ -79,6 +79,7 @@ int runRenderTest(int argc, char** argv)
                     scene.settings.imageHeight, scene.settings.photonsPerLight);
 
         WorkerDebug::resetDropCounters();
+        WorkerDebug::resetSplatCounters();
 
         RenderResult result = Renderer::renderFrame(scene);
 
@@ -91,6 +92,18 @@ int runRenderTest(int argc, char** argv)
                     WorkerDebug::droppedHit(),
                     WorkerDebug::droppedFinal(),
                     WorkerDebug::droppedTotal());
+
+        // Firefly fix: how often the minimum-radius floor engaged. clamped > 0
+        // means would-be fireflies (splats landing close to the camera) had their
+        // footprint floored instead of exploding 1/(pi r^2).
+        const size_t splatTotal = WorkerDebug::splatTotal();
+        const size_t splatClamped = WorkerDebug::splatRadiusClamped();
+        std::printf("splat-radius-floor: clamped=%zu total=%zu (%.3f%%)\n",
+                    splatClamped, splatTotal,
+                    splatTotal > 0
+                        ? 100.0 * static_cast<double>(splatClamped) /
+                              static_cast<double>(splatTotal)
+                        : 0.0);
 
         // Wave 3 memory evidence: high-water-mark slot occupancy of each queue.
         // The emitter queue now holds compact producers (a fraction of a

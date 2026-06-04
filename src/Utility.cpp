@@ -40,4 +40,23 @@ double degrees(double radians)
     return (radians * 180.0) / pi;
 }
 
+double flooredSplatRadius(double rawRadius, double minRadius)
+{
+    if (minRadius > 0.0 && rawRadius < minRadius)
+    {
+        return minRadius;
+    }
+    return rawRadius;
+}
+
+double splatFootprintWeight(double rawRadius, double minRadius)
+{
+    const double r = flooredSplatRadius(rawRadius, minRadius);
+    if (r <= 0.0)
+    {
+        return 0.0;
+    }
+    return 1.0 / (pi * r * r);
+}
+
 }

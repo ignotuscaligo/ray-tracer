@@ -588,6 +588,12 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.hashGridCellSize, renderConfiguration, "$hashGridCellSize", logToStdout);
         setFromJsonIfPresent(settings.densityCellScale, renderConfiguration, "$densityCellScale", logToStdout);
 
+        // Firefly fix: minimum splat-footprint radius as a fraction of the
+        // scene-depth pixel footprint. Floors the per-hit splat radius so a
+        // photon landing close to the camera can't blow up 1/(pi r^2). Default
+        // 0.5; 0 disables.
+        setFromJsonIfPresent(settings.splatMinRadiusScale, renderConfiguration, "$splatMinRadiusScale", logToStdout);
+
         if (renderConfiguration.contains("$renderPath"))
         {
             scene.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), absoluteScenePath.parent_path());

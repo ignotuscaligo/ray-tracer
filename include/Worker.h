@@ -84,6 +84,18 @@ public:
     // lookup). Must be set before the worker starts; default 0 disables the splat.
     void setPhotonsPerLight(double photonsPerLight);
 
+    // Firefly fix: world-space minimum splat-footprint radius. The direct camera
+    // splat normalizes each photon by its pixel footprint area (pi * r^2) where
+    // r = cameraDistance * tan(pixelHalfAngle). When an indirect photon lands on
+    // geometry very close to the camera, r collapses toward zero and 1/(pi r^2)
+    // explodes, spiking a single pixel to white (a firefly). Flooring r at this
+    // minimum bounds the weight without discarding energy: a too-concentrated
+    // splat is spread over the minimum footprint instead. The floor is derived
+    // from the scene-depth pixel footprint (the same length that sizes the
+    // density grid), so it scales with scene and camera geometry rather than
+    // being an arbitrary constant. 0 disables the floor (legacy behavior).
+    void setMinSplatRadius(double minSplatRadius);
+
     // Total number of hits this worker is holding in its claim-output-first
     // overflow buffers (work that is enqueued nowhere yet but not dropped).
     // The Renderer must include this in its drain-completion test, otherwise it
@@ -233,6 +245,10 @@ private:
     // 0 disables the splat (no normalization possible).
     double m_photonsPerLight = 0.0;
 
+    // Firefly fix: world-space minimum splat-footprint radius (see setter doc).
+    // 0 disables the floor.
+    double m_minSplatRadius = 0.0;
+
     // Storage pivot M3: the cameras + buffers the splat accumulates into (one per
     // scene camera). Set by the Renderer before the worker starts.
     std::vector<SplatTarget> m_splatTargets;
@@ -282,6 +298,12 @@ size_t deltaHitsAccepted();
 size_t deltaHitsRejectedBackface();
 size_t deltaHitsRejectedConeOffset();
 void resetDeltaHitCounters();
+
+// Firefly-fix splat counters: total splat contributions vs those whose
+// footprint radius was floored to the minimum-radius (the would-be fireflies).
+size_t splatTotal();
+size_t splatRadiusClamped();
+void resetSplatCounters();
 
 // Drop counters: number of pipeline items discarded because a destination
 // WorkQueue was full. Queried after the render drains. Must be zero once

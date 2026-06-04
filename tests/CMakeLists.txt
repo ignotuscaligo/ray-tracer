@@ -41,6 +41,7 @@ target_sources(tests
         test_CameraExposure.cpp
         test_Emitter.cpp
         test_DensityGrid.cpp
+        test_SplatRadiusFloor.cpp
         test_main.cpp
         test_OrbitCamera.cpp
         test_RasterMesh.cpp

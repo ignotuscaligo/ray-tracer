@@ -150,6 +150,11 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     // configured hashGridCellSize is the fallback. The same scale that sized the
     // old hash grid sizes the cells here.
     double cellSize = settings.hashGridCellSize;
+    // The scene-depth pixel footprint radius. Sizes the density grid below AND
+    // seeds the firefly floor (minimum splat radius). 0 = could not be derived
+    // (no volumes / no camera), in which case both fall back to their configured
+    // defaults and the floor is left disabled.
+    double sceneDepthFootprint = 0.0;
     {
         const std::shared_ptr<Camera>& primaryCam =
             cameras.empty() ? scene.camera : cameras.front();
@@ -177,10 +182,20 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
                 if (representativeRadius > 0.0)
                 {
                     cellSize = representativeRadius;
+                    sceneDepthFootprint = representativeRadius;
                 }
             }
         }
     }
+
+    // Firefly fix: world-space minimum splat-footprint radius. Tied to the scene-
+    // depth pixel footprint so it scales with scene/camera geometry. If the
+    // footprint couldn't be derived, leave it 0 (floor disabled). Independent of
+    // densityCellScale (a memory knob) on purpose — this is a quality floor.
+    const double minSplatRadius =
+        (sceneDepthFootprint > 0.0 && settings.splatMinRadiusScale > 0.0)
+            ? settings.splatMinRadiusScale * sceneDepthFootprint
+            : 0.0;
     // Tunable cell-size scale ($densityCellScale): coarser cells = less memory +
     // blurrier reflections, finer = more memory + sharper. Clamp the scale so the
     // cell can never go microscopic (which would defeat the compression).
@@ -215,6 +230,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         });
         worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
+        worker->setMinSplatRadius(minSplatRadius);
         worker->setSplatTargets(splatTargets);
         ++workerIndex;
     }
