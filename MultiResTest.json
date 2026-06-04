@@ -1,0 +1,72 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": { "$type": "Lambertian", "$color": [0.8, 0.2, 0.2] },
+        "RightWall": { "$type": "Lambertian", "$color": [0.2, 0.8, 0.2] },
+        "Wall": { "$type": "Lambertian", "$color": [0.8, 0.8, 0.8] },
+        "DiffuseSphere": { "$type": "Lambertian", "$color": [0.8, 0.7, 0.3] },
+        "MirrorSphere": { "$type": "Mirror", "$color": [0.95, 0.95, 0.95] },
+        "RoughSphere": { "$type": "Microfacet", "$color": [0.9, 0.9, 0.9], "$roughness": 0.4 }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 10,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize": 5000000,
+        "$emittingQueueSize": 20000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 256,
+        "$height": 256,
+        "$photonsPerLight": 4000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "multires",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Cam256": {
+            "$type": "Camera", "$outputName": "256",
+            "$width": 256, "$height": 256,
+            "$verticalFieldOfView": 60.0, "$fNumber": 8.0, "$shutterTime": 0.01, "$iso": 2000.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0.0, 0.0, 0.0] }
+        },
+        "Cam1024": {
+            "$type": "Camera", "$outputName": "1024",
+            "$width": 1024, "$height": 1024,
+            "$verticalFieldOfView": 60.0, "$fNumber": 8.0, "$shutterTime": 0.01, "$iso": 2000.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0.0, 0.0, 0.0] }
+        },
+        "Cam4096": {
+            "$type": "Camera", "$outputName": "4096",
+            "$width": 4096, "$height": 4096,
+            "$verticalFieldOfView": 60.0, "$fNumber": 8.0, "$shutterTime": 0.01, "$iso": 2000.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0.0, 0.0, 0.0] }
+        },
+        "Light": {
+            "$type": "OmniLight",
+            "$position": [0, 280, 0],
+            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0, 0, 0] },
+            "$color": [1.0, 1.0, 1.0],
+            "$intensityCandela": 50000
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": { "$type": "MeshVolume", "$material": "Wall", "$mesh": "Ceiling" },
+            "LeftWall": { "$type": "MeshVolume", "$material": "LeftWall", "$mesh": "Left" },
+            "RightWall": { "$type": "MeshVolume", "$material": "RightWall", "$mesh": "Right" },
+            "Floor": { "$type": "MeshVolume", "$material": "Wall", "$mesh": "Floor" },
+            "Back": { "$type": "MeshVolume", "$material": "Wall", "$mesh": "Back" },
+            "DiffuseSphere": { "$type": "SphereVolume", "$material": "DiffuseSphere", "$center": [-90.0, 60.0, 30.0], "$radius": 55.0 },
+            "MirrorSphere": { "$type": "SphereVolume", "$material": "MirrorSphere", "$center": [0.0, 90.0, 70.0], "$radius": 55.0 },
+            "RoughSphere": { "$type": "SphereVolume", "$material": "RoughSphere", "$center": [90.0, 60.0, 30.0], "$radius": 55.0 }
+        }
+    }
+}
