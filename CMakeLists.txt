@@ -228,6 +228,9 @@ target_sources(ray-tracer-lib
         include/HashGrid.h
         src/HashGrid.cpp
 
+        include/DensityGrid.h
+        src/DensityGrid.cpp
+
         include/Gather.h
         src/Gather.cpp
 )
