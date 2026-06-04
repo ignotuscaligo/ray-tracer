@@ -89,4 +89,15 @@ struct RenderSettings
     // radius so a radius-r query touches a 3x3x3 cell neighborhood. Built over
     // the cloud after the photon pass drains.
     double hashGridCellSize = 1.0;
+
+    // ===== Storage pivot: density-grid cell-size tunability =====
+    // The density grid's cell edge length is auto-derived from the gather
+    // footprint scale (camera-to-scene-depth * pixel half-angle). This multiplier
+    // scales that auto value, exposing the memory/quality tradeoff as a scene/
+    // render param ($densityCellScale): a LARGER scale = coarser cells = LESS
+    // memory + blurrier reflections; a SMALLER scale = finer cells = MORE memory +
+    // sharper reflections. Default 1.0 uses the footprint-scale cell unchanged.
+    // Clamped to a sane floor so it can never go microscopic (which would defeat
+    // the compression).
+    double densityCellScale = 1.0;
 };

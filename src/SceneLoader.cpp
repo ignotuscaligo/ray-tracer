@@ -546,6 +546,7 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.bounceCloudMaxRecords, renderConfiguration, "$bounceCloudMaxRecords", logToStdout);
         setFromJsonIfPresent(settings.bounceCloudBudgetFactor, renderConfiguration, "$bounceCloudBudgetFactor", logToStdout);
         setFromJsonIfPresent(settings.hashGridCellSize, renderConfiguration, "$hashGridCellSize", logToStdout);
+        setFromJsonIfPresent(settings.densityCellScale, renderConfiguration, "$densityCellScale", logToStdout);
 
         if (renderConfiguration.contains("$renderPath"))
         {

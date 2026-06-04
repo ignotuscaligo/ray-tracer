@@ -180,6 +180,11 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
             }
         }
     }
+    // Tunable cell-size scale ($densityCellScale): coarser cells = less memory +
+    // blurrier reflections, finer = more memory + sharper. Clamp the scale so the
+    // cell can never go microscopic (which would defeat the compression).
+    const double cellScale = std::max(0.05, settings.densityCellScale);
+    cellSize *= cellScale;
     std::shared_ptr<DensityGrid> densityGrid = std::make_shared<DensityGrid>(cellSize);
 
     std::vector<std::shared_ptr<Worker>> workers{settings.workerCount};
