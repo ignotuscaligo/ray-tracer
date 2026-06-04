@@ -77,6 +77,32 @@ double AreaLight::luminousFlux() const
     return Light::luminousFlux();
 }
 
+double AreaLight::surfaceArea() const
+{
+    if (m_shape == Shape::Disc)
+    {
+        return Utility::pi * m_radius * m_radius;
+    }
+    return m_width * m_height;
+}
+
+Color AreaLight::surfaceRadiance() const
+{
+    const double area = surfaceArea();
+    if (area <= 0.0)
+    {
+        return Color{0.0f, 0.0f, 0.0f};
+    }
+
+    // Radiant/luminous exitance M = total flux / area. A Lambertian emitter's
+    // outgoing radiance is L = M / pi (the cosine-weighted hemisphere integrates
+    // to pi sr of projected solid angle). Tint by the light's color so a colored
+    // emitter shows its color at the fixture.
+    const double exitance = luminousFlux() / area;
+    const double radiance = exitance / Utility::pi;
+    return m_color * static_cast<float>(radiance);
+}
+
 void AreaLight::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
 {
     Color photonColor = m_color * static_cast<float>(photonFlux);

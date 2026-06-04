@@ -3,6 +3,7 @@
 #include "AnimationQuery.h"
 #include "Color.h"
 #include "DensityGrid.h"
+#include "EmissiveGather.h"
 #include "EmitterQueue.h"
 #include "MirrorGather.h"
 #include "LightQueue.h"
@@ -374,6 +375,21 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
                 *scene.materialLibrary,
                 animationQuery.get(),
                 static_cast<double>(settings.photonsPerLight),
+                settings.workerCount,
+                *imageBuffer);
+        }
+        // Emissive gather: make light fixtures camera-visible at their true
+        // surface radiance L = M/pi. Treats each emitter as a surface whose
+        // outgoing radiance the camera reads (no primary-ray-vs-light special
+        // case in the tracer) and writes it into the pixels the fixture is
+        // visible in. Composites into the same buffer; skipped for debug cameras
+        // (which isolate deposits, not direct emitter visibility).
+        if (imageBuffer && !debugCamera)
+        {
+            cr.emissive = EmissiveGather::run(
+                scene.objects,
+                cam,
+                animationQuery.get(),
                 settings.workerCount,
                 *imageBuffer);
         }

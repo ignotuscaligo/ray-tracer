@@ -230,6 +230,9 @@ target_sources(ray-tracer-lib
 
         include/MirrorGather.h
         src/MirrorGather.cpp
+
+        include/EmissiveGather.h
+        src/EmissiveGather.cpp
 )
 
 # ===== Executable

@@ -178,6 +178,12 @@ int runRenderTest(int argc, char** argv)
                 cr.mirror.pixelsReflected > 0
                     ? cr.mirror.sumRadiance / static_cast<double>(cr.mirror.pixelsReflected)
                     : 0.0);
+            std::printf(
+                "  emissive: fixture-pixels=%zu max-radiance=%.2f mean-radiance=%.4f\n",
+                cr.emissive.pixelsEmissive, cr.emissive.maxRadiance,
+                cr.emissive.pixelsEmissive > 0
+                    ? cr.emissive.sumRadiance / static_cast<double>(cr.emissive.pixelsEmissive)
+                    : 0.0);
 
             if (cr.image)
             {

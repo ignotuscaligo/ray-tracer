@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "DensityGrid.h"
+#include "EmissiveGather.h"
 #include "Image.h"
 #include "MirrorGather.h"
 #include "SceneLoader.h"
@@ -24,6 +25,10 @@ struct CameraRender
     // Storage pivot: mirror-gather diagnostics for this camera (how many delta
     // pixels reflected the grid vs stayed black).
     MirrorGather::Result mirror;
+
+    // Emissive-gather diagnostics for this camera (how many pixels a light
+    // fixture was directly visible in, and at what radiance).
+    EmissiveGather::Result emissive;
 
     // Wall-clock time this camera's mirror gather took. The shared photon pass
     // time (which now includes the direct splat) is reported once at the

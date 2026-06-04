@@ -62,6 +62,20 @@ public:
 
     double luminousFlux() const override;
 
+    // Surface area of the emitter (world units^2): width*height for a square,
+    // pi*radius^2 for a disc.
+    double surfaceArea() const;
+
+    // Emitted SURFACE RADIANCE L (the view-independent radiance a Lambertian
+    // emitter shows in every direction of its hemisphere). For a Lambertian
+    // emitter of radiant exitance M = Phi / area, L = M / pi. This is the value
+    // a camera looking directly at the fixture should read, so the panel appears
+    // as a uniform patch at the light's true radiance — no special primary-ray-
+    // vs-light path, the emissive gather reads this the way the mirror gather
+    // reads a lit surface's outgoing radiance. Returns black if the area is
+    // degenerate.
+    Color surfaceRadiance() const;
+
     void emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const override;
 
 private:
