@@ -61,6 +61,24 @@ public:
 
     void setBounceThreshold(size_t bounceThreshold);
 
+    // Russian-roulette configuration (unbiased path termination). When `enabled`
+    // is false the worker behaves exactly as the pre-RR pipeline. See
+    // RenderSettings for the meaning of each field; they are copied in verbatim
+    // by the Renderer before the worker starts.
+    struct RussianRouletteConfig
+    {
+        bool enabled = false;
+        size_t minBounces = 1;
+        float minProbability = 0.05f;
+        float referenceEnergy = 1.0f;
+    };
+    void setRussianRoulette(const RussianRouletteConfig& config);
+
+    // Configurable daughter fan-out. `countOverride` (when > 0) forces an exact
+    // count; otherwise the material's native daughterPhotonCount() is multiplied
+    // by `scale` (rounded, min 1). Default (override 0, scale 1) is a no-op.
+    void setDaughterCount(size_t countOverride, double scale);
+
     // Total number of hits this worker is holding in its claim-output-first
     // overflow buffers (work that is enqueued nowhere yet but not dropped).
     // The Renderer must include this in its drain-completion test, otherwise it
@@ -166,6 +184,15 @@ private:
     size_t m_fetchSize = 0;
 
     size_t m_bounceThreshold = 1;
+
+    RussianRouletteConfig m_russianRoulette;
+
+    size_t m_daughterCountOverride = 0;
+    double m_daughterCountScale = 1.0;
+
+    // Resolve the daughter count for a bounceable hit, applying the override /
+    // scale config on top of the material's native daughterPhotonCount().
+    size_t resolveDaughterCount(size_t materialCount) const;
 
     std::thread m_thread;
 

@@ -210,6 +210,39 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
     m_bounceThreshold = bounceThreshold;
 }
 
+void Worker::setRussianRoulette(const RussianRouletteConfig& config)
+{
+    m_russianRoulette = config;
+}
+
+void Worker::setDaughterCount(size_t countOverride, double scale)
+{
+    m_daughterCountOverride = countOverride;
+    m_daughterCountScale = scale;
+}
+
+size_t Worker::resolveDaughterCount(size_t materialCount) const
+{
+    // Override wins: force an exact count on every bounceable hit regardless of
+    // material. The 1/N energy split downstream keys on whatever count we return
+    // here (carried in the Emitter's total), so total outgoing energy stays
+    // correct — only sampling noise changes.
+    if (m_daughterCountOverride > 0)
+    {
+        return m_daughterCountOverride;
+    }
+
+    // Otherwise scale the material's native count (rounded, min 1). Scale == 1
+    // (the default) returns the native count unchanged.
+    if (m_daughterCountScale != 1.0)
+    {
+        const long scaled = std::lround(static_cast<double>(materialCount) * m_daughterCountScale);
+        return static_cast<size_t>(std::max<long>(1, scaled));
+    }
+
+    return materialCount;
+}
+
 void Worker::syncOverflowGauge()
 {
     m_pendingOverflowGauge.store(
@@ -410,10 +443,54 @@ bool Worker::processPhotons()
             // photon-queue space.
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
-                const size_t n = material ? material->daughterPhotonCount() : 1;
-                if (n > 0)
+                // Russian roulette (unbiased path termination). Applied at the
+                // CONTINUATION decision: the current hit's deposit above already
+                // captured this bounce's energy with the un-reweighted color, so
+                // RR only governs whether the random walk continues from here.
+                // Each daughter becomes its own photon -> own hit -> own RR roll,
+                // so this composes with the fan-out: every daughter can be
+                // independently terminated at its next bounce.
+                //
+                // p = clamp(maxChannel(color) / referenceEnergy, pMin, 1). Roll a
+                // uniform; on death, skip the Emitter (path stops). On survival,
+                // seed the Emitter with color * (1/p) so the estimator is
+                // unbiased — the expected continued energy is unchanged, dim
+                // paths are just dropped and survivors boosted to compensate.
+                // RR is skipped for bounces < minBounces so early/high-energy
+                // paths always survive (variance control, standard practice).
+                PhotonHit continuation = photonHit;
+                bool survive = true;
+
+                if (m_russianRoulette.enabled
+                    && photonHit.photon.bounces >= static_cast<int>(m_russianRoulette.minBounces))
                 {
-                    m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(n));
+                    const Color& c = photonHit.photon.color;
+                    const float maxChannel = std::max({c.red, c.green, c.blue});
+                    const float ref = (m_russianRoulette.referenceEnergy > 0.0f)
+                        ? m_russianRoulette.referenceEnergy
+                        : 1.0f;
+                    float p = maxChannel / ref;
+                    p = std::clamp(p, m_russianRoulette.minProbability, 1.0f);
+
+                    if (m_generator.value() < static_cast<double>(p))
+                    {
+                        // Survive: reweight to stay unbiased.
+                        continuation.photon.color = photonHit.photon.color * (1.0f / p);
+                    }
+                    else
+                    {
+                        survive = false;
+                    }
+                }
+
+                if (survive)
+                {
+                    const size_t materialCount = material ? material->daughterPhotonCount() : 1;
+                    const size_t n = resolveDaughterCount(materialCount);
+                    if (n > 0)
+                    {
+                        m_emitterOverflow.emplace_back(continuation, static_cast<std::uint32_t>(n));
+                    }
                 }
             }
         }

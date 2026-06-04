@@ -24,6 +24,42 @@ struct RenderSettings
     size_t endFrame = 0;
     size_t bounceThreshold = 1;
 
+    // ===== Russian roulette (unbiased path termination) =====
+    // When enabled, a photon that hits a bounceable surface at bounce depth >=
+    // russianRouletteMinBounces is probabilistically terminated with survival
+    // probability p = clamp(maxChannel(throughput) / referenceEnergy, pMin, 1).
+    // Survivors have their carried color scaled by 1/p so the Monte-Carlo
+    // estimator stays UNBIASED (the expected energy is unchanged — dim paths are
+    // dropped, bright ones are boosted to compensate). Disabled by default for
+    // exact back-compat with the pre-RR pipeline.
+    //
+    // - minBounces: RR is skipped for bounces < this, so early (direct / first-
+    //   bounce) paths always survive. Standard practice: terminating high-energy
+    //   early paths spikes variance.
+    // - minProbability: the survival-probability floor (pMin). Keeps p away from
+    //   0 so the 1/p reweight can't explode.
+    // - referenceEnergy: the throughput value mapped to p=1 (full survival). A
+    //   photon at or above this energy always survives; below it survives with
+    //   probability proportional to its energy.
+    bool russianRoulette = false;
+    size_t russianRouletteMinBounces = 1;
+    float russianRouletteMinProbability = 0.05f;
+    float russianRouletteReferenceEnergy = 1.0f;
+
+    // ===== Configurable daughter fan-out (Milestone 2) =====
+    // Override or scale the per-material daughterPhotonCount() without
+    // recompiling. Default behavior (override = 0, scale = 1) leaves each
+    // material's native count untouched.
+    //   - daughterCountOverride > 0 forces EXACTLY this many daughters on every
+    //     bounceable hit, regardless of material (so 9/3/1 sweeps come from the
+    //     scene file). The 1/N energy split tracks the forced N, so total
+    //     outgoing energy stays correct — only sampling noise changes.
+    //   - daughterCountScale multiplies the material's native count (rounded,
+    //     min 1) when no override is set.
+    // Override takes precedence over scale.
+    size_t daughterCountOverride = 0;
+    double daughterCountScale = 1.0;
+
     // ===== Wave 4a: BounceCloud deposit store =====
     // Capacity (in records) of the persistent deposit cloud is budgeted as
     // photonsPerLight * bounceCloudBudgetFactor, clamped to bounceCloudMaxRecords.

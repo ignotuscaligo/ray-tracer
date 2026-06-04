@@ -528,6 +528,17 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.endFrame, renderConfiguration, "$endFrame", logToStdout);
         setFromJsonIfPresent(settings.bounceThreshold, renderConfiguration, "$bounceThreshold", logToStdout);
 
+        // Russian roulette (unbiased path termination). Default off for back-compat.
+        setFromJsonIfPresent(settings.russianRoulette, renderConfiguration, "$russianRoulette", logToStdout);
+        setFromJsonIfPresent(settings.russianRouletteMinBounces, renderConfiguration, "$russianRouletteMinBounces", logToStdout);
+        setFromJsonIfPresent(settings.russianRouletteMinProbability, renderConfiguration, "$russianRouletteMinProbability", logToStdout);
+        setFromJsonIfPresent(settings.russianRouletteReferenceEnergy, renderConfiguration, "$russianRouletteReferenceEnergy", logToStdout);
+
+        // Configurable daughter fan-out (Milestone 2). Override forces an exact
+        // count; scale multiplies the material's native count. Defaults are no-ops.
+        setFromJsonIfPresent(settings.daughterCountOverride, renderConfiguration, "$daughterCount", logToStdout);
+        setFromJsonIfPresent(settings.daughterCountScale, renderConfiguration, "$daughterCountScale", logToStdout);
+
         // Wave 4a/4b: bounce-cloud deposit budget. Raising the cap lets a small
         // verification render capture EVERY non-delta deposit (budget-hit=no) so
         // the gather sees the complete light transport. Cell size is normally

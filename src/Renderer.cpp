@@ -134,6 +134,13 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->animationQuery = animationQuery;
         worker->bounceCloud = bounceCloud;
         worker->setBounceThreshold(settings.bounceThreshold);
+        worker->setRussianRoulette(Worker::RussianRouletteConfig{
+            settings.russianRoulette,
+            settings.russianRouletteMinBounces,
+            settings.russianRouletteMinProbability,
+            settings.russianRouletteReferenceEnergy,
+        });
+        worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
         ++workerIndex;
     }
 
