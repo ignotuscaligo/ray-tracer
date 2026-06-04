@@ -39,6 +39,7 @@ target_sources(tests
         test_Bounds.cpp
         test_Sphere.cpp
         test_CameraExposure.cpp
+        test_BSDF.cpp
         test_Emitter.cpp
         test_DensityGrid.cpp
         test_SplatRadiusFloor.cpp
