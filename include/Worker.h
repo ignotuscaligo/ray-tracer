@@ -117,8 +117,9 @@ private:
     bool processLights();
     bool processPhotons();
     bool processEmissions();
-    bool processHits();
-    bool processFinalHits();
+    // Wave 4b: processHits (camera-visibility) and processFinalHits (the splat
+    // sink) were removed with the forward splat. The image is now produced by the
+    // gather over the deposit cloud (src/Gather.cpp), run after the photon pass.
 
     // Claim-output-first helper. Push as many of `items` into `queue` as the
     // queue's clamped allocation allows; whatever does not fit stays in `items`
@@ -177,19 +178,17 @@ private:
     std::vector<PhotonHit> m_hitBuffer;
     std::vector<PhotonHit> m_volumeHitBuffer;
 
-    // Persistent per-worker overflow buffers (claim-output-first back-pressure).
-    // When a producer queue cannot accept a batch's full output, the surplus is
+    // Persistent per-worker overflow buffer (claim-output-first back-pressure).
+    // When the emitter queue cannot accept a batch's full output, the surplus is
     // parked here and flushed on a later iteration — never dropped. processPhotons
-    // refuses to fetch new source photons while either of its overflows is
-    // non-empty, which bounds these to at most one batch worth of hits.
-    //   - m_hitOverflow:     bounce-hits awaiting the hitQueue (splat path)
+    // refuses to fetch new source photons while this overflow is non-empty, which
+    // bounds it to at most one batch worth of emitters.
     //   - m_emitterOverflow: compact Emitters awaiting the EmitterQueue (daughter path)
-    //   - m_finalOverflow:   camera-visible hits awaiting the finalHitQueue
-    std::vector<PhotonHit> m_hitOverflow;
+    // Wave 4b: the splat-path overflow buffers (m_hitOverflow, m_finalOverflow)
+    // were removed with the forward splat.
     std::vector<Emitter> m_emitterOverflow;
-    std::vector<PhotonHit> m_finalOverflow;
 
-    // Cross-thread-visible mirror of the three overflow buffer sizes above.
+    // Cross-thread-visible mirror of the overflow buffer size above.
     // Written only by this worker's thread (after every mutation via
     // syncOverflowGauge), read by the Renderer drain loop. Atomic so the read
     // is well-defined; relaxed ordering is fine since it's only a liveness hint.

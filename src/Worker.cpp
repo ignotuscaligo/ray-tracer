@@ -147,17 +147,14 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 1: raycast pending photons. Claim-output-first: a batch of
-            // fetchSize photons produces up to fetchSize bounce-hits that must be
-            // pushed to the hitQueue (splat path) AND, for bounceable hits, one
-            // compact Emitter each to the EmitterQueue (lazy daughter path).
-            // processPhotons first flushes any per-worker overflow from a prior
-            // iteration, and only fetches new source photons when both overflow
-            // buffers are empty — so nothing is ever dropped, only deferred.
-            //
-            // We run the stage if there is work to do (new photons OR pending
-            // overflow). The internal logic decides whether it can fetch.
-            const bool photonOverflowPending = !m_hitOverflow.empty() || !m_emitterOverflow.empty();
+            // Stage 1: raycast pending photons. Wave 4b: a batch of fetchSize
+            // photons produces bounce-hits that are DEPOSITED into the cloud
+            // (gather source) and, for bounceable hits, one compact Emitter each
+            // to the EmitterQueue (lazy daughter path). The forward-splat hitQueue
+            // push is removed. processPhotons flushes any emitter overflow from a
+            // prior iteration and only fetches new source photons when the emitter
+            // overflow is empty — so nothing is dropped, only deferred.
+            const bool photonOverflowPending = !m_emitterOverflow.empty();
             if (photonQueue->available() > 0 || photonOverflowPending)
             {
                 if (!processPhotons())
@@ -183,27 +180,12 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 3: camera-visibility check. Like Stage 1 this is claim-output-
-            // first — visible hits must be pushed to the finalHitQueue, and any
-            // that don't fit are parked in m_finalOverflow and retried before the
-            // next fetch. Run while there is hitQueue work OR pending overflow.
-            if (hitQueue->available() > 0 || !m_finalOverflow.empty())
-            {
-                if (!processHits())
-                {
-                    break;
-                }
-                drainedAnything = true;
-            }
-
-            if (finalHitQueue->available() > 0)
-            {
-                if (!processFinalHits())
-                {
-                    break;
-                }
-                drainedAnything = true;
-            }
+            // Wave 4b: Stage 3 (camera-visibility check, processHits) and the
+            // splat sink (processFinalHits) are REMOVED. The forward splat that
+            // turned the camera into an accumulator is gone; the image is produced
+            // after the pass by the gather over the deposit cloud. Only the
+            // photon pass (emit -> raycast+deposit -> lazy daughter fan-out) runs
+            // here now.
 
             if (!drainedAnything)
             {
@@ -231,7 +213,7 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
 void Worker::syncOverflowGauge()
 {
     m_pendingOverflowGauge.store(
-        m_hitOverflow.size() + m_emitterOverflow.size() + m_finalOverflow.size(),
+        m_emitterOverflow.size(),
         std::memory_order_relaxed);
 }
 
@@ -302,14 +284,15 @@ bool Worker::processPhotons()
     auto workStart = std::chrono::system_clock::now();
 
     // Claim-output-first: before consuming any new source photons, drain any
-    // bounce-hits parked from a previous iteration into their queues. If either
+    // emitters parked from a previous iteration into the emitter queue. If the
     // overflow can't fully drain, do NOT fetch new photons this round — that
     // would grow the overflow without bound. Leave the source photons in the
     // photonQueue (we simply don't fetch) and let the worker run other stages,
     // which frees downstream room. This is what makes the stage lossless.
-    if (!m_hitOverflow.empty() || !m_emitterOverflow.empty())
+    // (Wave 4b: the hit-overflow / splat path is gone; only the emitter daughter
+    // path remains.)
+    if (!m_emitterOverflow.empty())
     {
-        flushIntoQueue(m_hitOverflow, *hitQueue);
         flushIntoQueue(m_emitterOverflow, *emitterQueue);
         syncOverflowGauge();
 
@@ -373,15 +356,14 @@ bool Worker::processPhotons()
 
     if (!m_hitBuffer.empty())
     {
-        // Every bounce-hit goes to hitQueue (splat path). The two paths are
-        // independent downstream consumers, so we stage each into its own
-        // overflow buffer and flush. Whatever doesn't fit stays parked and is
-        // retried on the next iteration before any new photons are fetched —
-        // nothing is dropped.
+        // Wave 4b: the forward splat is REMOVED. Bounce-hits are no longer pushed
+        // to the hitQueue (the splat / camera-as-accumulator path is gone). The
+        // image is produced after the pass by the gather over the cloud. Each
+        // non-delta hit is DEPOSITED into the cloud, and bounceable hits still
+        // feed the EmitterQueue (daughter path) so multi-bounce light transport
+        // continues to fill the cloud.
         for (auto& photonHit : m_hitBuffer)
         {
-            m_hitOverflow.push_back(photonHit);
-
             std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 
             // Wave 4a deposit: append a BounceRecord for every hit on a NON-DELTA
@@ -389,7 +371,7 @@ bool Worker::processPhotons()
             // delta materials are excluded — those become the ray-extension case
             // in Wave 4c, not a stored deposit. Deposit ALL non-delta hits, not
             // just bounceable ones: a terminal non-delta hit (at the bounce
-            // threshold) is still a valid sample the later gather will query.
+            // threshold) is still a valid sample the gather will query.
             // The append is a lock-free atomic fetch-add, so it does not
             // serialize the workers; if the budget is exhausted it no-ops.
             if (bounceCloud && material && !material->isDelta())
@@ -404,13 +386,11 @@ bool Worker::processPhotons()
                 });
             }
 
-            // Bounce-hits below the threshold also feed the EmitterQueue
-            // (daughter path). Terminal hits only contribute via the splat path,
-            // so they're excluded from the emitter set. Wave 3: instead of
-            // pushing the full PhotonHit and eagerly materializing N daughters at
-            // emission time, we push ONE compact Emitter carrying the hit's
-            // generation state + the material's daughter count. The daughters are
-            // materialized lazily in processEmissions, only into reserved space.
+            // Bounce-hits below the threshold feed the EmitterQueue (daughter
+            // path) to continue the random walk. Wave 3: push ONE compact Emitter
+            // carrying the hit's generation state + the material's daughter count;
+            // daughters are materialized lazily in processEmissions into reserved
+            // photon-queue space.
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
                 const size_t n = material ? material->daughterPhotonCount() : 1;
@@ -421,7 +401,6 @@ bool Worker::processPhotons()
             }
         }
 
-        flushIntoQueue(m_hitOverflow, *hitQueue);
         flushIntoQueue(m_emitterOverflow, *emitterQueue);
     }
 
@@ -573,301 +552,6 @@ bool Worker::processEmissions()
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
     emitDuration += workDuration.count();
-
-    return true;
-}
-
-bool Worker::processHits()
-{
-    auto workStart = std::chrono::system_clock::now();
-
-    // Claim-output-first: flush any camera-visible hits parked from a prior
-    // iteration into the finalHitQueue before fetching more hitQueue work. If
-    // the overflow can't fully drain, don't fetch — leave hitQueue items in
-    // place and let processFinalHits drain the sink to free room. Lossless.
-    if (!m_finalOverflow.empty())
-    {
-        flushIntoQueue(m_finalOverflow, *finalHitQueue);
-        syncOverflowGauge();
-
-        auto workEnd = std::chrono::system_clock::now();
-        hitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
-        return true;
-    }
-
-    auto hitsBlock = hitQueue->fetch(m_fetchSize);
-
-    m_hitBuffer.clear();
-
-    Vector cameraPosition = camera->position();
-    Vector cameraNormal = camera->forward();
-
-    for (auto& photonHit : hitsBlock)
-    {
-        std::optional<PixelCoords> coord = camera->coordForPoint(photonHit.hit.position);
-
-        // Not within the camera frustum, skip
-        if (!coord)
-        {
-            continue;
-        }
-
-        Vector pixelDirection = camera->pixelDirection(*coord);
-        double dot = Vector::dot(pixelDirection, photonHit.hit.normal);
-
-        // Not facing the pixel, skip
-        if (dot >= 0.0)
-        {
-            continue;
-        }
-
-        Vector path = cameraPosition - photonHit.hit.position;
-        double cameraDistance = path.magnitude();
-
-        if (cameraDistance < selfHitThreshold)
-        {
-            continue;
-        }
-
-        Ray ray{photonHit.hit.position, path / cameraDistance};
-
-        std::optional<Hit> closestHit;
-
-        // Do any objects obscure this hit?
-        for (auto& object : objects)
-        {
-            if (!object->hasType<Volume>())
-            {
-                continue;
-            }
-
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
-                ray, m_castBuffer, photonHit.photon.time, animationQuery.get());
-
-            if (hit)
-            {
-                if (hit->distance > selfHitThreshold && (!closestHit || hit->distance < closestHit->distance))
-                {
-                    closestHit = hit;
-                }
-            }
-        }
-
-        // If no object was hit, or the closest hit object is behind the camera, the hit is valid
-        if (!closestHit || closestHit->distance > cameraDistance)
-        {
-            m_hitBuffer.push_back(photonHit);
-        }
-    }
-
-    if (!m_hitBuffer.empty())
-    {
-        // Stage the camera-visible hits into the persistent overflow buffer and
-        // flush. Whatever doesn't fit stays parked and is retried before the
-        // next fetch — never dropped.
-        m_finalOverflow.insert(m_finalOverflow.end(), m_hitBuffer.begin(), m_hitBuffer.end());
-        flushIntoQueue(m_finalOverflow, *finalHitQueue);
-    }
-
-    syncOverflowGauge();
-
-    hitsProcessed += hitsBlock.size();
-
-    hitQueue->release(hitsBlock);
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    hitDuration += workDuration.count();
-
-    return true;
-}
-
-namespace
-{
-
-// 1-pixel-radius cone splat: distribute `contribution` across up to 4 neighboring integer
-// pixels around the sub-pixel coordinate (fx, fy) using a linear-falloff kernel of radius
-// 1.0 pixel. A perfectly centered bouncehit contributes 100% to a single pixel; a hit at
-// the boundary between two pixels contributes ~50% to each; a hit at a 4-pixel corner
-// distributes (1 - sqrt(0.5)) ≈ 0.293 to each of the four (slightly over unity in that
-// corner case — acceptable for v1 since the cone's bias is uniform over the image and
-// energy conservation is not catastrophically broken).
-//
-// This is the implementation of the "Mirror Visibility Model" cone gate in
-// research/ray-tracer-architecture-vision.md: same kernel doing two jobs at once —
-// resolving mirror reflections that delta-BRDF colorForHit can't render, and providing
-// sub-pixel anti-aliasing for non-delta materials.
-void splatCone(Buffer& buffer, double fx, double fy, size_t width, size_t height, const Color& contribution)
-{
-    if (contribution.brightness() <= 0.0f)
-    {
-        return;
-    }
-
-    const long lx = static_cast<long>(std::floor(fx));
-    const long ly = static_cast<long>(std::floor(fy));
-
-    for (long dy = 0; dy <= 1; ++dy)
-    {
-        for (long dx = 0; dx <= 1; ++dx)
-        {
-            const long px = lx + dx;
-            const long py = ly + dy;
-
-            if (px < 0 || py < 0 || px >= static_cast<long>(width) || py >= static_cast<long>(height))
-            {
-                continue;
-            }
-
-            const double ddx = static_cast<double>(px) - fx;
-            const double ddy = static_cast<double>(py) - fy;
-            const double dist = std::sqrt(ddx * ddx + ddy * ddy);
-            if (dist >= 1.0)
-            {
-                continue;
-            }
-
-            const float weight = static_cast<float>(1.0 - dist);
-            buffer.addColor(PixelCoords{static_cast<size_t>(px), static_cast<size_t>(py)}, contribution * weight);
-        }
-    }
-}
-
-}
-
-bool Worker::processFinalHits()
-{
-    auto workStart = std::chrono::system_clock::now();
-    auto hitsBlock = finalHitQueue->fetch(m_fetchSize);
-
-    const Vector cameraPosition = camera->position();
-    const size_t imageWidth = camera->width();
-    const size_t imageHeight = camera->height();
-
-    // Pixel angular size (radians per pixel) along the vertical axis. The "1-pixel radius"
-    // direction cone for delta materials gates on angular deviation from the line-of-sight
-    // to the camera, measured in these units.
-    const double pixelAngularSize = Utility::radians(camera->verticalFieldOfView()) /
-                                    static_cast<double>(imageHeight);
-
-    for (auto& photonHit : hitsBlock)
-    {
-        std::optional<Camera::SubPixelCoords> subCoord = camera->coordForPointSubPixel(photonHit.hit.position);
-
-        if (!subCoord)
-        {
-            continue;
-        }
-
-        // Integer-pixel coord for the per-pixel exposure window query. Sub-pixel-precise
-        // gating is overkill — exposure windows are continuous across a frame, and the
-        // current shutter models (global, rolling) vary at most per-row.
-        PixelCoords nearestCoord{
-            std::min(imageWidth - 1, static_cast<size_t>(std::max(0.0, std::round(subCoord->x)))),
-            std::min(imageHeight - 1, static_cast<size_t>(std::max(0.0, std::round(subCoord->y))))
-        };
-
-        // Time gate: drop bounces whose emission timestamp falls outside the camera's
-        // exposure window for this pixel. With the default base-class window (infinite),
-        // every photon is accepted and behavior is identical to the pre-gate pipeline.
-        Camera::ExposureWindow window = camera->exposureWindowForPixel(nearestCoord);
-        if (!window.contains(photonHit.photon.time))
-        {
-            continue;
-        }
-
-        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
-        if (!material)
-        {
-            continue;
-        }
-
-        Color contribution{0.0f, 0.0f, 0.0f};
-
-        if (material->isDelta())
-        {
-            g_deltaHitsTotal.fetch_add(1);
-            // Delta BRDF (mirror): the photon bounces in a single deterministic direction.
-            // The bouncehit is visible ONLY if that reflected direction points back toward
-            // the camera within a 1-pixel-radius angular cone. This is the new mirror
-            // visibility path — pre-cone, delta materials rendered as black.
-            const Vector incident = photonHit.photon.ray.direction;
-            const Vector reflected = Vector::normalized(Vector::reflected(incident, photonHit.hit.normal));
-            const Vector toCamera = cameraPosition - photonHit.hit.position;
-            const double toCameraMag = toCamera.magnitude();
-            if (toCameraMag <= 0.0)
-            {
-                continue;
-            }
-            const Vector toCameraDir = toCamera / toCameraMag;
-            const double cosOff = Vector::dot(reflected, toCameraDir);
-            if (cosOff <= 0.0)
-            {
-                g_deltaHitsRejectedBackface.fetch_add(1);
-                continue;
-            }
-            // acos is well-defined here because cosOff is in (0, 1]. Numerical guard.
-            const double angularOffset = std::acos(std::min(1.0, cosOff));
-
-            // Delta-cone radius (in angular pixels). A strict 1-pixel-radius cone is what
-            // the architecture vision doc specifies, but the photon budget required for
-            // visible mirror reflections at that radius is impractical (per-pixel
-            // acceptance rate ~5e-7 against a full sphere; at 20M photons, expected
-            // accepted samples per mirror pixel is far less than one).
-            //
-            // The pragmatic fix for v1: widen the directional cone to kDeltaConeRadius
-            // angular pixels and divide each accepted contribution by kDeltaConeRadius^2
-            // for energy conservation. The expected per-pixel value is unchanged; per-
-            // pixel variance drops by kDeltaConeRadius^2. The cost is that the mirror
-            // image is softened by ~kDeltaConeRadius pixels (an emergent "frosted mirror"
-            // look at large values).
-            //
-            // The architecturally correct long-term fix is the "fuzzing" optimization
-            // sketched in the vision doc (track which bouncehits reach the camera, re-
-            // emit photons from the source toward those paths). When that lands, this
-            // widening reverts to 1.0 — both code paths describe the same physical model.
-            constexpr double kDeltaConeRadius = 1.0;
-            const double pixelOffset = angularOffset / (pixelAngularSize * kDeltaConeRadius);
-            if (pixelOffset >= 1.0)
-            {
-                g_deltaHitsRejectedConeOffset.fetch_add(1);
-                continue;
-            }
-            g_deltaHitsAccepted.fetch_add(1);
-            // Linear falloff toward the cone edge. No 1/K^2 energy compensation here —
-            // the strict-cone version of this would deliver each photon's full energy to
-            // one pixel; widening the cone simply lets more photons land per pixel. The
-            // per-photon contribution stays at the natural delta-reflection magnitude,
-            // which produces "frosted mirror" appearance at the chosen radius rather
-            // than perfect specular, but at correct overall brightness. Cone radius
-            // becomes the roughness knob; K=1 is perfect specular and physically exact
-            // but requires impractical photon counts to produce signal.
-            const float directionWeight = static_cast<float>(1.0 - pixelOffset);
-
-            // Energy = incoming color × mirror albedo. sample() is deterministic for
-            // delta materials, so reusing it for the throughput weight is exact.
-            BSDFSample s = material->sample(incident, photonHit.hit.normal, m_generator);
-            contribution = photonHit.photon.color * s.weight * directionWeight;
-        }
-        else
-        {
-            // Non-delta BRDF: the existing camera splat trick. Project the hit's BRDF
-            // value in the direction-toward-camera and modulate by the incoming photon
-            // color. The sub-pixel cone below provides anti-aliasing.
-            const Vector pixelDirection = camera->pixelDirection(nearestCoord);
-            contribution = material->colorForHit(pixelDirection, photonHit);
-        }
-
-        splatCone(*buffer, subCoord->x, subCoord->y, imageWidth, imageHeight, contribution);
-    }
-
-    finalHitsProcessed += hitsBlock.size();
-
-    finalHitQueue->release(hitsBlock);
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    writeDuration += workDuration.count();
 
     return true;
 }
