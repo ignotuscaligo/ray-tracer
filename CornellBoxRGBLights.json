@@ -1,0 +1,110 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        },
+        "RightWall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        },
+        "Wall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        },
+        "WhiteSphere": {
+            "$type": "Lambertian",
+            "$color": [0.9, 0.9, 0.9]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 16,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 40000000,
+        "$hitQueueSize": 10000000,
+        "$emittingQueueSize": 40000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 256,
+        "$height": 256,
+        "$photonsPerLight": 2000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "CornellBoxRGBLights",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 90.0,
+            "$position": [0.0, 150, -300],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "RedLight": {
+            "$type": "OmniLight",
+            "$position": [0, 270, 105],
+            "$color": [1.0, 0.0, 0.0],
+            "$intensityCandela": 9000000
+        },
+        "GreenLight": {
+            "$type": "OmniLight",
+            "$position": [-73.6, 270, -22.5],
+            "$color": [0.0, 1.0, 0.0],
+            "$intensityCandela": 9000000
+        },
+        "BlueLight": {
+            "$type": "OmniLight",
+            "$position": [73.6, 270, -22.5],
+            "$color": [0.0, 0.0, 1.0],
+            "$intensityCandela": 9000000
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            },
+            "WhiteSphere": {
+                "$type": "SphereVolume",
+                "$material": "WhiteSphere",
+                "$center": [0.0, 45.0, 30.0],
+                "$radius": 45.0
+            },
+            "SmallSphere": {
+                "$type": "SphereVolume",
+                "$material": "WhiteSphere",
+                "$center": [-80.0, 30.0, -40.0],
+                "$radius": 30.0
+            }
+        }
+    }
+}
