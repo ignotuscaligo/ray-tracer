@@ -183,6 +183,9 @@ target_sources(ray-tracer-lib
         include/MicrofacetMaterial.h
         src/MicrofacetMaterial.cpp
 
+        include/DielectricMaterial.h
+        src/DielectricMaterial.cpp
+
         include/ObjReader.h
         src/ObjReader.cpp
 

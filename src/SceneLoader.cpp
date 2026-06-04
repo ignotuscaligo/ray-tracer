@@ -1,6 +1,7 @@
 #include "SceneLoader.h"
 
 #include "AreaLight.h"
+#include "DielectricMaterial.h"
 #include "LambertianMaterial.h"
 #include "MeshVolume.h"
 #include "MicrofacetMaterial.h"
@@ -667,6 +668,17 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
                     roughness = material["$roughness"].get<double>();
                 }
                 scene.materialLibrary->add(std::make_shared<MicrofacetMaterial>(name, color, roughness));
+            }
+            else if (type == "Glass" || type == "Dielectric")
+            {
+                double ior = 1.5;
+                if (material.contains("$ior"))
+                {
+                    ior = material["$ior"].get<double>();
+                }
+                // $color (if present) is the clear-glass tint; default white.
+                Color tint = material.contains("$color") ? color : Color{1.0f, 1.0f, 1.0f};
+                scene.materialLibrary->add(std::make_shared<DielectricMaterial>(name, ior, tint));
             }
             else if (logToStdout)
             {
