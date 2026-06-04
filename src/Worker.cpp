@@ -382,6 +382,28 @@ bool Worker::processPhotons()
         {
             m_hitOverflow.push_back(photonHit);
 
+            std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
+
+            // Wave 4a deposit: append a BounceRecord for every hit on a NON-DELTA
+            // surface (Lambertian diffuse + glossy Microfacet). Pure mirrors /
+            // delta materials are excluded — those become the ray-extension case
+            // in Wave 4c, not a stored deposit. Deposit ALL non-delta hits, not
+            // just bounceable ones: a terminal non-delta hit (at the bounce
+            // threshold) is still a valid sample the later gather will query.
+            // The append is a lock-free atomic fetch-add, so it does not
+            // serialize the workers; if the budget is exhausted it no-ops.
+            if (bounceCloud && material && !material->isDelta())
+            {
+                bounceCloud->append(BounceRecord{
+                    photonHit.hit.position,
+                    photonHit.photon.ray.direction,
+                    photonHit.photon.color,
+                    photonHit.hit.normal,
+                    photonHit.hit.material,
+                    photonHit.photon.time,
+                });
+            }
+
             // Bounce-hits below the threshold also feed the EmitterQueue
             // (daughter path). Terminal hits only contribute via the splat path,
             // so they're excluded from the emitter set. Wave 3: instead of
@@ -391,7 +413,6 @@ bool Worker::processPhotons()
             // materialized lazily in processEmissions, only into reserved space.
             if (photonHit.photon.bounces < m_bounceThreshold)
             {
-                std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
                 const size_t n = material ? material->daughterPhotonCount() : 1;
                 if (n > 0)
                 {

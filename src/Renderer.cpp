@@ -120,6 +120,15 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         }
     }
 
+    // Wave 4a: allocate the persistent deposit cloud before the workers start.
+    // Capacity = photonsPerLight * budgetFactor, clamped to the configured max.
+    // The whole buffer is preallocated so worker appends are a lock-free atomic
+    // fetch-add into a buffer that never reallocates during the pass.
+    const size_t cloudBudget = std::min(
+        settings.bounceCloudMaxRecords,
+        static_cast<size_t>(static_cast<double>(settings.photonsPerLight) * settings.bounceCloudBudgetFactor));
+    std::shared_ptr<BounceCloud> bounceCloud = std::make_shared<BounceCloud>(cloudBudget);
+
     std::vector<std::shared_ptr<Worker>> workers{settings.workerCount};
 
     size_t workerIndex = 0;
@@ -137,6 +146,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->materialLibrary = scene.materialLibrary;
         worker->lightQueue = lightQueue;
         worker->animationQuery = animationQuery;
+        worker->bounceCloud = bounceCloud;
         worker->setBounceThreshold(settings.bounceThreshold);
         ++workerIndex;
     }
@@ -249,6 +259,15 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     result.peakHitQueue = hitQueue->largestAllocated();
     result.peakEmitterQueue = emitterQueue->largestAllocated();
     result.peakFinalQueue = finalHitQueue->largestAllocated();
+
+    // Wave 4a: the photon pass has fully drained and all worker threads are
+    // joined (workers[i]->stop() above), so every deposit append has completed
+    // and is visible here. Build the spatial hash grid over the deposited points
+    // now — single-pass, read-only over the cloud. The cloud + grid are returned
+    // for inspection but do NOT drive the image this wave (the forward splat
+    // above already produced it); Wave 4b swaps the image source to a gather.
+    result.bounceCloud = bounceCloud;
+    result.hashGrid = std::make_shared<HashGrid>(*bounceCloud, settings.hashGridCellSize);
 
     return result;
 }

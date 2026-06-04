@@ -95,6 +95,27 @@ int runRenderTest(int argc, char** argv)
                     result.peakEmitterQueue,
                     result.peakFinalQueue);
 
+        // Wave 4a deposit evidence: how many non-delta bounce hits were stored in
+        // the persistent cloud, the cloud's preallocated footprint, whether the
+        // budget cap was hit (and how many appends were dropped if so), and the
+        // hash-grid stats built over the deposits.
+        if (result.bounceCloud)
+        {
+            const BounceCloud& cloud = *result.bounceCloud;
+            const double mib = static_cast<double>(cloud.memoryBytes()) / (1024.0 * 1024.0);
+            std::printf("bounce-cloud: deposited=%zu capacity=%zu footprint=%.1f MiB "
+                        "budget-hit=%s dropped=%zu\n",
+                        cloud.size(), cloud.capacity(), mib,
+                        cloud.budgetHit() ? "yes" : "no", cloud.droppedCount());
+        }
+        if (result.hashGrid)
+        {
+            std::printf("hash-grid: cells=%zu points=%zu cell-size=%.3f\n",
+                        result.hashGrid->cellCount(),
+                        result.hashGrid->pointCount(),
+                        result.hashGrid->cellSize());
+        }
+
         std::printf("render-test: wrote %s\n", outPath.c_str());
         return 0;
     }

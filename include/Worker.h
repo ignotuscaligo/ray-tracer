@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnimationQuery.h"
+#include "BounceCloud.h"
 #include "Buffer.h"
 #include "Camera.h"
 #include "Emitter.h"
@@ -87,6 +88,14 @@ public:
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
+    // Wave 4a: persistent append-only deposit store. When a photon hits a
+    // NON-DELTA surface (Lambertian / Microfacet — not a pure Mirror), the
+    // worker appends one BounceRecord here in parallel with the existing forward
+    // splat. The deposit is a lock-free atomic fetch-add append, so it does not
+    // serialize the workers. Built/queried only after the pass drains (Wave 4b
+    // gather). May be null — when unset, deposits are skipped and the pipeline
+    // behaves exactly as Wave 3 (the splat is unaffected either way).
+    std::shared_ptr<BounceCloud> bounceCloud;
     // Continuous-time transform oracle (vision doc pillar 1). Default initialization is
     // a StaticAnimationQuery — every transformAt() call returns the scene-load transform
     // regardless of time. Workers currently read object positions through the existing

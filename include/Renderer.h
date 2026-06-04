@@ -1,6 +1,8 @@
 #pragma once
 
+#include "BounceCloud.h"
 #include "Buffer.h"
+#include "HashGrid.h"
 #include "Image.h"
 #include "SceneLoader.h"
 
@@ -27,6 +29,15 @@ struct RenderResult
     size_t peakHitQueue = 0;
     size_t peakEmitterQueue = 0;
     size_t peakFinalQueue = 0;
+
+    // Wave 4a: the persistent deposit cloud built during the photon pass, and the
+    // spatial hash grid built over it after the pass drains. These are populated
+    // but NOT yet used to produce the image — the forward splat still drives the
+    // image this wave (Wave 4b switches the image source to a gather over these).
+    // bounceCloud may hold fewer records than were attempted if the budget was
+    // hit (see bounceCloud->budgetHit()).
+    std::shared_ptr<BounceCloud> bounceCloud;
+    std::shared_ptr<HashGrid> hashGrid;
 };
 
 namespace Renderer
