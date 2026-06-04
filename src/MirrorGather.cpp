@@ -1,5 +1,6 @@
 #include "MirrorGather.h"
 
+#include "DielectricMaterial.h"
 #include "Hit.h"
 #include "Material.h"
 #include "RandomGenerator.h"
@@ -92,6 +93,38 @@ Color reflectedRadiance(const Context& ctx,
         return Color{0.0f, 0.0f, 0.0f};
     }
 
+    // Dielectric (glass): a delta material that splits into TWO branches. Trace
+    // both the reflected and refracted child rays and combine them weighted by
+    // Fresnel R and 1-R. This is the deterministic camera-side split that gives a
+    // clean, noise-free glass image (the photon side picks one lobe stochastically
+    // instead). Each branch recurses through the same extension path until it
+    // reaches a non-delta surface and gathers the grid.
+    if (auto* dielectric = dynamic_cast<DielectricMaterial*>(material.get()))
+    {
+        const DielectricMaterial::Interaction it =
+            DielectricMaterial::resolve(direction, hit->normal, dielectric->ior());
+
+        // Reflected branch. Offset along the oriented (incident-side) normal so
+        // the child ray does not immediately re-hit this surface.
+        const Vector reflectOrigin = hit->position + it.orientedNormal * kReflectionEpsilon;
+        const Color reflectChild = reflectedRadiance(
+            ctx, reflectOrigin, it.reflectDir, depth + 1, castBuffer, generator, outNonDeltaSeen);
+
+        Color result = static_cast<float>(it.reflectance) * reflectChild;
+
+        // Refracted branch (skipped under total internal reflection). Offset along
+        // the transmitted direction (through the surface to the far side).
+        if (!it.totalInternalReflection)
+        {
+            const Vector refractOrigin = hit->position + it.refractDir * kReflectionEpsilon;
+            const Color refractChild = reflectedRadiance(
+                ctx, refractOrigin, it.refractDir, depth + 1, castBuffer, generator, outNonDeltaSeen);
+            result += static_cast<float>(1.0 - it.reflectance) * refractChild;
+        }
+
+        return dielectric->tint() * result;
+    }
+
     if (material->isDelta())
     {
         // Chained mirror: keep extending the reflection.
@@ -159,22 +192,49 @@ void gatherRows(size_t rowBegin,
                 continue;  // direct non-delta pixel — owned by the splat, skip
             }
 
-            // First visible surface is a mirror: extend the reflection and look up
-            // the grid at whatever non-delta surface it reaches.
+            // First visible surface is a delta material (mirror or glass): extend
+            // the camera ray through it and look up the grid at whatever non-delta
+            // surface(s) it reaches.
             ++stats.pixelsDelta;
 
-            const BSDFSample s = material->sample(dir, hit->normal, generator);
-            if (!s.valid)
-            {
-                ++stats.pixelsBlack;
-                continue;
-            }
-            const Vector reflectedDir = Vector::normalized(s.direction);
-            const Vector nextOrigin = hit->position + hit->normal * kReflectionEpsilon;
-
             bool nonDeltaSeen = false;
-            const Color reflected = s.weight * reflectedRadiance(
-                ctx, nextOrigin, reflectedDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+            Color reflected{0.0f, 0.0f, 0.0f};
+
+            if (auto* dielectric = dynamic_cast<DielectricMaterial*>(material.get()))
+            {
+                // Glass: split into reflect + refract branches weighted by Fresnel.
+                const DielectricMaterial::Interaction it =
+                    DielectricMaterial::resolve(dir, hit->normal, dielectric->ior());
+
+                const Vector reflectOrigin = hit->position + it.orientedNormal * kReflectionEpsilon;
+                const Color reflectChild = reflectedRadiance(
+                    ctx, reflectOrigin, it.reflectDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+                reflected = static_cast<float>(it.reflectance) * reflectChild;
+
+                if (!it.totalInternalReflection)
+                {
+                    const Vector refractOrigin = hit->position + it.refractDir * kReflectionEpsilon;
+                    const Color refractChild = reflectedRadiance(
+                        ctx, refractOrigin, it.refractDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+                    reflected += static_cast<float>(1.0 - it.reflectance) * refractChild;
+                }
+
+                reflected = dielectric->tint() * reflected;
+            }
+            else
+            {
+                // Mirror: single perfect-reflection extension.
+                const BSDFSample s = material->sample(dir, hit->normal, generator);
+                if (!s.valid)
+                {
+                    ++stats.pixelsBlack;
+                    continue;
+                }
+                const Vector reflectedDir = Vector::normalized(s.direction);
+                const Vector nextOrigin = hit->position + hit->normal * kReflectionEpsilon;
+                reflected = s.weight * reflectedRadiance(
+                    ctx, nextOrigin, reflectedDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+            }
 
             if (reflected.red == 0.0f && reflected.green == 0.0f && reflected.blue == 0.0f)
             {
