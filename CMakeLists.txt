@@ -221,6 +221,12 @@ target_sources(ray-tracer-lib
 
         include/Renderer.h
         src/Renderer.cpp
+
+        include/BounceCloud.h
+        src/BounceCloud.cpp
+
+        include/HashGrid.h
+        src/HashGrid.cpp
 )
 
 # ===== Executable
