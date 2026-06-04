@@ -1,5 +1,6 @@
 #include "SceneLoader.h"
 
+#include "AreaLight.h"
 #include "LambertianMaterial.h"
 #include "MeshVolume.h"
 #include "MicrofacetMaterial.h"
@@ -380,6 +381,39 @@ public:
         object->angle(angle);
     }
 
+    void setParametersForAreaLight(std::shared_ptr<AreaLight> object, json jsonContainer)
+    {
+        setParametersForLight(object, jsonContainer);
+
+        // Shape selector: "$shape" is "Square" (default) or "Disc".
+        std::string shape = "Square";
+        setFromJsonIfPresent(shape, jsonContainer, "$shape");
+        object->shape(shape == "Disc" ? AreaLight::Shape::Disc : AreaLight::Shape::Square);
+
+        // Square/rectangle extents. "$size" sets both width and height; "$width"
+        // / "$height" override individually for a non-square rectangle.
+        double size = 0.0;
+        setFromJsonIfPresent(size, jsonContainer, "$size");
+        double width = size;
+        double height = size;
+        setFromJsonIfPresent(width, jsonContainer, "$width");
+        setFromJsonIfPresent(height, jsonContainer, "$height");
+        object->width(width);
+        object->height(height);
+
+        // Disc radius.
+        double radius = 0.0;
+        setFromJsonIfPresent(radius, jsonContainer, "$radius");
+        object->radius(radius);
+
+        // Optional direct total-flux override (lumens). When present it replaces
+        // the I*pi convention, making this light energy-comparable to a point
+        // light reporting the same luminousFlux().
+        double luminousFlux = 0.0;
+        setFromJsonIfPresent(luminousFlux, jsonContainer, "$luminousFlux");
+        object->luminousFluxOverride(luminousFlux);
+    }
+
     std::shared_ptr<Object> createObjectFromJson(json jsonContainer)
     {
         std::string type = "Object";
@@ -431,6 +465,12 @@ public:
         {
             std::shared_ptr<SpotLight> object = std::make_shared<SpotLight>();
             setParametersForSpotLight(object, jsonContainer);
+            return object;
+        }
+        else if (type == "AreaLight")
+        {
+            std::shared_ptr<AreaLight> object = std::make_shared<AreaLight>();
+            setParametersForAreaLight(object, jsonContainer);
             return object;
         }
         else

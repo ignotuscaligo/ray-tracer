@@ -204,6 +204,9 @@ target_sources(ray-tracer-lib
         include/ParallelLight.h
         src/ParallelLight.cpp
 
+        include/AreaLight.h
+        src/AreaLight.cpp
+
         include/Library.h
         src/Library.cpp
 

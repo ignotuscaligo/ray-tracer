@@ -39,7 +39,9 @@ public:
     double brightness() const;
 
     // Total emitted luminous flux Phi = I * m_emissionSolidAngle (lumens).
-    double luminousFlux() const;
+    // Virtual so emitters with a direct-flux convention (e.g. AreaLight's
+    // "$luminousFlux" override) can substitute their own Phi.
+    virtual double luminousFlux() const;
 
     virtual void emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const;
 
