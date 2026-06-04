@@ -5,8 +5,8 @@
 // drive the same code path. This file is now a thin CLI wrapper: parse args,
 // load the scene, render each frame, write PNGs, print timing.
 
-#include "Gather.h"
 #include "Image.h"
+#include "MirrorGather.h"
 #include "PngWriter.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
@@ -68,16 +68,14 @@ int main(int argc, char** argv)
             const std::chrono::microseconds renderDuration =
                 std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
 
-            // Gather diagnostics for the primary camera. Surfaces the camera-ray
-            // hit/delta/miss classification so seam/edge "miss" pixels are visible
-            // from the CLI (previously only printed by the editor's render-test).
-            const Gather::GatherResult& g = render.gather;
-            std::cout << "Gather: hit=" << g.pixelsHit
-                      << " gathered=" << g.pixelsGathered
-                      << " delta-black=" << g.pixelsDelta
-                      << " miss=" << g.pixelsMiss
-                      << " max-radius=" << g.maxGatherRadius
-                      << " mean-deposits/gather=" << g.meanDepositsPerGather
+            // Storage pivot: mirror-gather diagnostics for the primary camera. The
+            // direct image comes from the forward splat; reflections come from the
+            // density grid. Reports how many delta (mirror) pixels reflected the
+            // grid vs stayed black.
+            const MirrorGather::Result& m = render.mirror;
+            std::cout << "Mirror: delta-pixels=" << m.pixelsDelta
+                      << " reflected=" << m.pixelsReflected
+                      << " black=" << m.pixelsBlack
                       << std::endl;
 
             std::string fileName = scene.renderName + "." + std::to_string(frame) + ".png";

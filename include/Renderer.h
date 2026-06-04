@@ -1,10 +1,9 @@
 #pragma once
 
-#include "BounceCloud.h"
 #include "Buffer.h"
-#include "Gather.h"
-#include "HashGrid.h"
+#include "DensityGrid.h"
 #include "Image.h"
+#include "MirrorGather.h"
 #include "SceneLoader.h"
 
 #include <functional>
@@ -19,12 +18,16 @@ struct CameraRender
 {
     std::shared_ptr<Camera> camera;  // the camera that produced this image
     std::string outputName;          // base name for the PNG (may be empty)
-    std::shared_ptr<Buffer> buffer;  // physical-luminance gather buffer (1/N normalized)
+    std::shared_ptr<Buffer> buffer;  // composited splat + mirror-gather buffer (1/N normalized)
     std::shared_ptr<Image> image;    // tonemapped 16-bit image for this camera
-    Gather::GatherResult gather;     // gather diagnostics for this camera
 
-    // Wall-clock time this camera's gather took (Milestone 2 timing). The shared
-    // photon pass time is reported once at the RenderResult level.
+    // Storage pivot: mirror-gather diagnostics for this camera (how many delta
+    // pixels reflected the grid vs stayed black).
+    MirrorGather::Result mirror;
+
+    // Wall-clock time this camera's mirror gather took. The shared photon pass
+    // time (which now includes the direct splat) is reported once at the
+    // RenderResult level.
     double gatherSeconds = 0.0;
     // Mean luminance over the gather buffer (pre-exposure), for the brightness-
     // stability sanity check as the per-pixel footprint shrinks with resolution.
@@ -62,22 +65,15 @@ struct RenderResult
     size_t peakEmitterQueue = 0;
     size_t peakFinalQueue = 0;
 
-    // Wave 4a: the persistent deposit cloud built during the photon pass, and the
-    // spatial hash grid built over it after the pass drains. These are populated
-    // but NOT yet used to produce the image — the forward splat still drives the
-    // image this wave (Wave 4b switches the image source to a gather over these).
-    // bounceCloud may hold fewer records than were attempted if the budget was
-    // hit (see bounceCloud->budgetHit()).
-    std::shared_ptr<BounceCloud> bounceCloud;
-    std::shared_ptr<HashGrid> hashGrid;
+    // Storage pivot: the QUANTIZED DENSITY GRID built during the photon pass. This
+    // is the compact reflection store that replaces the per-photon BounceCloud +
+    // HashGrid. Memory is bounded by occupied cells (grid->cellCount()), not photon
+    // count — the headline memory win. The direct image comes from the forward
+    // splat (no per-photon storage); mirror reflections come from this grid.
+    std::shared_ptr<DensityGrid> densityGrid;
 
-    // Wave 4b: diagnostics from the gather pass that produced the image (the
-    // forward splat is removed; the gather is the sole image source). Reports how
-    // many camera pixels found a visible surface, how many gathered >= 1 deposit,
-    // how many were left black because the visible surface is a delta/specular
-    // material (Wave 4c will ray-extend those), how many camera rays missed all
-    // geometry, plus the max footprint radius and mean deposits per gathered pixel.
-    Gather::GatherResult gather;
+    // Storage pivot: mirror-gather diagnostics for the PRIMARY camera.
+    MirrorGather::Result mirror;
 };
 
 namespace Renderer

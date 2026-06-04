@@ -1,8 +1,8 @@
 #pragma once
 
 #include "AnimationQuery.h"
-#include "BounceCloud.h"
 #include "Buffer.h"
+#include "DensityGrid.h"
 #include "Camera.h"
 #include "Emitter.h"
 #include "EmitterQueue.h"
@@ -111,14 +111,12 @@ public:
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<Image> image;
-    // Wave 4a: persistent append-only deposit store. When a photon hits a
-    // NON-DELTA surface (Lambertian / Microfacet — not a pure Mirror), the
-    // worker appends one BounceRecord here in parallel with the existing forward
-    // splat. The deposit is a lock-free atomic fetch-add append, so it does not
-    // serialize the workers. Built/queried only after the pass drains (Wave 4b
-    // gather). May be null — when unset, deposits are skipped and the pipeline
-    // behaves exactly as Wave 3 (the splat is unaffected either way).
-    std::shared_ptr<BounceCloud> bounceCloud;
+    // Storage pivot: the QUANTIZED DENSITY GRID. Each non-delta photon bounce is
+    // accumulated into the grid CELL it lands in (add(position, power)) instead of
+    // stored as a per-photon record. Bounded by occupied cells, not photon count.
+    // The mirror gather looks this up at reflected surface points after the pass.
+    // May be null (then grid accumulation is skipped).
+    std::shared_ptr<DensityGrid> densityGrid;
     // Continuous-time transform oracle (vision doc pillar 1). Default initialization is
     // a StaticAnimationQuery — every transformAt() call returns the scene-load transform
     // regardless of time. Workers currently read object positions through the existing
@@ -158,6 +156,24 @@ private:
     // N = photonsPerLight. Summed over all photons landing in a pixel's footprint
     // this equals the gather's invN/(pi r^2) * sum(BRDF*power) estimate.
     void splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material);
+
+public:
+    // Storage pivot M3 (multi-camera): a camera the splat targets, paired with the
+    // buffer it accumulates into and that camera's debug-deposit filters. The
+    // worker splats every camera-visible non-delta bounce into EVERY target whose
+    // frustum/filters admit it, so multi-camera and debug cameras (bounce/light
+    // filters) keep working under the splat model — each camera's direct image is
+    // produced in the photon pass instead of by a per-photon gather.
+    struct SplatTarget
+    {
+        std::shared_ptr<Camera> camera;
+        std::shared_ptr<Buffer> buffer;
+        int bounceFilter = -1;  // -1 = admit all bounce depths
+        int lightFilter = -1;   // -1 = admit all light ids
+    };
+    void setSplatTargets(const std::vector<SplatTarget>& targets);
+
+private:
     // Wave 4b: processHits (camera-visibility) and processFinalHits (the splat
     // sink) were removed with the forward splat. The image is now produced by the
     // gather over the deposit cloud (src/Gather.cpp), run after the photon pass.
@@ -216,6 +232,10 @@ private:
     // Storage pivot M2: photons-per-light N for the direct splat's 1/N divide.
     // 0 disables the splat (no normalization possible).
     double m_photonsPerLight = 0.0;
+
+    // Storage pivot M3: the cameras + buffers the splat accumulates into (one per
+    // scene camera). Set by the Renderer before the worker starts.
+    std::vector<SplatTarget> m_splatTargets;
 
     // Resolve the daughter count for a bounceable hit, applying the override /
     // scale config on top of the material's native daughterPhotonCount().

@@ -102,25 +102,22 @@ int runRenderTest(int argc, char** argv)
                     result.peakEmitterQueue,
                     result.peakFinalQueue);
 
-        // Wave 4a deposit evidence: how many non-delta bounce hits were stored in
-        // the persistent cloud, the cloud's preallocated footprint, whether the
-        // budget cap was hit (and how many appends were dropped if so), and the
-        // hash-grid stats built over the deposits.
-        if (result.bounceCloud)
+        // Storage pivot: the QUANTIZED DENSITY GRID replaces the per-photon cloud.
+        // Report occupied cells (the memory driver), total deposits accumulated,
+        // cell size, and the resident footprint estimate. The headline win is this
+        // footprint vs the old per-photon cloud (90M records ~ 15.6 GiB) for the
+        // same scene/photon count — the grid is bounded by occupied cells, so a
+        // bright spot where millions of photons land costs a single cell.
+        if (result.densityGrid)
         {
-            const BounceCloud& cloud = *result.bounceCloud;
-            const double mib = static_cast<double>(cloud.memoryBytes()) / (1024.0 * 1024.0);
-            std::printf("bounce-cloud: deposited=%zu capacity=%zu footprint=%.1f MiB "
-                        "budget-hit=%s dropped=%zu\n",
-                        cloud.size(), cloud.capacity(), mib,
-                        cloud.budgetHit() ? "yes" : "no", cloud.droppedCount());
-        }
-        if (result.hashGrid)
-        {
-            std::printf("hash-grid: cells=%zu points=%zu cell-size=%.3f\n",
-                        result.hashGrid->cellCount(),
-                        result.hashGrid->pointCount(),
-                        result.hashGrid->cellSize());
+            const DensityGrid& grid = *result.densityGrid;
+            const std::size_t cells = grid.cellCount();
+            const std::uint64_t deposits = grid.depositCount();
+            const double mib = static_cast<double>(grid.memoryBytes()) / (1024.0 * 1024.0);
+            std::printf("density-grid: cells=%zu deposits=%llu cell-size=%.3f "
+                        "footprint=%.3f MiB\n",
+                        cells, static_cast<unsigned long long>(deposits),
+                        grid.cellSize(), mib);
         }
 
         std::printf("photon-pass: %.2f s (shared across %zu camera(s))\n",
@@ -147,7 +144,6 @@ int runRenderTest(int argc, char** argv)
         for (size_t i = 0; i < result.cameras.size(); ++i)
         {
             const CameraRender& cr = result.cameras[i];
-            const Gather::GatherResult& g = cr.gather;
 
             std::string name = cr.outputName;
             if (name.empty())
@@ -172,13 +168,11 @@ int runRenderTest(int argc, char** argv)
 
             std::printf(
                 "camera[%zu] name=%s res=%zux%zu bounceFilter=%d lightFilter=%d "
-                "gather-time=%.3f s mean-luminance=%.4f\n",
+                "mirror-gather-time=%.3f s mean-luminance=%.4f\n",
                 i, name.c_str(), w, h, bf, lf, cr.gatherSeconds, cr.meanLuminance);
             std::printf(
-                "  gather: hit=%zu gathered=%zu delta-black=%zu miss=%zu "
-                "max-radius=%.3f mean-deposits/gather=%.1f max-radiance=%.2f\n",
-                g.pixelsHit, g.pixelsGathered, g.pixelsDelta, g.pixelsMiss,
-                g.maxGatherRadius, g.meanDepositsPerGather, g.maxRadiance);
+                "  mirror: delta-pixels=%zu reflected=%zu black=%zu\n",
+                cr.mirror.pixelsDelta, cr.mirror.pixelsReflected, cr.mirror.pixelsBlack);
 
             if (cr.image)
             {

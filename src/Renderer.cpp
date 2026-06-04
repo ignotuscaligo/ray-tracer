@@ -2,8 +2,9 @@
 
 #include "AnimationQuery.h"
 #include "Color.h"
+#include "DensityGrid.h"
 #include "EmitterQueue.h"
-#include "Gather.h"
+#include "MirrorGather.h"
 #include "LightQueue.h"
 #include "Light.h"
 #include "Photon.h"
@@ -106,14 +107,80 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         }
     }
 
-    // Wave 4a: allocate the persistent deposit cloud before the workers start.
-    // Capacity = photonsPerLight * budgetFactor, clamped to the configured max.
-    // The whole buffer is preallocated so worker appends are a lock-free atomic
-    // fetch-add into a buffer that never reallocates during the pass.
-    const size_t cloudBudget = std::min(
-        settings.bounceCloudMaxRecords,
-        static_cast<size_t>(static_cast<double>(settings.photonsPerLight) * settings.bounceCloudBudgetFactor));
-    std::shared_ptr<BounceCloud> bounceCloud = std::make_shared<BounceCloud>(cloudBudget);
+    // Storage pivot: the per-photon BounceCloud + HashGrid are GONE. The direct
+    // image now comes from the forward SPLAT (no per-photon storage) and mirror
+    // reflections from a compact QUANTIZED DENSITY GRID accumulated during the
+    // pass. Storage is bounded by occupied grid cells, not photon count.
+
+    // Resolve the scene cameras up front (declaration order) so each gets its own
+    // splat buffer the workers accumulate into during the photon pass. A single-
+    // camera scene loops once; the primary is cameras[0]. Fall back to the
+    // back-compat scene.camera handle.
+    std::vector<std::shared_ptr<Camera>> cameras = scene.cameras;
+    if (cameras.empty() && scene.camera)
+    {
+        cameras.push_back(scene.camera);
+    }
+
+    // One splat buffer per camera, at that camera's own resolution. The workers
+    // splat every camera-visible non-delta bounce into each camera's buffer
+    // (applying that camera's debug bounce/light filter). The mirror gather later
+    // composites reflected radiance into the same buffers.
+    std::vector<std::shared_ptr<Buffer>> splatBuffers;
+    std::vector<Worker::SplatTarget> splatTargets;
+    splatBuffers.reserve(cameras.size());
+    splatTargets.reserve(cameras.size());
+    for (const auto& cam : cameras)
+    {
+        if (!cam)
+        {
+            continue;
+        }
+        auto camBuffer = std::make_shared<Buffer>(cam->width(), cam->height());
+        camBuffer->clear();
+        splatBuffers.push_back(camBuffer);
+        splatTargets.push_back(Worker::SplatTarget{
+            cam, camBuffer, cam->bounceFilter(), cam->lightFilter()});
+    }
+
+    // Density grid cell size: tied to the gather footprint scale (the world-space
+    // size a pixel projects to at scene depth), NOT microscopic — a microscopic
+    // cell defeats the compression. Computed below from the primary camera; the
+    // configured hashGridCellSize is the fallback. The same scale that sized the
+    // old hash grid sizes the cells here.
+    double cellSize = settings.hashGridCellSize;
+    {
+        const std::shared_ptr<Camera>& primaryCam =
+            cameras.empty() ? scene.camera : cameras.front();
+        if (primaryCam && settings.imageHeight > 0)
+        {
+            Vector centroid{0.0, 0.0, 0.0};
+            size_t volumeCount = 0;
+            for (const auto& object : scene.objects)
+            {
+                if (object->hasType<Volume>())
+                {
+                    centroid = centroid + object->position();
+                    ++volumeCount;
+                }
+            }
+            if (volumeCount > 0)
+            {
+                centroid = centroid / static_cast<double>(volumeCount);
+                const double depth = (centroid - primaryCam->position()).magnitude();
+                const double pixelHalfAngle =
+                    0.5 * Utility::radians(primaryCam->verticalFieldOfView()) /
+                    static_cast<double>(primaryCam->height() > 0 ? primaryCam->height()
+                                                                 : settings.imageHeight);
+                const double representativeRadius = depth * std::tan(pixelHalfAngle);
+                if (representativeRadius > 0.0)
+                {
+                    cellSize = representativeRadius;
+                }
+            }
+        }
+    }
+    std::shared_ptr<DensityGrid> densityGrid = std::make_shared<DensityGrid>(cellSize);
 
     std::vector<std::shared_ptr<Worker>> workers{settings.workerCount};
 
@@ -132,7 +199,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->materialLibrary = scene.materialLibrary;
         worker->lightQueue = lightQueue;
         worker->animationQuery = animationQuery;
-        worker->bounceCloud = bounceCloud;
+        worker->densityGrid = densityGrid;
         worker->setBounceThreshold(settings.bounceThreshold);
         worker->setRussianRoulette(Worker::RussianRouletteConfig{
             settings.russianRoulette,
@@ -142,6 +209,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         });
         worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
+        worker->setSplatTargets(splatTargets);
         ++workerIndex;
     }
 
@@ -241,13 +309,11 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     // this).
     (void)aborted;
 
-    // Wave 4b: the forward splat is GONE — `buffer` (the camera-as-accumulator
-    // sink the workers used to splat into) is no longer the image source and is
-    // not tonemapped here. The photon pass still ran, but only to fill the cloud.
-    // The image is produced by the gather below. We keep the exposure parameters
-    // for that tonemap.
+    // Storage pivot: the photon pass produced the DIRECT image via the forward
+    // SPLAT (into each camera's splat buffer — no per-photon storage) and filled
+    // the compact DENSITY GRID with non-delta bounce energy for reflections. We
+    // keep exposure parameters for the per-camera tonemap.
     const double photonsEmitted = static_cast<double>(settings.photonsPerLight);
-    const double saturationLuminance = scene.camera ? scene.camera->saturationLuminance() : 0.0;
 
     // Wave 3 memory evidence: high-water-mark occupancy of each queue.
     result.peakPhotonQueue = photonQueue->largestAllocated();
@@ -255,128 +321,64 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     result.peakEmitterQueue = emitterQueue->largestAllocated();
     result.peakFinalQueue = finalHitQueue->largestAllocated();
 
-    // Wave 4a/4b: the photon pass has fully drained and all worker threads are
-    // joined (workers[i]->stop() above), so every deposit append has completed
-    // and is visible here. Build the spatial hash grid over the deposited points,
-    // then run the GATHER pass — which is now the SOLE image source (the forward
-    // splat is removed from the Worker pipeline).
-    result.bounceCloud = bounceCloud;
+    // The compact reflection store (bounded by occupied cells, not photon count).
+    result.densityGrid = densityGrid;
 
-    // Hash-grid cell size: a radiusSearch(p, r) should touch roughly a 3x3x3
-    // neighborhood, i.e. cellSize ~= the typical gather radius. The gather radius
-    // r = depth * tan(pixelHalfAngle) varies per pixel (depth-dependent), so we
-    // pick a REPRESENTATIVE radius: the camera-to-scene-center depth times the
-    // pixel half-angle. Scene center is the centroid of the scene Volumes; depth
-    // is its distance from the camera. This scales correctly with resolution
-    // (finer pixels -> smaller cells) and roughly tracks the per-pixel radius for
-    // the bulk of the frame. Pixels closer than the centroid query a sub-cell
-    // radius (touch ~1 cell — still correct, just fewer candidates); pixels deeper
-    // query a slightly-larger-than-cell radius (touch ~3x3x3). Falls back to the
-    // configured hashGridCellSize when the scene has no resolvable depth.
-    double cellSize = settings.hashGridCellSize;
-    if (scene.camera && settings.imageHeight > 0)
-    {
-        Vector centroid{0.0, 0.0, 0.0};
-        size_t volumeCount = 0;
-        for (const auto& object : scene.objects)
-        {
-            if (object->hasType<Volume>())
-            {
-                const Vector p = object->position();
-                centroid = centroid + p;
-                ++volumeCount;
-            }
-        }
-        if (volumeCount > 0)
-        {
-            centroid = centroid / static_cast<double>(volumeCount);
-            const double depth = (centroid - scene.camera->position()).magnitude();
-            const double pixelHalfAngle =
-                0.5 * Utility::radians(scene.camera->verticalFieldOfView()) /
-                static_cast<double>(settings.imageHeight);
-            const double representativeRadius = depth * std::tan(pixelHalfAngle);
-            if (representativeRadius > 0.0)
-            {
-                cellSize = representativeRadius;
-            }
-        }
-    }
-
-    result.hashGrid = std::make_shared<HashGrid>(*bounceCloud, cellSize);
-
-    // The shared photon pass + cloud + grid build is now complete. Everything below
-    // is per-camera gather work (amortized across cameras), so freeze the shared
-    // time here.
+    // The shared photon pass (emit + splat + grid fill) is complete. Everything
+    // below is per-camera mirror-gather work, so freeze the shared time here.
     const std::chrono::time_point photonPassEnd = std::chrono::system_clock::now();
     result.photonPassSeconds =
         std::chrono::duration<double>(photonPassEnd - photonPassStart).count();
 
-    // Wave 6 MULTI-CAMERA: the photon pass / bounce cloud / hash grid above are a
-    // SINGLE shared lighting solve. Now run the GATHER once per camera — each camera
-    // produces its own image at its own resolution/exposure (and, for debug cameras,
-    // its own deposit filter). A single-camera scene loops exactly once, matching the
-    // Wave 4b/4c behaviour. Fall back to the primary camera if the scene only set the
-    // back-compat `scene.camera` handle.
-    std::vector<std::shared_ptr<Camera>> cameras = scene.cameras;
-    if (cameras.empty() && scene.camera)
-    {
-        cameras.push_back(scene.camera);
-    }
-
     result.cameras.reserve(cameras.size());
 
-    // Storage pivot: the DIRECT image now comes from the worker SPLAT buffer
-    // (sharp camera-visible non-delta surfaces), not the gather. The splat wrote
-    // into the shared `buffer`, which is projected through the PRIMARY camera
-    // (scene.camera) at the global render resolution. The primary camera composites
-    // splat (direct) + mirror gather (delta pixels). Secondary/debug cameras keep
-    // the gather path unchanged (their own projection has no splat buffer).
-    std::shared_ptr<Buffer> splatBuffer = buffer;
-
-    for (size_t ci = 0; ci < cameras.size(); ++ci)
+    // MULTI-CAMERA: the photon pass / splat / grid above are a SINGLE shared solve.
+    // Each camera already has its own splat buffer (direct image). Now composite
+    // the MIRROR GATHER into that buffer's black delta pixels — reflected radiance
+    // looked up from the shared density grid — and tonemap into the camera image.
+    size_t splatIndex = 0;
+    for (const auto& cam : cameras)
     {
-        const auto& cam = cameras[ci];
         if (!cam)
         {
             continue;
         }
 
-        const bool isPrimary = (ci == 0);
-        const bool splatApplies =
-            isPrimary && splatBuffer &&
-            cam->width() == settings.imageWidth && cam->height() == settings.imageHeight;
+        std::shared_ptr<Buffer> imageBuffer =
+            (splatIndex < splatBuffers.size()) ? splatBuffers[splatIndex] : nullptr;
+        ++splatIndex;
 
         CameraRender cr;
         cr.camera = cam;
         cr.outputName = cam->outputName();
 
-        const Gather::GatherFilters filters{cam->bounceFilter(), cam->lightFilter()};
+        // Mirror gather: fill the delta (mirror) pixels by reflecting the camera
+        // ray through specular surfaces and looking up the density grid at the
+        // first non-delta point. Composites directly into the splat buffer (only
+        // touches currently-black delta pixels). Skipped for debug cameras with a
+        // bounce/light filter — those isolate direct deposits, not reflections.
+        const bool debugCamera = (cam->bounceFilter() >= 0) || (cam->lightFilter() >= 0);
 
         const std::chrono::time_point gatherStart = std::chrono::system_clock::now();
-        Gather::GatherResult gather = Gather::run(
-            scene.objects,
-            cam,
-            *bounceCloud,
-            *result.hashGrid,
-            *scene.materialLibrary,
-            animationQuery.get(),
-            static_cast<double>(settings.photonsPerLight),
-            settings.workerCount,
-            filters);
+        if (imageBuffer && !debugCamera)
+        {
+            cr.mirror = MirrorGather::run(
+                scene.objects,
+                cam,
+                *densityGrid,
+                *scene.materialLibrary,
+                animationQuery.get(),
+                static_cast<double>(settings.photonsPerLight),
+                settings.workerCount,
+                *imageBuffer);
+        }
         const std::chrono::time_point gatherEnd = std::chrono::system_clock::now();
 
         cr.gatherSeconds = std::chrono::duration<double>(gatherEnd - gatherStart).count();
-        cr.gather = gather;
-
-        // The image source: for the primary camera, the splat buffer (direct,
-        // sharp). For others, the gather buffer (unchanged). M3 will composite the
-        // mirror-reflection gather into the splat's delta pixels; for M2 the splat
-        // buffer alone drives the primary image so its sharpness can be verified.
-        std::shared_ptr<Buffer> imageBuffer = splatApplies ? splatBuffer : gather.buffer;
         cr.buffer = imageBuffer;
 
-        // Tonemap the chosen buffer through THIS camera's exposure into a fresh
-        // image at the camera's own resolution.
+        // Tonemap the composited buffer (direct splat + mirror reflections) through
+        // THIS camera's exposure into a fresh image at the camera's resolution.
         cr.image = std::make_shared<Image>(cam->width(), cam->height());
         cr.image->clear();
         if (imageBuffer)
@@ -384,9 +386,6 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
             tonemapBufferToImage(*imageBuffer, *cr.image, photonsEmitted,
                                  cam->saturationLuminance());
 
-            // Mean pre-exposure luminance over the buffer — brightness-stability
-            // check (should be ~constant across resolutions as the per-pixel
-            // footprint shrinks, validating the 1/(pi r^2) normalization).
             double sum = 0.0;
             const size_t w = cam->width();
             const size_t h = cam->height();
@@ -405,12 +404,12 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         result.cameras.push_back(std::move(cr));
     }
 
-    // Back-compat: surface the PRIMARY (first) camera's gather/buffer/image on the
-    // top-level RenderResult fields existing callers (editor, single-cam CLI) read.
+    // Back-compat: surface the PRIMARY (first) camera's buffer/image + mirror
+    // diagnostics on the top-level RenderResult fields existing callers read.
     if (!result.cameras.empty())
     {
         const CameraRender& primary = result.cameras.front();
-        result.gather = primary.gather;
+        result.mirror = primary.mirror;
         if (primary.buffer)
         {
             result.buffer = primary.buffer;
