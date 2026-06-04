@@ -306,8 +306,14 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
         }
         const Vector toCameraDir = toCamera / cameraDistance;
 
-        // Facing check: the surface must face this camera.
-        if (Vector::dot(toCameraDir, photonHit.hit.normal) <= 0.0)
+        // Facing check: the surface must face this camera. The same dot product is the
+        // foreshortening cosine between the surface normal and the camera direction —
+        // it must scale the splat contribution (see below). Without it, grazing hits
+        // at a sphere's silhouette deposit full energy into the thin rim band they
+        // project onto, producing a bright over-exposed rim. cos(theta) -> 0 at the
+        // grazing edge foreshortens that energy to near-zero, which is correct.
+        const double cosCamera = Vector::dot(toCameraDir, photonHit.hit.normal);
+        if (cosCamera <= 0.0)
         {
             continue;
         }
@@ -335,10 +341,11 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
             continue;  // occluded
         }
 
-        // Outgoing radiance toward the camera: BRDF(wi -> wo) * power, normalized by
-        // the photon count (1/N) and the pixel's world-space footprint area (pi r^2)
-        // so the buffer holds physical luminance the existing tonemap consumes
-        // unchanged. r is the footprint radius at the hit depth.
+        // Outgoing radiance toward the camera: BRDF(wi -> wo) * cos(theta) * power,
+        // normalized by the photon count (1/N) and the pixel's world-space footprint
+        // area (pi r^2) so the buffer holds physical luminance the existing tonemap
+        // consumes unchanged. cos(theta) = dot(normal, toCameraDir) is the foreshortening
+        // term (captured above as cosCamera). r is the footprint radius at the hit depth.
         const double pixelHalfAngle =
             0.5 * Utility::radians(cam->verticalFieldOfView()) /
             static_cast<double>(imageHeight);
@@ -351,7 +358,7 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
         const Color brdf = material->evaluate(wi, toCameraDir, photonHit.hit.normal);
 
         const double area = Utility::pi * r * r;
-        const float scale = static_cast<float>(invN / area);
+        const float scale = static_cast<float>(invN * cosCamera / area);
         const Color contribution = brdf * photonHit.photon.color * scale;
 
         if (contribution.brightness() <= 0.0f)
