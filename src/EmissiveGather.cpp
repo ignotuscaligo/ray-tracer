@@ -23,6 +23,22 @@ namespace
 
 constexpr double kSelfHitThreshold = std::numeric_limits<double>::epsilon();
 
+// Coincidence margin for the occlusion test (see gatherRows). A scene Volume is
+// treated as occluding the emitter only if it lies NEARER than the emitter by
+// more than this RELATIVE fraction of the emitter distance. Geometry that is
+// coplanar/coincident with the emitter (e.g. a ceiling mesh in the emitter's
+// own plane) is hit at t ~= bestT and so falls inside the margin: it does not
+// count as an occluder and cannot z-fight the panel dark.
+//
+// The margin is RELATIVE (a fraction of bestT) rather than an absolute world
+// distance, so it scales with scene/camera geometry automatically — no magic
+// absolute number to retune per scene. 1e-3 (0.1% of the emitter distance) is
+// far larger than the floating-point noise that drives the z-fight (~1e-12 of
+// bestT here) yet far smaller than the gap to any genuinely-occluding surface
+// (the Cornell sphere/walls sit at well under half the emitter distance, i.e.
+// hundreds of times outside this margin), so real occlusion is unaffected.
+constexpr double kOcclusionCoincidenceMargin = 1e-3;
+
 // A planar emissive patch resolved from an emitter: its plane, in-plane extent,
 // and the constant outgoing radiance it shows toward any viewer.
 struct EmissivePatch
@@ -187,8 +203,18 @@ void gatherRows(size_t rowBegin,
             }
 
             // Occlusion: a Volume nearer than the emitter hides the fixture.
+            //
+            // The emitter at y=300 is coplanar with the Cornell ceiling mesh, so
+            // a naive `occluder < bestT` z-fights: per-pixel floating-point noise
+            // makes the coincident ceiling resolve nearer than the emitter ~42%
+            // of the time, dropping those panel pixels to black (salt-and-pepper
+            // speckle). Require the occluder to be nearer by more than a small
+            // RELATIVE margin of the emitter distance, so coincident/coplanar
+            // geometry (hit at t ~= bestT) is not treated as an occluder. Genuine
+            // occluders (walls, the blocker sphere) sit far inside bestT and still
+            // block. Tied to bestT, the threshold scales with scene geometry.
             const double occluder = nearestOccluder(objects, ray, castBuffer, animation);
-            if (occluder < bestT)
+            if (occluder < bestT * (1.0 - kOcclusionCoincidenceMargin))
             {
                 continue;
             }
