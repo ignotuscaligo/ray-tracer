@@ -5,6 +5,7 @@
 // drive the same code path. This file is now a thin CLI wrapper: parse args,
 // load the scene, render each frame, write PNGs, print timing.
 
+#include "Gather.h"
 #include "Image.h"
 #include "PngWriter.h"
 #include "Renderer.h"
@@ -66,6 +67,18 @@ int main(int argc, char** argv)
             const std::chrono::time_point renderEnd = std::chrono::system_clock::now();
             const std::chrono::microseconds renderDuration =
                 std::chrono::duration_cast<std::chrono::microseconds>(renderEnd - renderStart);
+
+            // Gather diagnostics for the primary camera. Surfaces the camera-ray
+            // hit/delta/miss classification so seam/edge "miss" pixels are visible
+            // from the CLI (previously only printed by the editor's render-test).
+            const Gather::GatherResult& g = render.gather;
+            std::cout << "Gather: hit=" << g.pixelsHit
+                      << " gathered=" << g.pixelsGathered
+                      << " delta-black=" << g.pixelsDelta
+                      << " miss=" << g.pixelsMiss
+                      << " max-radius=" << g.maxGatherRadius
+                      << " mean-deposits/gather=" << g.meanDepositsPerGather
+                      << std::endl;
 
             std::string fileName = scene.renderName + "." + std::to_string(frame) + ".png";
             std::filesystem::path outputPath = scene.renderPath / fileName;
