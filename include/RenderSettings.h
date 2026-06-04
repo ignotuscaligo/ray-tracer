@@ -119,4 +119,21 @@ struct RenderSettings
     // full footprint); only hits closer than half the scene depth — where the
     // explosion happens — are floored. Set to 0 to disable (legacy behavior).
     double splatMinRadiusScale = 0.5;
+
+    // ===== Optional per-splat luminance clamp (extreme-firefly guard) =====
+    // A GENEROUS upper bound on the luminance a SINGLE camera splat may add to a
+    // pixel. The minimum-radius floor above only bounds the geometric 1/(pi r^2)
+    // blowup; it cannot touch a firefly whose energy comes from a degenerate
+    // light-transport path (e.g. a collinear point-light / sphere-top / camera
+    // alignment that produces a 2-pixel over-bright dot with a normal footprint
+    // and photon-count-invariant energy). This clamp catches those by scaling a
+    // splat's contribution down so its luminance never exceeds the threshold,
+    // preserving hue (all channels scaled by the same factor).
+    //
+    // Default 0 = DISABLED (no clamp, image bit-for-bit unchanged). When set, it
+    // is meant to be set HIGH — far above any legitimate single-splat luminance —
+    // so it only trims extreme outliers and its energy loss is negligible. It
+    // does NOT darken or alter the normal image: a normal splat's luminance is
+    // orders of magnitude below a sane threshold and passes through untouched.
+    double splatLuminanceClamp = 0.0;
 };

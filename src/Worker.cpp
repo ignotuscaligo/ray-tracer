@@ -30,6 +30,9 @@ std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
 // count on a scene with close-to-camera geometry is the fix doing its job.
 std::atomic<size_t> g_splatTotal{0};
 std::atomic<size_t> g_splatRadiusClamped{0};
+// Optional luminance-clamp guard: splats whose contributed luminance exceeded
+// the per-splat clamp and were scaled down. Stays 0 when the clamp is disabled.
+std::atomic<size_t> g_splatLuminanceClamped{0};
 
 // Drop counters. Every site where the forward photon pipeline discards work
 // because a destination WorkQueue was full increments one of these by the
@@ -67,10 +70,12 @@ void resetDeltaHitCounters()
 
 size_t splatTotal() { return g_splatTotal.load(); }
 size_t splatRadiusClamped() { return g_splatRadiusClamped.load(); }
+size_t splatLuminanceClamped() { return g_splatLuminanceClamped.load(); }
 void resetSplatCounters()
 {
     g_splatTotal.store(0);
     g_splatRadiusClamped.store(0);
+    g_splatLuminanceClamped.store(0);
 }
 
 size_t droppedEmitting() { return g_droppedEmitting.load(); }
@@ -252,6 +257,11 @@ void Worker::setMinSplatRadius(double minSplatRadius)
     m_minSplatRadius = std::max(0.0, minSplatRadius);
 }
 
+void Worker::setSplatLuminanceClamp(double clamp)
+{
+    m_splatLuminanceClamp = std::max(0.0, clamp);
+}
+
 void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material)
 {
     // M2/M3 direct camera splat. Project the non-delta hit into each target
@@ -409,7 +419,28 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
             continue;
         }
 
-        target.buffer->addColor(coord, contribution);
+        // Optional extreme-firefly guard. The radius floor above only bounds the
+        // geometric 1/(pi r^2) blowup; a firefly whose energy comes from a
+        // degenerate transport path (normal footprint, photon-count-invariant —
+        // e.g. the collinear point-light/sphere-top/camera dot) slips past it.
+        // If a (generous, high) clamp is set, scale any splat whose brightness
+        // exceeds it down to the clamp, preserving hue (uniform channel scale).
+        // Disabled by default (m_splatLuminanceClamp <= 0): no scaling, image
+        // unchanged. Set high enough that only pathological outliers are touched.
+        Color clamped = contribution;
+        if (m_splatLuminanceClamp > 0.0)
+        {
+            const double brightness = static_cast<double>(contribution.brightness());
+            if (brightness > m_splatLuminanceClamp)
+            {
+                const float factor =
+                    static_cast<float>(m_splatLuminanceClamp / brightness);
+                clamped = contribution * factor;
+                g_splatLuminanceClamped.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        target.buffer->addColor(coord, clamped);
     }
 }
 

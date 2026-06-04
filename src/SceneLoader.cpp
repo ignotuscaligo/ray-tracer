@@ -594,6 +594,12 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         // 0.5; 0 disables.
         setFromJsonIfPresent(settings.splatMinRadiusScale, renderConfiguration, "$splatMinRadiusScale", logToStdout);
 
+        // Optional extreme-firefly guard: a generous upper bound on a single
+        // splat's contributed luminance. Default 0 disables it (image unchanged).
+        // Set high so it only trims pathological outliers (e.g. the collinear
+        // point-light/sphere-top/camera dot) without altering the normal image.
+        setFromJsonIfPresent(settings.splatLuminanceClamp, renderConfiguration, "$splatLuminanceClamp", logToStdout);
+
         if (renderConfiguration.contains("$renderPath"))
         {
             scene.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), absoluteScenePath.parent_path());

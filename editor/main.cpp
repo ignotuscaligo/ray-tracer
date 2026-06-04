@@ -105,6 +105,16 @@ int runRenderTest(int argc, char** argv)
                               static_cast<double>(splatTotal)
                         : 0.0);
 
+        // Optional extreme-firefly guard: how many splats had their luminance
+        // clamped down. 0 when $splatLuminanceClamp is unset/disabled.
+        const size_t splatLumClamped = WorkerDebug::splatLuminanceClamped();
+        std::printf("splat-luminance-clamp: clamped=%zu total=%zu (%.4f%%)\n",
+                    splatLumClamped, splatTotal,
+                    splatTotal > 0
+                        ? 100.0 * static_cast<double>(splatLumClamped) /
+                              static_cast<double>(splatTotal)
+                        : 0.0);
+
         // Wave 3 memory evidence: high-water-mark slot occupancy of each queue.
         // The emitter queue now holds compact producers (a fraction of a
         // PhotonHit each) and the photon queue no longer needs N-daughter

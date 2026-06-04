@@ -231,6 +231,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
         worker->setMinSplatRadius(minSplatRadius);
+        worker->setSplatLuminanceClamp(settings.splatLuminanceClamp);
         worker->setSplatTargets(splatTargets);
         ++workerIndex;
     }

@@ -96,6 +96,16 @@ public:
     // being an arbitrary constant. 0 disables the floor (legacy behavior).
     void setMinSplatRadius(double minSplatRadius);
 
+    // Optional extreme-firefly guard: a generous upper bound on the luminance a
+    // single camera splat may add to a pixel. The minimum-radius floor only
+    // bounds the geometric 1/(pi r^2) blowup; this clamp also catches fireflies
+    // whose energy comes from a degenerate transport path (normal footprint,
+    // photon-count-invariant). A splat whose luminance exceeds the clamp is
+    // scaled down to it, preserving hue. <= 0 disables (default); intended to be
+    // set HIGH so only extreme outliers are touched and the normal image is
+    // unchanged.
+    void setSplatLuminanceClamp(double clamp);
+
     // Total number of hits this worker is holding in its claim-output-first
     // overflow buffers (work that is enqueued nowhere yet but not dropped).
     // The Renderer must include this in its drain-completion test, otherwise it
@@ -249,6 +259,10 @@ private:
     // 0 disables the floor.
     double m_minSplatRadius = 0.0;
 
+    // Optional extreme-firefly guard: per-splat luminance clamp (see setter doc).
+    // <= 0 disables (default).
+    double m_splatLuminanceClamp = 0.0;
+
     // Storage pivot M3: the cameras + buffers the splat accumulates into (one per
     // scene camera). Set by the Renderer before the worker starts.
     std::vector<SplatTarget> m_splatTargets;
@@ -303,6 +317,9 @@ void resetDeltaHitCounters();
 // footprint radius was floored to the minimum-radius (the would-be fireflies).
 size_t splatTotal();
 size_t splatRadiusClamped();
+// Optional luminance-clamp guard: splats whose contributed luminance exceeded
+// the per-splat clamp and were scaled down. 0 when the clamp is disabled.
+size_t splatLuminanceClamped();
 void resetSplatCounters();
 
 // Drop counters: number of pipeline items discarded because a destination
