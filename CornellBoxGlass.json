@@ -1,0 +1,99 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Lambertian",
+            "$color": [0.8, 0.2, 0.2]
+        },
+        "RightWall": {
+            "$type": "Lambertian",
+            "$color": [0.2, 0.8, 0.2]
+        },
+        "Wall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        },
+        "Glass": {
+            "$type": "Glass",
+            "$ior": 1.5
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 16,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 40000000,
+        "$hitQueueSize": 10000000,
+        "$emittingQueueSize": 40000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 720,
+        "$height": 720,
+        "$photonsPerLight": 8000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "CornellBoxGlass",
+        "$bounceThreshold": 5
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 60.0,
+            "$fNumber": 8.0,
+            "$shutterTime": 0.01,
+            "$iso": 4000.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "Light": {
+            "$type": "OmniLight",
+            "$position": [0, 285, 40],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0, 0, 0]
+            },
+            "$color": [1.0, 1.0, 1.0],
+            "$intensityCandela": 60000
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            },
+            "GlassSphere": {
+                "$type": "SphereVolume",
+                "$material": "Glass",
+                "$center": [0.0, 100.0, 50.0],
+                "$radius": 60.0
+            }
+        }
+    }
+}
