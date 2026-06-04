@@ -2,6 +2,7 @@
 
 #include "BounceCloud.h"
 #include "Buffer.h"
+#include "Gather.h"
 #include "HashGrid.h"
 #include "Image.h"
 #include "SceneLoader.h"
@@ -38,6 +39,14 @@ struct RenderResult
     // hit (see bounceCloud->budgetHit()).
     std::shared_ptr<BounceCloud> bounceCloud;
     std::shared_ptr<HashGrid> hashGrid;
+
+    // Wave 4b: diagnostics from the gather pass that produced the image (the
+    // forward splat is removed; the gather is the sole image source). Reports how
+    // many camera pixels found a visible surface, how many gathered >= 1 deposit,
+    // how many were left black because the visible surface is a delta/specular
+    // material (Wave 4c will ray-extend those), how many camera rays missed all
+    // geometry, plus the max footprint radius and mean deposits per gathered pixel.
+    Gather::GatherResult gather;
 };
 
 namespace Renderer

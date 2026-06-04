@@ -3,10 +3,12 @@
 #include "AnimationQuery.h"
 #include "Color.h"
 #include "EmitterQueue.h"
+#include "Gather.h"
 #include "LightQueue.h"
 #include "Light.h"
 #include "Photon.h"
 #include "Pixel.h"
+#include "Utility.h"
 #include "Vector.h"
 #include "WorkQueue.h"
 #include "Worker.h"
@@ -18,34 +20,19 @@
 namespace Renderer
 {
 
-// Global footprint calibration constant standing in for the per-pixel footprint
-// factor (solid angle / projected pixel area) that converts accumulated photon
-// flux into physical luminance. SIMPLIFICATION: it is uniform across the frame
-// rather than computed per pixel from FOV/depth. Its value is chosen so the
-// reference MirrorTest scene, at its default light intensity and the camera's
-// default (neutral) exposure, renders at roughly the prior look. See
-// luminanceFromBuffer() for how it enters.
-//
-// raw buffer holds sum_over_hits(Phi); dividing by total photons N gives a
-// Monte-Carlo flux estimate; multiplying by this footprint factor yields an
-// estimate of physical luminance L (cd/m^2).
-constexpr double kFootprintCalibration = 64.0;
-
-// Convert one raw accumulated buffer channel into physical luminance. This is the
-// ONE place the photon count enters the pipeline (the single 1/N normalization),
-// combined with the per-pixel footprint factor.
-//   L = rawChannel * (1 / photonsEmitted) * footprint
-static double luminanceFromBuffer(double rawChannel, double photonsEmitted)
-{
-    if (photonsEmitted <= 0.0)
-    {
-        return 0.0;
-    }
-    return rawChannel * (kFootprintCalibration / photonsEmitted);
-}
+// Wave 4b: the Wave-2 global footprint calibration constant (kFootprintCalibration)
+// is GONE. It was a uniform stand-in for the per-pixel solid-angle / projected-area
+// factor that the forward splat could not compute. The gather pass (src/Gather.cpp)
+// now computes the REAL per-pixel footprint — pi * r^2 with r = depth * tan(pixelHalfAngle)
+// — and the 1/N photon-count normalization, writing physical luminance directly into
+// the buffer. The tonemap therefore no longer applies any footprint factor or 1/N
+// divide: the buffer already holds luminance L (cd/m^2). The only job left here is
+// the photographic exposure (L / L_max) and the gamma curve.
 
 void tonemapBufferToImage(const Buffer& buffer, Image& image, double photonsEmitted, double saturationLuminance)
 {
+    (void)photonsEmitted;  // 1/N is applied upstream in the gather now.
+
     const size_t width = image.width();
     const size_t height = image.height();
 
@@ -60,16 +47,11 @@ void tonemapBufferToImage(const Buffer& buffer, Image& image, double photonsEmit
         {
             const Color color = buffer.fetchColor({x, y});
 
-            // Step a: raw accumulated energy -> physical luminance (the single
-            // divide-by-photon-count + footprint factor).
-            const double lumR = luminanceFromBuffer(color.red, photonsEmitted);
-            const double lumG = luminanceFromBuffer(color.green, photonsEmitted);
-            const double lumB = luminanceFromBuffer(color.blue, photonsEmitted);
-
-            // Step b: luminance -> [0,1] via the photographic saturation exposure.
-            const double exposedR = lumR * invLmax;
-            const double exposedG = lumG * invLmax;
-            const double exposedB = lumB * invLmax;
+            // The buffer already holds physical luminance (gather applied 1/N and
+            // the real per-pixel footprint). Apply only the photographic exposure.
+            const double exposedR = color.red * invLmax;
+            const double exposedG = color.green * invLmax;
+            const double exposedB = color.blue * invLmax;
 
             // Existing gamma / sRGB-ish tonemap, then clamp to 16-bit.
             const float gammaRed = std::pow(static_cast<float>(exposedR), 1.0f / Color::gamma);
@@ -247,12 +229,13 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     // this).
     (void)aborted;
 
-    // Wave 2: convert raw energy -> image with the physical pipeline. The single
-    // 1/N normalization (N = photonsPerLight) and the camera's saturation
-    // exposure L_max both enter here, once.
+    // Wave 4b: the forward splat is GONE — `buffer` (the camera-as-accumulator
+    // sink the workers used to splat into) is no longer the image source and is
+    // not tonemapped here. The photon pass still ran, but only to fill the cloud.
+    // The image is produced by the gather below. We keep the exposure parameters
+    // for that tonemap.
     const double photonsEmitted = static_cast<double>(settings.photonsPerLight);
     const double saturationLuminance = scene.camera ? scene.camera->saturationLuminance() : 0.0;
-    tonemapBufferToImage(*buffer, *image, photonsEmitted, saturationLuminance);
 
     // Wave 3 memory evidence: high-water-mark occupancy of each queue.
     result.peakPhotonQueue = photonQueue->largestAllocated();
@@ -260,14 +243,76 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     result.peakEmitterQueue = emitterQueue->largestAllocated();
     result.peakFinalQueue = finalHitQueue->largestAllocated();
 
-    // Wave 4a: the photon pass has fully drained and all worker threads are
+    // Wave 4a/4b: the photon pass has fully drained and all worker threads are
     // joined (workers[i]->stop() above), so every deposit append has completed
-    // and is visible here. Build the spatial hash grid over the deposited points
-    // now — single-pass, read-only over the cloud. The cloud + grid are returned
-    // for inspection but do NOT drive the image this wave (the forward splat
-    // above already produced it); Wave 4b swaps the image source to a gather.
+    // and is visible here. Build the spatial hash grid over the deposited points,
+    // then run the GATHER pass — which is now the SOLE image source (the forward
+    // splat is removed from the Worker pipeline).
     result.bounceCloud = bounceCloud;
-    result.hashGrid = std::make_shared<HashGrid>(*bounceCloud, settings.hashGridCellSize);
+
+    // Hash-grid cell size: a radiusSearch(p, r) should touch roughly a 3x3x3
+    // neighborhood, i.e. cellSize ~= the typical gather radius. The gather radius
+    // r = depth * tan(pixelHalfAngle) varies per pixel (depth-dependent), so we
+    // pick a REPRESENTATIVE radius: the camera-to-scene-center depth times the
+    // pixel half-angle. Scene center is the centroid of the scene Volumes; depth
+    // is its distance from the camera. This scales correctly with resolution
+    // (finer pixels -> smaller cells) and roughly tracks the per-pixel radius for
+    // the bulk of the frame. Pixels closer than the centroid query a sub-cell
+    // radius (touch ~1 cell — still correct, just fewer candidates); pixels deeper
+    // query a slightly-larger-than-cell radius (touch ~3x3x3). Falls back to the
+    // configured hashGridCellSize when the scene has no resolvable depth.
+    double cellSize = settings.hashGridCellSize;
+    if (scene.camera && settings.imageHeight > 0)
+    {
+        Vector centroid{0.0, 0.0, 0.0};
+        size_t volumeCount = 0;
+        for (const auto& object : scene.objects)
+        {
+            if (object->hasType<Volume>())
+            {
+                const Vector p = object->position();
+                centroid = centroid + p;
+                ++volumeCount;
+            }
+        }
+        if (volumeCount > 0)
+        {
+            centroid = centroid / static_cast<double>(volumeCount);
+            const double depth = (centroid - scene.camera->position()).magnitude();
+            const double pixelHalfAngle =
+                0.5 * Utility::radians(scene.camera->verticalFieldOfView()) /
+                static_cast<double>(settings.imageHeight);
+            const double representativeRadius = depth * std::tan(pixelHalfAngle);
+            if (representativeRadius > 0.0)
+            {
+                cellSize = representativeRadius;
+            }
+        }
+    }
+
+    result.hashGrid = std::make_shared<HashGrid>(*bounceCloud, cellSize);
+
+    // Wave 4b GATHER: produce the image by querying the cloud (camera-first
+    // density estimate). This REPLACES the forward splat as the image source.
+    Gather::GatherResult gather = Gather::run(
+        scene.objects,
+        scene.camera,
+        *bounceCloud,
+        *result.hashGrid,
+        *scene.materialLibrary,
+        animationQuery.get(),
+        static_cast<double>(settings.photonsPerLight),
+        settings.workerCount);
+
+    result.gather = gather;
+
+    // The gather buffer (physical luminance, already 1/N + footprint normalized)
+    // is the image source now. Tonemap it through the camera exposure.
+    if (gather.buffer)
+    {
+        result.buffer = gather.buffer;
+        tonemapBufferToImage(*gather.buffer, *image, photonsEmitted, saturationLuminance);
+    }
 
     return result;
 }
