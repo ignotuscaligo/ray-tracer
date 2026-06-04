@@ -41,8 +41,13 @@
 //      footprint calibration constant is GONE: the footprint is now the real
 //      per-pixel pi*r^2 computed here.
 //
-// Specular / delta surfaces at the visible point are left BLACK this sub-wave;
-// ray-extension through mirrors is Wave 4c.
+// Wave 4c: the gather is now RECURSIVE. A non-delta visible surface still produces
+// the fixed-footprint density estimate above (terminal). A specular / delta surface
+// (Mirror) no longer goes black: the camera path is EXTENDED along the perfect
+// reflection and gatherRadiance() recurses, returning reflectance * (radiance the
+// mirror sees). Recursion is capped at a max specular depth to bound mirror-to-mirror
+// loops; past the cap the path returns black. This makes mirrors reflect the room
+// (mirror->diffuse), other mirrors (mirror->mirror), and the light (mirror->light).
 
 namespace Gather
 {
