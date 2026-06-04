@@ -500,6 +500,14 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.endFrame, renderConfiguration, "$endFrame", logToStdout);
         setFromJsonIfPresent(settings.bounceThreshold, renderConfiguration, "$bounceThreshold", logToStdout);
 
+        // Wave 4a/4b: bounce-cloud deposit budget. Raising the cap lets a small
+        // verification render capture EVERY non-delta deposit (budget-hit=no) so
+        // the gather sees the complete light transport. Cell size is normally
+        // derived from FOV/depth by the Renderer; this override is for diagnostics.
+        setFromJsonIfPresent(settings.bounceCloudMaxRecords, renderConfiguration, "$bounceCloudMaxRecords", logToStdout);
+        setFromJsonIfPresent(settings.bounceCloudBudgetFactor, renderConfiguration, "$bounceCloudBudgetFactor", logToStdout);
+        setFromJsonIfPresent(settings.hashGridCellSize, renderConfiguration, "$hashGridCellSize", logToStdout);
+
         if (renderConfiguration.contains("$renderPath"))
         {
             scene.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), absoluteScenePath.parent_path());

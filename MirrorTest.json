@@ -77,7 +77,7 @@
             "$verticalFieldOfView": 60.0,
             "$fNumber": 8.0,
             "$shutterTime": 0.01,
-            "$iso": 100.0,
+            "$iso": 2000.0,
             "$position": [
                 0.0,
                 150,

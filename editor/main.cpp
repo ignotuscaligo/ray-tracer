@@ -116,6 +116,16 @@ int runRenderTest(int argc, char** argv)
                         result.hashGrid->cellSize());
         }
 
+        // Wave 4b gather evidence: the gather is the sole image source now. Report
+        // how many camera pixels found a surface, gathered >= 1 deposit, were left
+        // black as delta (mirror — 4c will ray-extend), or missed all geometry,
+        // plus the max footprint radius and mean deposits per gathered pixel.
+        const Gather::GatherResult& g = result.gather;
+        std::printf("gather: hit=%zu gathered=%zu delta-black=%zu miss=%zu "
+                    "max-radius=%.3f mean-deposits/gather=%.1f max-radiance=%.2f\n",
+                    g.pixelsHit, g.pixelsGathered, g.pixelsDelta, g.pixelsMiss,
+                    g.maxGatherRadius, g.meanDepositsPerGather, g.maxRadiance);
+
         std::printf("render-test: wrote %s\n", outPath.c_str());
         return 0;
     }
