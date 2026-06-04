@@ -184,6 +184,15 @@ void gatherRows(size_t rowBegin,
 
             buffer.addColor(coord, reflected);
             ++stats.pixelsReflected;
+            const double peak = std::max({static_cast<double>(reflected.red),
+                                          static_cast<double>(reflected.green),
+                                          static_cast<double>(reflected.blue)});
+            if (peak > stats.maxRadiance)
+            {
+                stats.maxRadiance = peak;
+            }
+            stats.sumRadiance += 0.2126 * reflected.red + 0.7152 * reflected.green +
+                                 0.0722 * reflected.blue;
         }
     }
 }
@@ -240,6 +249,8 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
         result.pixelsDelta += s.pixelsDelta;
         result.pixelsReflected += s.pixelsReflected;
         result.pixelsBlack += s.pixelsBlack;
+        result.maxRadiance = std::max(result.maxRadiance, s.maxRadiance);
+        result.sumRadiance += s.sumRadiance;
     }
     return result;
 }

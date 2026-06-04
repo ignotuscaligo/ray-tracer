@@ -171,8 +171,13 @@ int runRenderTest(int argc, char** argv)
                 "mirror-gather-time=%.3f s mean-luminance=%.4f\n",
                 i, name.c_str(), w, h, bf, lf, cr.gatherSeconds, cr.meanLuminance);
             std::printf(
-                "  mirror: delta-pixels=%zu reflected=%zu black=%zu\n",
-                cr.mirror.pixelsDelta, cr.mirror.pixelsReflected, cr.mirror.pixelsBlack);
+                "  mirror: delta-pixels=%zu reflected=%zu black=%zu max-radiance=%.2f "
+                "sum-radiance=%.2f mean-radiance=%.4f\n",
+                cr.mirror.pixelsDelta, cr.mirror.pixelsReflected, cr.mirror.pixelsBlack,
+                cr.mirror.maxRadiance, cr.mirror.sumRadiance,
+                cr.mirror.pixelsReflected > 0
+                    ? cr.mirror.sumRadiance / static_cast<double>(cr.mirror.pixelsReflected)
+                    : 0.0);
 
             if (cr.image)
             {

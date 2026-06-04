@@ -41,6 +41,8 @@ struct Result
     size_t pixelsDelta = 0;      // camera pixels whose first visible surface is delta
     size_t pixelsReflected = 0;  // delta pixels that resolved to a grid lookup with energy
     size_t pixelsBlack = 0;      // delta pixels that stayed black (no non-delta hit / empty cell)
+    double maxRadiance = 0.0;    // peak per-pixel reflected luminance (pre-tonemap), for diagnostics
+    double sumRadiance = 0.0;    // sum of per-pixel reflected luminance (pre-tonemap), for diagnostics
 };
 
 // Run the mirror gather, compositing reflected radiance into `buffer` at the
