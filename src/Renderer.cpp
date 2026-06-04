@@ -141,6 +141,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
             settings.russianRouletteReferenceEnergy,
         });
         worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
+        worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
         ++workerIndex;
     }
 
@@ -324,12 +325,26 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     result.cameras.reserve(cameras.size());
 
-    for (const auto& cam : cameras)
+    // Storage pivot: the DIRECT image now comes from the worker SPLAT buffer
+    // (sharp camera-visible non-delta surfaces), not the gather. The splat wrote
+    // into the shared `buffer`, which is projected through the PRIMARY camera
+    // (scene.camera) at the global render resolution. The primary camera composites
+    // splat (direct) + mirror gather (delta pixels). Secondary/debug cameras keep
+    // the gather path unchanged (their own projection has no splat buffer).
+    std::shared_ptr<Buffer> splatBuffer = buffer;
+
+    for (size_t ci = 0; ci < cameras.size(); ++ci)
     {
+        const auto& cam = cameras[ci];
         if (!cam)
         {
             continue;
         }
+
+        const bool isPrimary = (ci == 0);
+        const bool splatApplies =
+            isPrimary && splatBuffer &&
+            cam->width() == settings.imageWidth && cam->height() == settings.imageHeight;
 
         CameraRender cr;
         cr.camera = cam;
@@ -352,20 +367,26 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
         cr.gatherSeconds = std::chrono::duration<double>(gatherEnd - gatherStart).count();
         cr.gather = gather;
-        cr.buffer = gather.buffer;
 
-        // Tonemap THIS camera's gather buffer through THIS camera's exposure into a
-        // fresh image at the camera's own resolution.
+        // The image source: for the primary camera, the splat buffer (direct,
+        // sharp). For others, the gather buffer (unchanged). M3 will composite the
+        // mirror-reflection gather into the splat's delta pixels; for M2 the splat
+        // buffer alone drives the primary image so its sharpness can be verified.
+        std::shared_ptr<Buffer> imageBuffer = splatApplies ? splatBuffer : gather.buffer;
+        cr.buffer = imageBuffer;
+
+        // Tonemap the chosen buffer through THIS camera's exposure into a fresh
+        // image at the camera's own resolution.
         cr.image = std::make_shared<Image>(cam->width(), cam->height());
         cr.image->clear();
-        if (gather.buffer)
+        if (imageBuffer)
         {
-            tonemapBufferToImage(*gather.buffer, *cr.image, photonsEmitted,
+            tonemapBufferToImage(*imageBuffer, *cr.image, photonsEmitted,
                                  cam->saturationLuminance());
 
-            // Mean pre-exposure luminance over the buffer — the Milestone 2
-            // brightness-stability check (should be ~constant across resolutions as
-            // the per-pixel footprint shrinks, validating the 1/(pi r^2) normalization).
+            // Mean pre-exposure luminance over the buffer — brightness-stability
+            // check (should be ~constant across resolutions as the per-pixel
+            // footprint shrinks, validating the 1/(pi r^2) normalization).
             double sum = 0.0;
             const size_t w = cam->width();
             const size_t h = cam->height();
@@ -373,7 +394,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
             {
                 for (size_t x = 0; x < w; ++x)
                 {
-                    const Color c = gather.buffer->fetchColor({x, y});
+                    const Color c = imageBuffer->fetchColor({x, y});
                     sum += (static_cast<double>(c.red) + c.green + c.blue) / 3.0;
                 }
             }

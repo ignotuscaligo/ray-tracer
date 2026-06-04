@@ -79,6 +79,11 @@ public:
     // by `scale` (rounded, min 1). Default (override 0, scale 1) is a no-op.
     void setDaughterCount(size_t countOverride, double scale);
 
+    // Storage pivot M2: photons-per-light N used by the direct splat to normalize
+    // each contribution by 1/N (the single count divide the gather applied at
+    // lookup). Must be set before the worker starts; default 0 disables the splat.
+    void setPhotonsPerLight(double photonsPerLight);
+
     // Total number of hits this worker is holding in its claim-output-first
     // overflow buffers (work that is enqueued nowhere yet but not dropped).
     // The Renderer must include this in its drain-completion test, otherwise it
@@ -135,6 +140,24 @@ private:
     bool processLights();
     bool processPhotons();
     bool processEmissions();
+
+    // Storage pivot M2: restored DIRECT CAMERA SPLAT. When a photon hits a
+    // NON-DELTA surface, project the hit into camera pixel space; if it is
+    // in-frustum, the surface faces the camera, and nothing occludes the line of
+    // sight, accumulate the bounce's outgoing radiance toward the camera into that
+    // pixel's buffer, then discard the photon. This is the cheap
+    // "camera-consumes-the-bounce" model — no per-photon storage — and it gives
+    // SHARP direct/diffuse visibility (each photon lands in its exact projected
+    // pixel, not smeared over a gather radius).
+    //
+    // The accumulated value matches the gather's physical-luminance normalization
+    // so the existing tonemap is unchanged: each photon contributes
+    //   BRDF(wi -> toCamera) * power / (N * pi * r^2)
+    // where r = cameraDistance * tan(pixelHalfAngle) is the pixel's world-space
+    // footprint radius at the hit depth (same footprint the gather computes), and
+    // N = photonsPerLight. Summed over all photons landing in a pixel's footprint
+    // this equals the gather's invN/(pi r^2) * sum(BRDF*power) estimate.
+    void splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material);
     // Wave 4b: processHits (camera-visibility) and processFinalHits (the splat
     // sink) were removed with the forward splat. The image is now produced by the
     // gather over the deposit cloud (src/Gather.cpp), run after the photon pass.
@@ -189,6 +212,10 @@ private:
 
     size_t m_daughterCountOverride = 0;
     double m_daughterCountScale = 1.0;
+
+    // Storage pivot M2: photons-per-light N for the direct splat's 1/N divide.
+    // 0 disables the splat (no normalization possible).
+    double m_photonsPerLight = 0.0;
 
     // Resolve the daughter count for a bounceable hit, applying the override /
     // scale config on top of the material's native daughterPhotonCount().

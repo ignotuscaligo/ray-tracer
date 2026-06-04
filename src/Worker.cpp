@@ -221,6 +221,120 @@ void Worker::setDaughterCount(size_t countOverride, double scale)
     m_daughterCountScale = scale;
 }
 
+void Worker::setPhotonsPerLight(double photonsPerLight)
+{
+    m_photonsPerLight = photonsPerLight;
+}
+
+void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material)
+{
+    // M2 direct camera splat. Project the non-delta hit into camera pixel space,
+    // gate on frustum / facing / exposure window / occlusion, then accumulate the
+    // bounce's outgoing radiance toward the camera into the pixel buffer.
+    if (!material || material->isDelta() || m_photonsPerLight <= 0.0)
+    {
+        return;
+    }
+
+    // Continuous pixel coordinate (and an early frustum reject). std::nullopt when
+    // the hit is behind the camera or outside the frustum.
+    std::optional<Camera::SubPixelCoords> subCoord =
+        camera->coordForPointSubPixel(photonHit.hit.position);
+    if (!subCoord)
+    {
+        return;
+    }
+
+    const size_t imageWidth = camera->width();
+    const size_t imageHeight = camera->height();
+    if (imageWidth == 0 || imageHeight == 0)
+    {
+        return;
+    }
+
+    // Nearest integer pixel — the splat writes the photon's full contribution into
+    // its exact projected pixel (sharp direct visibility; no sub-pixel cone smear).
+    const PixelCoords coord{
+        std::min(imageWidth - 1, static_cast<size_t>(std::max(0.0, std::floor(subCoord->x)))),
+        std::min(imageHeight - 1, static_cast<size_t>(std::max(0.0, std::floor(subCoord->y)))),
+    };
+
+    // Per-pixel exposure-window gate (motion blur / rolling shutter). With the
+    // default infinite window every photon is accepted.
+    const Camera::ExposureWindow window = camera->exposureWindowForPixel(coord);
+    if (!window.contains(photonHit.photon.time))
+    {
+        return;
+    }
+
+    const Vector cameraPosition = camera->position();
+    const Vector toCamera = cameraPosition - photonHit.hit.position;
+    const double cameraDistance = toCamera.magnitude();
+    if (cameraDistance < selfHitThreshold)
+    {
+        return;
+    }
+    const Vector toCameraDir = toCamera / cameraDistance;
+
+    // Facing check: the surface must face the camera (outward normal toward it).
+    if (Vector::dot(toCameraDir, photonHit.hit.normal) <= 0.0)
+    {
+        return;
+    }
+
+    // Occlusion: cast from the hit toward the camera; if a nearer surface lies
+    // between the hit and the camera, this bounce is not directly visible.
+    const Ray ray{photonHit.hit.position, toCameraDir};
+    std::optional<Hit> closestHit;
+    for (auto& object : objects)
+    {
+        if (!object->hasType<Volume>())
+        {
+            continue;
+        }
+        std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
+            ray, m_castBuffer, photonHit.photon.time, animationQuery.get());
+        if (hit && hit->distance > selfHitThreshold &&
+            (!closestHit || hit->distance < closestHit->distance))
+        {
+            closestHit = hit;
+        }
+    }
+    if (closestHit && closestHit->distance < cameraDistance)
+    {
+        return;  // occluded
+    }
+
+    // Outgoing radiance toward the camera: BRDF(wi -> wo) * power, normalized by
+    // the photon count (1/N) and the pixel's world-space footprint area (pi r^2)
+    // so the buffer holds physical luminance the existing tonemap consumes
+    // unchanged. r is the footprint radius at the hit depth: the world-space
+    // half-extent the pixel's solid angle projects to. This matches the gather's
+    // invN/(pi r^2) normalization exactly.
+    const double pixelHalfAngle =
+        0.5 * Utility::radians(camera->verticalFieldOfView()) /
+        static_cast<double>(imageHeight);
+    const double r = cameraDistance * std::tan(pixelHalfAngle);
+    if (r <= 0.0)
+    {
+        return;
+    }
+
+    const Vector wi = -photonHit.photon.ray.direction;  // direction photon came from
+    const Color brdf = material->evaluate(wi, toCameraDir, photonHit.hit.normal);
+
+    const double area = Utility::pi * r * r;
+    const float scale = static_cast<float>((1.0 / m_photonsPerLight) / area);
+    const Color contribution = brdf * photonHit.photon.color * scale;
+
+    if (contribution.brightness() <= 0.0f)
+    {
+        return;
+    }
+
+    buffer->addColor(coord, contribution);
+}
+
 size_t Worker::resolveDaughterCount(size_t materialCount) const
 {
     // Override wins: force an exact count on every bounceable hit regardless of
@@ -435,6 +549,15 @@ bool Worker::processPhotons()
                     photonHit.photon.lightId,
                 });
             }
+
+            // Storage pivot M2: DIRECT CAMERA SPLAT for camera-visible non-delta
+            // surfaces. Projects this bounce into the camera and accumulates its
+            // outgoing radiance into the pixel buffer (sharp direct image), then
+            // the photon is discarded — no per-photon storage for the direct path.
+            // Runs alongside the M1 grid (M3) and the legacy cloud during the
+            // pivot; the cloud deposit above is removed in M3 once the grid + splat
+            // fully replace it.
+            splatToCamera(photonHit, material);
 
             // Bounce-hits below the threshold feed the EmitterQueue (daughter
             // path) to continue the random walk. Wave 3: push ONE compact Emitter
