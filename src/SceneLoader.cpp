@@ -572,12 +572,6 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         // dependent). bounceThreshold is the hard per-photon depth cap. Default 1.0.
         setFromJsonIfPresent(settings.terminationThreshold, renderConfiguration, "$terminationThreshold", logToStdout);
 
-        // Russian roulette (unbiased path termination). Default off for back-compat.
-        setFromJsonIfPresent(settings.russianRoulette, renderConfiguration, "$russianRoulette", logToStdout);
-        setFromJsonIfPresent(settings.russianRouletteMinBounces, renderConfiguration, "$russianRouletteMinBounces", logToStdout);
-        setFromJsonIfPresent(settings.russianRouletteMinProbability, renderConfiguration, "$russianRouletteMinProbability", logToStdout);
-        setFromJsonIfPresent(settings.russianRouletteReferenceEnergy, renderConfiguration, "$russianRouletteReferenceEnergy", logToStdout);
-
         // Configurable daughter fan-out (Milestone 2). Override forces an exact
         // count; scale multiplies the material's native count. Defaults are no-ops.
         setFromJsonIfPresent(settings.daughterCountOverride, renderConfiguration, "$daughterCount", logToStdout);

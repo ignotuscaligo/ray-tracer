@@ -38,30 +38,6 @@ struct RenderSettings
     // what actually bounds path depth on normal scenes).
     double terminationThreshold = 1.0;
 
-    // ===== Russian roulette (LEGACY — superseded by decay termination) =====
-    // Retained as config fields for back-compat scene loading; the single-photon
-    // pipeline no longer applies the RR survivor-reweight boost.
-    // When enabled, a photon that hits a bounceable surface at bounce depth >=
-    // russianRouletteMinBounces is probabilistically terminated with survival
-    // probability p = clamp(maxChannel(throughput) / referenceEnergy, pMin, 1).
-    // Survivors have their carried color scaled by 1/p so the Monte-Carlo
-    // estimator stays UNBIASED (the expected energy is unchanged — dim paths are
-    // dropped, bright ones are boosted to compensate). Disabled by default for
-    // exact back-compat with the pre-RR pipeline.
-    //
-    // - minBounces: RR is skipped for bounces < this, so early (direct / first-
-    //   bounce) paths always survive. Standard practice: terminating high-energy
-    //   early paths spikes variance.
-    // - minProbability: the survival-probability floor (pMin). Keeps p away from
-    //   0 so the 1/p reweight can't explode.
-    // - referenceEnergy: the throughput value mapped to p=1 (full survival). A
-    //   photon at or above this energy always survives; below it survives with
-    //   probability proportional to its energy.
-    bool russianRoulette = false;
-    size_t russianRouletteMinBounces = 1;
-    float russianRouletteMinProbability = 0.05f;
-    float russianRouletteReferenceEnergy = 1.0f;
-
     // ===== Configurable daughter fan-out (Milestone 2) =====
     // Override or scale the per-material daughterPhotonCount() without
     // recompiling. Default behavior (override = 0, scale = 1) leaves each

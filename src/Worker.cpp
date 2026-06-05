@@ -236,11 +236,6 @@ void Worker::setTerminationThreshold(double terminationThreshold)
     m_terminationThreshold = std::max(0.0, terminationThreshold);
 }
 
-void Worker::setRussianRoulette(const RussianRouletteConfig& config)
-{
-    m_russianRoulette = config;
-}
-
 void Worker::setDaughterCount(size_t countOverride, double scale)
 {
     m_daughterCountOverride = countOverride;

@@ -219,12 +219,6 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->densityGrid = densityGrid;
         worker->setBounceThreshold(settings.bounceThreshold);
         worker->setTerminationThreshold(settings.terminationThreshold);
-        worker->setRussianRoulette(Worker::RussianRouletteConfig{
-            settings.russianRoulette,
-            settings.russianRouletteMinBounces,
-            settings.russianRouletteMinProbability,
-            settings.russianRouletteReferenceEnergy,
-        });
         worker->setDaughterCount(settings.daughterCountOverride, settings.daughterCountScale);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
         worker->setMinSplatRadius(minSplatRadius);
