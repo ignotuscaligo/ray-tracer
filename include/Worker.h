@@ -106,16 +106,6 @@ public:
     // requiring a Worker API change.
     std::shared_ptr<AnimationQuery> animationQuery;
 
-    size_t emitDuration = 0;
-    size_t photonDuration = 0;
-    size_t hitDuration = 0;
-    size_t writeDuration = 0;
-
-    size_t emitProcessed = 0;
-    size_t photonsProcessed = 0;
-    size_t hitsProcessed = 0;
-    size_t finalHitsProcessed = 0;
-
 private:
     bool processLights();
     bool processPhotons();

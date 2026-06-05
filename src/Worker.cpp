@@ -366,8 +366,6 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
 
 bool Worker::processLights()
 {
-    auto workStart = std::chrono::system_clock::now();
-
     // Wave 6: track each light's index in the scene light list (lights in object
     // declaration order). The light-id is stamped onto every emitted photon below
     // and inherited by daughters, so each deposit can be attributed to its source
@@ -422,24 +420,16 @@ bool Worker::processLights()
             }
         }
 
-        emitProcessed += photons.size();
-
         photonQueue->ready(photons);
 
         break;
     }
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    emitDuration += workDuration.count();
 
     return true;
 }
 
 bool Worker::processPhotons()
 {
-    auto workStart = std::chrono::system_clock::now();
-
     auto photonsBlock = photonQueue->fetch(m_fetchSize);
 
     // Single local slot used to scatter the next photon in the trace-to-completion
@@ -576,14 +566,8 @@ bool Worker::processPhotons()
         }
     }
 
-    photonsProcessed += photonsBlock.size();
-
     // The whole batch has been traced to completion; release the source slots.
     photonQueue->release(photonsBlock);
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    photonDuration += workDuration.count();
 
     return true;
 }
