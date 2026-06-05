@@ -18,11 +18,6 @@ namespace
 
 constexpr double selfHitThreshold = std::numeric_limits<double>::epsilon();
 
-std::atomic<size_t> g_deltaHitsTotal{0};
-std::atomic<size_t> g_deltaHitsAccepted{0};
-std::atomic<size_t> g_deltaHitsRejectedBackface{0};
-std::atomic<size_t> g_deltaHitsRejectedConeOffset{0};
-
 // Firefly fix diagnostics. g_splatTotal counts every splat contribution that
 // reached the footprint-area stage; g_splatRadiusClamped counts those whose raw
 // footprint radius fell below m_minSplatRadius and was floored (these are the
@@ -34,40 +29,10 @@ std::atomic<size_t> g_splatRadiusClamped{0};
 // the per-splat clamp and were scaled down. Stays 0 when the clamp is disabled.
 std::atomic<size_t> g_splatLuminanceClamped{0};
 
-// Drop counters. Every site where the forward photon pipeline discards work
-// because a destination WorkQueue was full increments one of these by the
-// number of items dropped. They prove the lossy-drop bug exists (Step A) and
-// must read zero once claim-output-first back-pressure lands (Step B).
-//   - g_droppedEmitting: bounce-hits dropped at the emitting-queue producer
-//     in processPhotons (raycast path) and any short-alloc there.
-//   - g_droppedRequeue: emitting hits dropped when processEmissions could not
-//     re-enqueue hits it declined to service this iteration.
-//   - g_droppedHit: bounce-hits silently truncated at the hitQueue producer
-//     in processPhotons when the returned block was shorter than requested.
-std::atomic<size_t> g_droppedEmitting{0};
-std::atomic<size_t> g_droppedRequeue{0};
-std::atomic<size_t> g_droppedHit{0};
-// g_droppedFinal: valid camera-visible hits dropped at the finalHitQueue
-// producer in processHits when its returned block was short (finalHitQueue is
-// the smallest queue, so it saturates too). These never reach the splat sink.
-std::atomic<size_t> g_droppedFinal{0};
-
 }
 
 namespace WorkerDebug
 {
-size_t deltaHitsTotal() { return g_deltaHitsTotal.load(); }
-size_t deltaHitsAccepted() { return g_deltaHitsAccepted.load(); }
-size_t deltaHitsRejectedBackface() { return g_deltaHitsRejectedBackface.load(); }
-size_t deltaHitsRejectedConeOffset() { return g_deltaHitsRejectedConeOffset.load(); }
-void resetDeltaHitCounters()
-{
-    g_deltaHitsTotal.store(0);
-    g_deltaHitsAccepted.store(0);
-    g_deltaHitsRejectedBackface.store(0);
-    g_deltaHitsRejectedConeOffset.store(0);
-}
-
 size_t splatTotal() { return g_splatTotal.load(); }
 size_t splatRadiusClamped() { return g_splatRadiusClamped.load(); }
 size_t splatLuminanceClamped() { return g_splatLuminanceClamped.load(); }
@@ -76,23 +41,6 @@ void resetSplatCounters()
     g_splatTotal.store(0);
     g_splatRadiusClamped.store(0);
     g_splatLuminanceClamped.store(0);
-}
-
-size_t droppedEmitting() { return g_droppedEmitting.load(); }
-size_t droppedRequeue() { return g_droppedRequeue.load(); }
-size_t droppedHit() { return g_droppedHit.load(); }
-size_t droppedFinal() { return g_droppedFinal.load(); }
-size_t droppedTotal()
-{
-    return g_droppedEmitting.load() + g_droppedRequeue.load()
-         + g_droppedHit.load() + g_droppedFinal.load();
-}
-void resetDropCounters()
-{
-    g_droppedEmitting.store(0);
-    g_droppedRequeue.store(0);
-    g_droppedHit.store(0);
-    g_droppedFinal.store(0);
 }
 }
 

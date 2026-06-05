@@ -304,17 +304,10 @@ private:
     std::exception_ptr m_exception;
 };
 
-// Diagnostic counters for the delta-material cone gate in processFinalHits. Reset between
-// frames; queried after the render completes. Will be removed once the cone-budget tuning
-// settles.
+// Firefly-fix splat diagnostics, reset between frames and queried after the
+// render completes.
 namespace WorkerDebug
 {
-size_t deltaHitsTotal();
-size_t deltaHitsAccepted();
-size_t deltaHitsRejectedBackface();
-size_t deltaHitsRejectedConeOffset();
-void resetDeltaHitCounters();
-
 // Firefly-fix splat counters: total splat contributions vs those whose
 // footprint radius was floored to the minimum-radius (the would-be fireflies).
 size_t splatTotal();
@@ -323,14 +316,4 @@ size_t splatRadiusClamped();
 // the per-splat clamp and were scaled down. 0 when the clamp is disabled.
 size_t splatLuminanceClamped();
 void resetSplatCounters();
-
-// Drop counters: number of pipeline items discarded because a destination
-// WorkQueue was full. Queried after the render drains. Must be zero once
-// claim-output-first back-pressure is in place.
-size_t droppedEmitting();
-size_t droppedRequeue();
-size_t droppedHit();
-size_t droppedFinal();
-size_t droppedTotal();
-void resetDropCounters();
 }

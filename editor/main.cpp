@@ -78,20 +78,9 @@ int runRenderTest(int argc, char** argv)
                     scenePath.c_str(), scene.settings.imageWidth,
                     scene.settings.imageHeight, scene.settings.photonsPerLight);
 
-        WorkerDebug::resetDropCounters();
         WorkerDebug::resetSplatCounters();
 
         RenderResult result = Renderer::renderFrame(scene);
-
-        // Surface the forward-pipeline drop totals after the queues have drained.
-        // Nonzero values mean photons/bounce-hits were discarded under queue
-        // saturation; the back-pressure fix must drive these to zero.
-        std::printf("dropped: emitting=%zu requeue=%zu hit=%zu final=%zu total=%zu\n",
-                    WorkerDebug::droppedEmitting(),
-                    WorkerDebug::droppedRequeue(),
-                    WorkerDebug::droppedHit(),
-                    WorkerDebug::droppedFinal(),
-                    WorkerDebug::droppedTotal());
 
         // Firefly fix: how often the minimum-radius floor engaged. clamped > 0
         // means would-be fireflies (splats landing close to the camera) had their
