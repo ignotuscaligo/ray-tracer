@@ -577,12 +577,9 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.daughterCountOverride, renderConfiguration, "$daughterCount", logToStdout);
         setFromJsonIfPresent(settings.daughterCountScale, renderConfiguration, "$daughterCountScale", logToStdout);
 
-        // Wave 4a/4b: bounce-cloud deposit budget. Raising the cap lets a small
-        // verification render capture EVERY non-delta deposit (budget-hit=no) so
-        // the gather sees the complete light transport. Cell size is normally
-        // derived from FOV/depth by the Renderer; this override is for diagnostics.
-        setFromJsonIfPresent(settings.bounceCloudMaxRecords, renderConfiguration, "$bounceCloudMaxRecords", logToStdout);
-        setFromJsonIfPresent(settings.bounceCloudBudgetFactor, renderConfiguration, "$bounceCloudBudgetFactor", logToStdout);
+        // Density-grid cell-size fallback (world units). Cell size is normally
+        // derived from FOV/depth by the Renderer; this override is the fallback
+        // when the footprint can't be derived (and is for diagnostics).
         setFromJsonIfPresent(settings.hashGridCellSize, renderConfiguration, "$hashGridCellSize", logToStdout);
         setFromJsonIfPresent(settings.densityCellScale, renderConfiguration, "$densityCellScale", logToStdout);
 
