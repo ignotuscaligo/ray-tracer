@@ -173,3 +173,27 @@ jobs:
         run-clang-tidy -p build/Release -quiet '.*/(src|editor)/.*\.cpp' \
           | tee clang-tidy.log || true
         echo "clang-tidy finding count: $(grep -c 'warning:' clang-tidy.log || echo 0)"
+
+  # ---------------------------------------------------------------------------
+  # cppcheck (informational). Cheap second opinion on uninitialized members,
+  # init-list ordering, etc. Many findings are false positives on this codebase
+  # (aggregate-initialized structs, class-type members with self-initializing
+  # default ctors), so the job is informational and does not fail the build.
+  # ---------------------------------------------------------------------------
+  cppcheck:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install cppcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck
+
+    - name: Run cppcheck (informational)
+      run: |
+        cppcheck --enable=warning,performance,portability \
+          --inline-suppr --std=c++20 --language=c++ \
+          -I include -I editor --quiet src editor 2>cppcheck.log || true
+        echo "cppcheck finding count: $(grep -cE 'error:|warning:|performance:|portability:' cppcheck.log || echo 0)"
+        cat cppcheck.log || true

@@ -11,5 +11,9 @@ struct Plane
     bool pointAbovePlane(const Vector& point) const;
 
     Vector normal;
-    double dot;
+    // Default member initializer: a default-constructed Plane otherwise left
+    // `dot` indeterminate (cppcheck uninitMemberVar). It is read in
+    // rayIntersectsPlane (Ray.cpp) as `plane.dot - ...`, so an uninitialized
+    // value would be a latent UB hazard for any default-constructed Plane.
+    double dot = 0.0;
 };
