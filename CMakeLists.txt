@@ -147,6 +147,9 @@ target_sources(ray-tracer-lib
         include/Image.h
         src/Image.cpp
 
+        include/PngWriteSession.h
+        src/PngWriteSession.cpp
+
         include/PngWriter.h
         src/PngWriter.cpp
 
