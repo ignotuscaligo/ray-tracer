@@ -52,6 +52,7 @@ struct Emitter
         , time(photonHit.photon.time)
         , bounces(photonHit.photon.bounces)
         , lightId(photonHit.photon.lightId)
+        , initialMagnitude(photonHit.photon.initialMagnitude)
         , material(photonHit.hit.material)
         , m_total(totalDaughters)
         , m_generated(0)
@@ -74,6 +75,10 @@ struct Emitter
     // multi-bounce deposit is still attributed to the light that emitted the
     // original photon.
     int lightId = -1;
+    // Emission magnitude (max colour channel at emission), carried verbatim from
+    // parent to daughter so decay termination can compare the daughter's current
+    // magnitude against its scale-invariant emission reference.
+    float initialMagnitude = 0.0f;
     // Material-library index used to generate daughters and to recover albedo.
     size_t material = 0;
 

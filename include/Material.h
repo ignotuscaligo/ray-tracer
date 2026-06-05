@@ -120,6 +120,7 @@ public:
                                    float parentTime,
                                    int parentBounces,
                                    int parentLightId,
+                                   float parentInitialMagnitude,
                                    RandomGenerator& generator) const;
 
     // Default implementation evaluates the BRDF against the camera direction and modulates

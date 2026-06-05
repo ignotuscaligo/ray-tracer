@@ -34,6 +34,7 @@ void Material::bounce(WorkQueue<Photon>::Block photonBlock, size_t startIndex, s
                       photonHit.photon.time,
                       photonHit.photon.bounces,
                       photonHit.photon.lightId,
+                      photonHit.photon.initialMagnitude,
                       generator);
 }
 
@@ -49,6 +50,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
                                  float parentTime,
                                  int parentBounces,
                                  int parentLightId,
+                                 float parentInitialMagnitude,
                                  RandomGenerator& generator) const
 {
     // SINGLE-PHOTON light tracing. Each bounce scatters EXACTLY ONE outgoing
@@ -89,6 +91,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.time = parentTime;
         out.bounces = parentBounces + 1;
         out.lightId = parentLightId;
+        out.initialMagnitude = parentInitialMagnitude;
 
         const BSDFSample s = sample(incident, normal, generator);
 

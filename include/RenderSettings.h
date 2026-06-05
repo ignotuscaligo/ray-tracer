@@ -24,7 +24,17 @@ struct RenderSettings
     size_t endFrame = 0;
     size_t bounceThreshold = 1;
 
-    // ===== Russian roulette (unbiased path termination) =====
+    // ===== Single-photon decay termination =====
+    // The canonical terminator for the single-photon light-tracing model. A
+    // photon is killed once its current magnitude (max colour channel) falls
+    // below terminationFraction * its EMISSION magnitude — a cutoff relative to
+    // emission, so it is scale-invariant ("100 x 1.0 == 10 x 10.0"). bounceThreshold
+    // above is then only a hard safety cap (kept large). Default 1e-3.
+    double terminationFraction = 1e-3;
+
+    // ===== Russian roulette (LEGACY — superseded by decay termination) =====
+    // Retained as config fields for back-compat scene loading; the single-photon
+    // pipeline no longer applies the RR survivor-reweight boost.
     // When enabled, a photon that hits a bounceable surface at bounce depth >=
     // russianRouletteMinBounces is probabilistically terminated with survival
     // probability p = clamp(maxChannel(throughput) / referenceEnergy, pMin, 1).

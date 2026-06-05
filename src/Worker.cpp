@@ -231,6 +231,11 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
     m_bounceThreshold = bounceThreshold;
 }
 
+void Worker::setTerminationFraction(double terminationFraction)
+{
+    m_terminationFraction = std::max(0.0, terminationFraction);
+}
+
 void Worker::setRussianRoulette(const RussianRouletteConfig& config)
 {
     m_russianRoulette = config;
@@ -511,10 +516,15 @@ bool Worker::processLights()
 
         // Stamp the source light-id on every freshly-emitted photon (emit() resets
         // bounces/ray/color but leaves lightId for us to set here, so emit()
-        // implementations don't each need to know their scene index).
+        // implementations don't each need to know their scene index). Also stamp
+        // the EMISSION magnitude (max colour channel) used as the scale-invariant
+        // reference for decay termination — captured here, after emit() has set the
+        // photon's emission colour, so no Light subclass needs to know about it.
         for (auto& photon : photons)
         {
             photon.lightId = lightIndex;
+            photon.initialMagnitude =
+                std::max({photon.color.red, photon.color.green, photon.color.blue});
         }
 
         // Stamp each freshly-emitted photon with a random time within the camera's
@@ -658,61 +668,37 @@ bool Worker::processPhotons()
             // the photon is discarded — no per-photon storage for the direct path.
             splatToCamera(photonHit, material);
 
-            // Bounce-hits below the threshold feed the EmitterQueue (daughter
-            // path) to continue the random walk. Wave 3: push ONE compact Emitter
-            // carrying the hit's generation state + the material's daughter count;
-            // daughters are materialized lazily in processEmissions into reserved
-            // photon-queue space.
-            if (photonHit.photon.bounces < m_bounceThreshold)
+            // Continue the random walk only while BOTH terminators allow it:
+            //   1. DETERMINISTIC DECAY (the real terminator): kill the photon once
+            //      its current magnitude has decayed below a cutoff RELATIVE to its
+            //      emission magnitude. This is monotonic (the magnitude only ever
+            //      decreases across bounces, since every BSDF weight is <= 1) and
+            //      scale-invariant: the cutoff is terminationFraction *
+            //      initialMagnitude, so a photon emitted 10x brighter is traced to
+            //      the same NUMBER of bounces as a 10x-dimmer one — the
+            //      "100 x 1.0 == 10 x 10.0" emission equivalence holds. An ABSOLUTE
+            //      cutoff would trace bright photons deeper and break that.
+            //      No Russian-roulette survivor reweight: termination is a hard
+            //      monotonic decay + cutoff, NOT a probabilistic 1/p boost.
+            //   2. bounceThreshold: a hard safety CAP only (kept large) so a near-
+            //      unity-albedo path can't loop forever; decay is the real cutoff.
+            // (photonDecayAlive: alive iff currentMagnitude >
+            // terminationFraction * initialMagnitude. A photon with no recorded
+            // emission magnitude — e.g. a synthetic test hit — never decay-
+            // terminates; only the bounce cap governs it. Live photons always
+            // carry a positive initialMagnitude.)
+            const bool decayAlive = photonDecayAlive(photonHit.photon, m_terminationFraction);
+
+            if (decayAlive && photonHit.photon.bounces < static_cast<int>(m_bounceThreshold))
             {
-                // Russian roulette (unbiased path termination). Applied at the
-                // CONTINUATION decision: the current hit's deposit above already
-                // captured this bounce's energy with the un-reweighted color, so
-                // RR only governs whether the random walk continues from here.
-                // Each daughter becomes its own photon -> own hit -> own RR roll,
-                // so this composes with the fan-out: every daughter can be
-                // independently terminated at its next bounce.
-                //
-                // p = clamp(maxChannel(color) / referenceEnergy, pMin, 1). Roll a
-                // uniform; on death, skip the Emitter (path stops). On survival,
-                // seed the Emitter with color * (1/p) so the estimator is
-                // unbiased — the expected continued energy is unchanged, dim
-                // paths are just dropped and survivors boosted to compensate.
-                // RR is skipped for bounces < minBounces so early/high-energy
-                // paths always survive (variance control, standard practice).
-                PhotonHit continuation = photonHit;
-                bool survive = true;
-
-                if (m_russianRoulette.enabled
-                    && photonHit.photon.bounces >= static_cast<int>(m_russianRoulette.minBounces))
+                // Single-photon continuation: push ONE compact Emitter carrying the
+                // hit's generation state. resolveDaughterCount returns 1 (constant
+                // population) unless an experiment override forces more.
+                const size_t materialCount = material ? material->daughterPhotonCount() : 1;
+                const size_t n = resolveDaughterCount(materialCount);
+                if (n > 0)
                 {
-                    const Color& c = photonHit.photon.color;
-                    const float maxChannel = std::max({c.red, c.green, c.blue});
-                    const float ref = (m_russianRoulette.referenceEnergy > 0.0f)
-                        ? m_russianRoulette.referenceEnergy
-                        : 1.0f;
-                    float p = maxChannel / ref;
-                    p = std::clamp(p, m_russianRoulette.minProbability, 1.0f);
-
-                    if (m_generator.value() < static_cast<double>(p))
-                    {
-                        // Survive: reweight to stay unbiased.
-                        continuation.photon.color = photonHit.photon.color * (1.0f / p);
-                    }
-                    else
-                    {
-                        survive = false;
-                    }
-                }
-
-                if (survive)
-                {
-                    const size_t materialCount = material ? material->daughterPhotonCount() : 1;
-                    const size_t n = resolveDaughterCount(materialCount);
-                    if (n > 0)
-                    {
-                        m_emitterOverflow.emplace_back(continuation, static_cast<std::uint32_t>(n));
-                    }
+                    m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(n));
                 }
             }
         }
@@ -829,6 +815,7 @@ bool Worker::processEmissions()
                 emitter.time,
                 emitter.bounces,
                 emitter.lightId,
+                emitter.initialMagnitude,
                 m_generator);
 
             emitter.advance(static_cast<std::uint32_t>(produce));

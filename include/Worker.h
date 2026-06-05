@@ -61,6 +61,13 @@ public:
 
     void setBounceThreshold(size_t bounceThreshold);
 
+    // Single-photon DECAY termination cutoff, as a FRACTION of each photon's
+    // emission magnitude. A photon is terminated (the random walk stops) once its
+    // current magnitude (max colour channel) falls below
+    // terminationFraction * initialMagnitude. Relative-to-emission makes the
+    // cutoff scale-invariant. Default 1e-3.
+    void setTerminationFraction(double terminationFraction);
+
     // Russian-roulette configuration (unbiased path termination). When `enabled`
     // is false the worker behaves exactly as the pre-RR pipeline. See
     // RenderSettings for the meaning of each field; they are copied in verbatim
@@ -244,7 +251,12 @@ private:
     size_t m_index = 0;
     size_t m_fetchSize = 0;
 
+    // Hard safety CAP on bounce depth (decay is the real terminator). Kept large
+    // by config so a near-unity-albedo path cannot loop forever.
     size_t m_bounceThreshold = 1;
+
+    // Single-photon decay-termination cutoff fraction (see setTerminationFraction).
+    double m_terminationFraction = 1e-3;
 
     RussianRouletteConfig m_russianRoulette;
 
