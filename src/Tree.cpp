@@ -161,29 +161,12 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const noexcep
     return objects;
 }
 
-template<typename T>
-const Vector& Tree<T>::getPivot(const T& /*object*/) noexcept
-{
-    // Primary-template stub: every instantiated type (Triangle, PhotonHit)
-    // provides an explicit specialization, so this body is never selected at a
-    // real call site. Return a reference to a function-local static rather than
-    // to a temporary — `return {};` here bound a dangling reference to a stack
-    // temporary (UB if ever called), which -Wreturn-stack-address flagged.
-    static const Vector zero{};
-    return zero;
-}
-
-template<typename T>
-double Tree<T>::getPivot(const T& /*object*/, Axis /*axis*/) noexcept
-{
-    return 0.0;
-}
-
-template<typename T>
-Bounds Tree<T>::getBounds(const T& /*object*/) noexcept
-{
-    return {};
-}
+// getPivot / getBounds primary templates are intentionally left undeclared-here
+// (declared but undefined): every instantiated element type (Triangle,
+// PhotonHit) provides explicit specializations below, so the primary-template
+// bodies were never selected. Leaving them undefined turns any accidental
+// unspecialized instantiation into a link error instead of silently returning a
+// zero/default. (rayIntersectsObject is likewise specialized per type below.)
 
 template<typename T>
 double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
@@ -299,12 +282,6 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
     // {
     //     fetchWithinPyramidFromNode(pyramid, node->right, objects);
     // }
-}
-
-template<typename T>
-std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& /*ray*/, const T& /*object*/) noexcept
-{
-    return std::nullopt;
 }
 
 template<typename T>
