@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <stdexcept>
 #include <thread>
 
 namespace Renderer
@@ -247,6 +248,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     std::exception_ptr workerException;
     bool aborted = false;
+    bool drainStalled = false;
 
     // Completion test for the single-photon trace-to-completion pipeline: work is
     // done when the lights owe no more photons AND no photons remain allocated in
@@ -275,6 +277,32 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
             break;
         }
 
+        // Liveness guard (safety net for an abnormal exit, not the normal path).
+        // start() sets m_running synchronously, so every worker is live on the
+        // first iteration; this only fires if EVERY worker has left its exec()
+        // loop while work is still outstanding -- e.g. a future non-exception
+        // return-false/break path. Without it the loop would spin forever with no
+        // worker draining the queue and no exception to surface. The normal case
+        // (at least one worker still running) is completely unaffected.
+        if (photonsAllocated > 0 || photonsToEmit > 0)
+        {
+            bool anyWorkerRunning = false;
+            for (const auto& worker : workers)
+            {
+                if (worker->running())
+                {
+                    anyWorkerRunning = true;
+                    break;
+                }
+            }
+
+            if (!anyWorkerRunning)
+            {
+                drainStalled = true;
+                break;
+            }
+        }
+
         if (progress)
         {
             const size_t remainingWork = photonsToEmit + photonsAllocated;
@@ -294,6 +322,14 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     if (workerException)
     {
         std::rethrow_exception(workerException);
+    }
+
+    if (drainStalled)
+    {
+        throw std::runtime_error(
+            "Render drain stalled: all workers exited with photon work still "
+            "outstanding. This indicates a worker terminated abnormally without "
+            "surfacing an exception.");
     }
 
     // Even on a caller-requested abort, tonemap whatever has accumulated so the

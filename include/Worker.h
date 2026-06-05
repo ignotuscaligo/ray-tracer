@@ -51,6 +51,12 @@ public:
     void exec();
     std::exception_ptr exception();
 
+    // True while the worker's exec() loop is live. Goes false when the worker
+    // exits its loop -- on stop(), on a caught exception, or on any internal
+    // return-false/break path. The render drain loop uses this as a liveness
+    // guard so outstanding work with no live worker can't spin forever.
+    bool running() const { return m_running.load(); }
+
     void setBounceThreshold(size_t bounceThreshold);
 
     // Single-photon DECAY termination cutoff, as an ABSOLUTE magnitude floor in
