@@ -3,10 +3,18 @@
 void LightQueue::registerLight(const std::string& name, size_t count, double luminousFlux)
 {
     std::scoped_lock<std::mutex> lock(m_mutex);
-    // Count-independent: store the light's total luminous flux Phi directly. Each
-    // photon will carry Phi as its weight. No 1/count here — the divide by N is
-    // applied once at image-conversion time.
-    m_flux.insert_or_assign(name, luminousFlux);
+    // Single-photon model: BAKE the per-photon magnitude = Phi / N at emission, so
+    // the carried weight already encodes the photon-count normalization. The gather
+    // is then a PURE ADDITIVE SUM with no 1/N divide at lookup time — emission
+    // distributes the light's total flux Phi across its N photons, and summing all
+    // deposits reconstructs Phi (modulated by transport) directly.
+    //
+    // This is the count-equivalence guarantee: 100 photons each carrying Phi/100
+    // and 10 photons each carrying Phi/10 deposit the same expected total energy,
+    // so doubling N halves per-photon magnitude and the image brightness is
+    // unchanged (only noise drops). A zero count would divide by zero; guard it.
+    const double perPhotonFlux = (count > 0) ? (luminousFlux / static_cast<double>(count)) : 0.0;
+    m_flux.insert_or_assign(name, perPhotonFlux);
     m_photons.insert_or_assign(name, count);
     m_remaining.fetch_add(count);
 }

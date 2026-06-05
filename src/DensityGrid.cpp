@@ -47,7 +47,7 @@ DensityGrid::Cell DensityGrid::lookupCell(const Vector& position) const
     return it->second;
 }
 
-Color DensityGrid::lookupIrradiance(const Vector& position, double photonsPerLight) const
+Color DensityGrid::lookupIrradiance(const Vector& position) const
 {
     const Cell cell = lookupCell(position);
     if (cell.count == 0)
@@ -55,14 +55,18 @@ Color DensityGrid::lookupIrradiance(const Vector& position, double photonsPerLig
         return Color{0.0f, 0.0f, 0.0f};
     }
 
-    const double invN = (photonsPerLight > 0.0) ? (1.0 / photonsPerLight) : 0.0;
+    // Single-photon model: the cell's accumulated power is a PURE ADDITIVE SUM of
+    // per-photon magnitudes that were already baked as Phi/N at emission. There is
+    // NO 1/N count-normalization here — that divide now lives at emission. Only the
+    // GEOMETRIC divide by cell footprint AREA (cellSize^2) remains; that is a units
+    // conversion (power -> irradiance per unit surface area), not a count.
     const double cellArea = m_cellSize * m_cellSize;
     if (cellArea <= 0.0)
     {
         return Color{0.0f, 0.0f, 0.0f};
     }
 
-    const float scale = static_cast<float>(invN / cellArea);
+    const float scale = static_cast<float>(1.0 / cellArea);
     return cell.power * scale;
 }
 

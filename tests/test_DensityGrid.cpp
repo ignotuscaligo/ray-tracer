@@ -62,7 +62,7 @@ TEST_CASE("DensityGrid negative coordinates floor correctly", "[DensityGrid]")
     REQUIRE(grid2.lookupCell(Vector{-3.0, 0.0, 0.0}).count == 2);
 }
 
-TEST_CASE("DensityGrid irradiance lookup normalizes by N and cell area", "[DensityGrid]")
+TEST_CASE("DensityGrid irradiance lookup is a pure additive sum over cell area", "[DensityGrid]")
 {
     const double cellSize = 4.0;
     DensityGrid grid(cellSize);
@@ -70,17 +70,18 @@ TEST_CASE("DensityGrid irradiance lookup normalizes by N and cell area", "[Densi
     // Deposit total power 8.0 (white) into one cell.
     grid.add(Vector{1.0, 1.0, 1.0}, Color{8.0f, 8.0f, 8.0f});
 
-    const double N = 2.0;
-    const Color irr = grid.lookupIrradiance(Vector{2.0, 2.0, 2.0}, N);
+    const Color irr = grid.lookupIrradiance(Vector{2.0, 2.0, 2.0});
 
-    // expected = (1/N) * sumPower / cellArea = (1/2) * 8 / 16 = 0.25
-    const float expected = static_cast<float>((1.0 / N) * 8.0 / (cellSize * cellSize));
+    // Single-photon model: NO 1/N count-normalization (the 1/N is baked into each
+    // deposited magnitude at emission). Only the geometric divide by cell area
+    // remains: expected = sumPower / cellArea = 8 / 16 = 0.5.
+    const float expected = static_cast<float>(8.0 / (cellSize * cellSize));
     REQUIRE(approxEqual(irr.red, expected));
     REQUIRE(approxEqual(irr.green, expected));
     REQUIRE(approxEqual(irr.blue, expected));
 
     // Empty cell -> black.
-    const Color empty = grid.lookupIrradiance(Vector{100.0, 100.0, 100.0}, N);
+    const Color empty = grid.lookupIrradiance(Vector{100.0, 100.0, 100.0});
     REQUIRE(approxEqual(empty.red, 0.0f));
     REQUIRE(approxEqual(empty.green, 0.0f));
     REQUIRE(approxEqual(empty.blue, 0.0f));

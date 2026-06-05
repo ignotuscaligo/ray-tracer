@@ -282,7 +282,11 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
     }
 
     const Vector wi = -photonHit.photon.ray.direction;  // direction photon came from
-    const double invN = 1.0 / m_photonsPerLight;
+
+    // Single-photon model: NO 1/N count-normalization here. Each photon's magnitude
+    // was baked as Phi/N at emission, so the splat sums per-photon contributions
+    // additively. Only the geometric divide by footprint AREA (pi r^2) below
+    // remains — that is a units conversion, not a count.
 
     for (const SplatTarget& target : m_splatTargets)
     {
@@ -416,7 +420,7 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
         const Color brdf = material->evaluate(wi, toCameraDir, photonHit.hit.normal);
 
         const double area = Utility::pi * r * r;
-        const float scale = static_cast<float>(invN * cosCamera / area);
+        const float scale = static_cast<float>(cosCamera / area);
         const Color contribution = brdf * photonHit.photon.color * scale;
 
         if (contribution.brightness() <= 0.0f)

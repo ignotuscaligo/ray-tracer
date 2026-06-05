@@ -63,7 +63,8 @@ struct Context
     const DensityGrid& grid;
     const MaterialLibrary& materials;
     const AnimationQuery* animation;
-    double photonsPerLight;
+    // (No photonsPerLight: the grid gather is a pure additive sum now — the 1/N is
+    // baked at emission, so the lookup needs no count normalization.)
 };
 
 // Follow the perfect reflection from a delta surface until a non-delta surface,
@@ -143,7 +144,7 @@ Color reflectedRadiance(const Context& ctx,
     // wi is unused by Lambertian::evaluate; pass wo so any hemisphere check in a
     // glossy material treats this as a same-side query.
     const Color brdf = material->evaluate(wo, wo, hit->normal);
-    const Color irradiance = ctx.grid.lookupIrradiance(hit->position, ctx.photonsPerLight);
+    const Color irradiance = ctx.grid.lookupIrradiance(hit->position);
 
     return brdf * irradiance;
 }
@@ -257,6 +258,11 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
            size_t workerCount,
            Buffer& buffer)
 {
+    // photonsPerLight is retained in the public signature for caller stability but
+    // is no longer used: the single-photon gather is a pure additive sum (the 1/N
+    // count-normalization is baked at emission).
+    (void)photonsPerLight;
+
     Result result;
     const size_t width = camera->width();
     const size_t height = camera->height();
@@ -265,7 +271,7 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
         return result;
     }
 
-    const Context ctx{objects, grid, materials, animation, photonsPerLight};
+    const Context ctx{objects, grid, materials, animation};
 
     const size_t threads = std::max<size_t>(1, workerCount);
     const size_t effectiveThreads = std::min(threads, height);

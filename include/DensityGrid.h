@@ -24,12 +24,14 @@
 // store the running sum of deposited photon power (Color) and the deposit count.
 // At lookup we normalize:
 //
-//   irradiance(cell) = (1 / N) * sumPower / cellArea
+//   irradiance(cell) = sumPower / cellArea
 //
-// where N = photonsPerLight (the single count normalization the photon mapper
-// applies once) and cellArea = cellSize^2 (the world-space area one cell face
-// projects onto a surface — the same role the per-pixel pi*r^2 footprint played
-// in the old gather). A diffuse surface's reflected radiance toward any viewer
+// Single-photon model: sumPower is a PURE ADDITIVE SUM of per-photon magnitudes
+// that were baked as Phi/N at emission, so NO 1/N count-normalization is applied
+// at lookup. cellArea = cellSize^2 (the world-space area one cell face projects
+// onto a surface — the same role the per-pixel pi*r^2 footprint played in the old
+// gather) is the only divide, and it is a units conversion, not a count. A diffuse
+// surface's reflected radiance toward any viewer
 // is then  albedo/pi * irradiance, which the mirror gather computes by
 // multiplying the cell irradiance by the reflected surface's BRDF.
 //
@@ -64,10 +66,13 @@ public:
     void add(const Vector& position, const Color& power);
 
     // Look up the cell containing `position` and return its IRRADIANCE estimate:
-    //   (1 / photonsPerLight) * sumPower / (cellSize * cellSize).
-    // Returns black for an empty / never-deposited cell. `photonsPerLight` is the
-    // photon-count normalization N. Read-only; valid after the photon pass drains.
-    Color lookupIrradiance(const Vector& position, double photonsPerLight) const;
+    //   sumPower / (cellSize * cellSize).
+    // The accumulated power is a PURE ADDITIVE SUM of per-photon magnitudes baked
+    // as Phi/N at emission, so there is NO 1/N count-normalization here — only the
+    // geometric divide by cell footprint area (a units conversion). Returns black
+    // for an empty / never-deposited cell. Read-only; valid after the photon pass
+    // drains.
+    Color lookupIrradiance(const Vector& position) const;
 
     // Raw accumulated power summed in the cell containing `position` (no
     // normalization). Black if the cell is empty. Exposed for tests.
