@@ -478,60 +478,55 @@ bool Worker::processPhotons()
 {
     auto workStart = std::chrono::system_clock::now();
 
-    // Claim-output-first: before consuming any new source photons, drain any
-    // emitters parked from a previous iteration into the emitter queue. If the
-    // overflow can't fully drain, do NOT fetch new photons this round — that
-    // would grow the overflow without bound. Leave the source photons in the
-    // photonQueue (we simply don't fetch) and let the worker run other stages,
-    // which frees downstream room. This is what makes the stage lossless.
-    // (Wave 4b: the hit-overflow / splat path is gone; only the emitter daughter
-    // path remains.)
-    if (!m_emitterOverflow.empty())
-    {
-        flushIntoQueue(m_emitterOverflow, *emitterQueue);
-        syncOverflowGauge();
-
-        auto workEnd = std::chrono::system_clock::now();
-        photonDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
-        return true;
-    }
-
     auto photonsBlock = photonQueue->fetch(m_fetchSize);
 
-    m_hitBuffer.clear();
+    // Single local slot used to scatter the next photon in the trace-to-completion
+    // loop. generateDaughters() writes into a WorkQueue<Photon>::Block; we wrap a
+    // one-element vector in a Block so the SAME scatter primitive the pipeline has
+    // always used produces the continuation photon — identical RNG draw, identical
+    // weight math — but in-place instead of via a requeue. Allocated once per call.
+    std::vector<Photon> scatterSlot(1);
 
-    for (auto& photon : photonsBlock)
+    for (auto& sourcePhoton : photonsBlock)
     {
-        // Skip photons with no brightness left, will drop them from the queue
-        if (photon.color.brightness() < std::numeric_limits<double>::epsilon())
-        {
-            continue;
-        }
+        // Trace this emitted photon to COMPLETION on this worker: intersect,
+        // deposit + splat at each bounce, scatter exactly one importance-sampled
+        // continuation photon, and repeat until the photon decays below the
+        // termination floor, reaches the bounce cap, or escapes the scene. No
+        // per-bounce requeue: the whole random walk stays in this loop on this
+        // worker's RNG (a Monte-Carlo reshuffle relative to the old requeue path,
+        // not a change in the expected image).
+        Photon photon = sourcePhoton;
 
-        m_volumeHitBuffer.clear();
-
-        for (auto& object : objects)
+        while (true)
         {
-            if (!object->hasType<Volume>())
+            // Skip / terminate photons with no brightness left.
+            if (photon.color.brightness() < std::numeric_limits<double>::epsilon())
             {
-                continue;
+                break;
             }
 
-            std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
-                photon.ray, m_castBuffer, photon.time, animationQuery.get());
-
-            if (hit)
+            // Nearest-hit raycast across all volumes (front-most valid hit).
+            m_volumeHitBuffer.clear();
+            for (auto& object : objects)
             {
-                m_volumeHitBuffer.push_back({photon, *hit});
-            }
-        }
+                if (!object->hasType<Volume>())
+                {
+                    continue;
+                }
 
-        if (!m_volumeHitBuffer.empty())
-        {
+                std::optional<Hit> hit = std::static_pointer_cast<Volume>(object)->castRayAt(
+                    photon.ray, m_castBuffer, photon.time, animationQuery.get());
+
+                if (hit)
+                {
+                    m_volumeHitBuffer.push_back({photon, *hit});
+                }
+            }
+
             double minDistance = std::numeric_limits<double>::max();
             size_t minIndex = 0;
             bool validHit = false;
-
             for (size_t i = 0; i < m_volumeHitBuffer.size(); ++i)
             {
                 if (m_volumeHitBuffer[i].hit.distance < minDistance && m_volumeHitBuffer[i].hit.distance > selfHitThreshold)
@@ -542,35 +537,24 @@ bool Worker::processPhotons()
                 }
             }
 
-            if (validHit)
+            if (!validHit)
             {
-                m_hitBuffer.push_back(m_volumeHitBuffer[minIndex]);
+                // Escaped the scene — the random walk ends.
+                break;
             }
-        }
-    }
 
-    if (!m_hitBuffer.empty())
-    {
-        // Wave 4b: the forward splat is REMOVED. Bounce-hits are no longer pushed
-        // to the hitQueue (the splat / camera-as-accumulator path is gone). The
-        // image is produced after the pass by the gather over the cloud. Each
-        // non-delta hit is DEPOSITED into the cloud, and bounceable hits still
-        // feed the EmitterQueue (daughter path) so multi-bounce light transport
-        // continues to fill the cloud.
-        for (auto& photonHit : m_hitBuffer)
-        {
+            PhotonHit photonHit = m_volumeHitBuffer[minIndex];
             std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 
             // Storage pivot M3: accumulate this NON-DELTA bounce's energy into the
-            // QUANTIZED DENSITY GRID cell it landed in, then discard the photon.
-            // This replaces the per-photon BounceCloud record entirely: storage is
-            // bounded by occupied cells, not photon count. A Lambertian surface's
-            // outgoing radiance is view-independent, so the cell accumulates the
-            // incoming photon power (an irradiance accumulator); the mirror gather
-            // reads it back and multiplies by the reflected surface's BRDF. Pure
-            // mirrors / delta materials are excluded — a delta bounce has no diffuse
-            // deposit; it is the ray-extension case in the gather. The add is
-            // sharded + locked per cell, so distinct cells do not serialize workers.
+            // QUANTIZED DENSITY GRID cell it landed in. Storage is bounded by
+            // occupied cells, not photon count. A Lambertian surface's outgoing
+            // radiance is view-independent, so the cell accumulates the incoming
+            // photon power (an irradiance accumulator); the mirror gather reads it
+            // back and multiplies by the reflected surface's BRDF. Pure mirrors /
+            // delta materials are excluded — a delta bounce has no diffuse deposit;
+            // it is the ray-extension case in the gather. The add is sharded +
+            // locked per cell, so distinct cells do not serialize workers.
             if (densityGrid && material && !material->isDelta())
             {
                 densityGrid->add(photonHit.hit.position, photonHit.photon.color);
@@ -578,47 +562,61 @@ bool Worker::processPhotons()
 
             // Storage pivot M2: DIRECT CAMERA SPLAT for camera-visible non-delta
             // surfaces. Projects this bounce into the camera and accumulates its
-            // outgoing radiance into the pixel buffer (sharp direct image), then
-            // the photon is discarded — no per-photon storage for the direct path.
+            // outgoing radiance into the pixel buffer (sharp direct image).
             splatToCamera(photonHit, material);
 
             // Continue the random walk only while BOTH terminators allow it; the
             // photon dies at WHICHEVER fires FIRST:
             //   1. BOUNCE CAP (the scene's $bounceThreshold): a HARD per-photon
             //      ceiling on path depth. A photon that has already bounced
-            //      m_bounceThreshold times is terminal — no further emitter is
-            //      pushed. This is the real depth bound: scenes set bounceThreshold
+            //      m_bounceThreshold times is terminal. Scenes set bounceThreshold
             //      2 or 3 expecting short paths, and that value is honored exactly.
             //   2. ABSOLUTE DECAY: kill the photon once its current magnitude falls
             //      below a fixed absolute floor (terminationThreshold, in photon-
-            //      magnitude / flux units). This is monotonic — every BSDF weight is
-            //      <= 1, so magnitude only decreases across bounces. Because the
-            //      floor is absolute (not relative to emission), a BRIGHTER photon
-            //      survives MORE bounces than a dimmer one before crossing it; the
-            //      bounce cap above is what keeps that bounded.
-            //      No Russian-roulette survivor reweight: termination is a hard
-            //      decay + cutoff, NOT a probabilistic 1/p boost.
+            //      magnitude / flux units). Monotonic — every BSDF weight is <= 1,
+            //      so magnitude only decreases across bounces. The floor is absolute
+            //      (not relative to emission), so a BRIGHTER photon survives MORE
+            //      bounces; the bounce cap keeps that bounded. No Russian-roulette
+            //      survivor reweight: termination is a hard decay + cutoff.
             const bool decayAlive = photonDecayAlive(photonHit.photon, m_terminationThreshold);
-
-            if (decayAlive && photonHit.photon.bounces < static_cast<int>(m_bounceThreshold))
+            if (!decayAlive || photonHit.photon.bounces >= static_cast<int>(m_bounceThreshold))
             {
-                // Single-photon continuation: push ONE compact Emitter carrying the
-                // hit's generation state. Every bounce scatters exactly one outgoing
-                // photon, so the population stays constant.
-                m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(1));
+                break;
             }
+
+            if (!material)
+            {
+                break;
+            }
+
+            // Scatter exactly ONE importance-sampled continuation photon (the
+            // single-photon model: every bounce is 1-in-1-out, population constant).
+            // generateDaughters with totalDaughters=1 is the identical primitive the
+            // requeue path used — same sample() draw, same magnitude * BSDF weight.
+            WorkQueue<Photon>::Block block(0, 1, scatterSlot);
+            material->generateDaughters(
+                block,
+                /*blockStart=*/0,
+                /*globalStart=*/0,
+                /*count=*/1,
+                /*totalDaughters=*/1,
+                photonHit.photon.ray.direction,
+                photonHit.hit.normal,
+                photonHit.hit.position,
+                photonHit.photon.color,
+                photonHit.photon.time,
+                photonHit.photon.bounces,
+                photonHit.photon.lightId,
+                m_generator);
+
+            // Continue the walk with the scattered photon.
+            photon = scatterSlot[0];
         }
-
-        flushIntoQueue(m_emitterOverflow, *emitterQueue);
     }
-
-    syncOverflowGauge();
 
     photonsProcessed += photonsBlock.size();
 
-    // We have fully captured this batch's output into the queues + overflow
-    // buffers, so the source photons can be released. They are not lost: their
-    // bounce-hits are either enqueued or parked in the persistent overflow.
+    // The whole batch has been traced to completion; release the source slots.
     photonQueue->release(photonsBlock);
 
     auto workEnd = std::chrono::system_clock::now();
