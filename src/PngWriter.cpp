@@ -1,160 +1,48 @@
 #include "PngWriter.h"
 
-#include <cstring>
+#include "PngWriteSession.h"
+
 #include <iostream>
+#include <vector>
 
-PngWriter::PngWriter(const std::filesystem::path& path)
-{
-    m_file = fopen(path.string().c_str(), "wb");
-    if (m_file == nullptr) {
-        std::cout << "Could not open file " << path.generic_string() << " for writing" << std::endl;
-        return;
-    }
-
-    m_structPtr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    if (m_structPtr == nullptr)
-    {
-        std::cout << "Could not create write structure" << std::endl;
-        return;
-    }
-
-    m_infoPtr = png_create_info_struct(m_structPtr);
-    if (m_infoPtr == nullptr)
-    {
-        std::cout << "Could not create info structure" << std::endl;
-        return;
-    }
-
-    png_init_io(m_structPtr, m_file);
-}
-
-PngWriter::PngWriter(PngWriter&& other) noexcept
-    : m_file(std::move(other.m_file))
-    , m_structPtr(std::move(other.m_structPtr))
-    , m_infoPtr(std::move(other.m_infoPtr))
-{
-}
-
-PngWriter::~PngWriter()
-{
-    if (m_infoPtr != nullptr)
-    {
-        png_free_data(m_structPtr, m_infoPtr, PNG_FREE_ALL, -1);
-    }
-
-    if (m_structPtr != nullptr)
-    {
-        png_destroy_write_struct(&m_structPtr, static_cast<png_infopp>(nullptr));
-    }
-
-    if (m_file != nullptr)
-    {
-        fclose(m_file);
-    }
-}
-
-PngWriter& PngWriter::operator=(PngWriter&& other) noexcept
-{
-    m_file = std::move(other.m_file);
-    m_structPtr = std::move(other.m_structPtr);
-    m_infoPtr = std::move(other.m_infoPtr);
-    return *this;
-}
-
-bool PngWriter::valid() const noexcept
-{
-    return m_file != nullptr &&
-        m_structPtr != nullptr &&
-        m_infoPtr != nullptr;
-}
-
-png_structp PngWriter::structPtr() noexcept
-{
-    return m_structPtr;
-}
-
-png_infop PngWriter::infoPtr() noexcept
-{
-    return m_infoPtr;
-}
-
-void PngWriter::setTitle(const std::string& title)
-{
-    if (!valid())
-    {
-        return;
-    }
-
-    png_text title_text{};
-    // libpng's png_text fields are non-const char*, but png_set_text does not
-    // modify the key/text. Keep mutable backing storage and const_cast the
-    // string literal key (avoids the ISO C++11 writable-string conversion that
-    // -Wwritable-strings flags).
-    std::vector<char> titleString(title.size() + 1, '\0');
-    // Bounded copy (the vector is sized to title.size()+1 with a trailing NUL):
-    // memcpy with an explicit length avoids the unbounded-strcpy analyzer finding.
-    std::memcpy(titleString.data(), title.data(), title.size());
-    title_text.compression = PNG_TEXT_COMPRESSION_NONE;
-    title_text.key = const_cast<png_charp>("Title");
-    title_text.text = titleString.data();
-    png_set_text(m_structPtr, m_infoPtr, &title_text, 1);
-}
-
-void PngWriter::writeImage(Image& image)
-{
-    if (!valid())
-    {
-        return;
-    }
-
-    // Write header (8 bit colour depth)
-    png_set_IHDR(m_structPtr, m_infoPtr, image.width(), image.height(),
-        16, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
-        PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-
-    png_write_info(m_structPtr, m_infoPtr);
-
-    // Copy image data
-    png_bytepp rowPointers = new png_bytep[sizeof(png_bytep) * image.height()];
-    for (size_t y = 0; y < image.height(); ++y)
-    {
-        rowPointers[y] = new png_byte[png_get_rowbytes(m_structPtr, m_infoPtr)];
-        for (size_t x = 0; x < image.width(); ++x)
-        {
-            for (size_t k = 0; k < 3; ++k)
-            {
-                png_save_uint_16(&(rowPointers[y][(x * 6) + (k * 2)]), image.getPixel(x, y)[k]);
-            }
-        }
-    }
-
-    // Write image data
-    png_write_image(m_structPtr, rowPointers);
-
-    // End write
-    png_write_end(m_structPtr, nullptr);
-
-    for (size_t y = 0; y < image.height(); ++y)
-    {
-        delete[] rowPointers[y];
-    }
-
-    delete[] rowPointers;
-}
-
-void PngWriter::writeImage(const std::filesystem::path& path, Image& image, const std::string& title)
+bool PngWriter::writeImage(const std::filesystem::path& path, Image& image,
+                           const std::string& title)
 {
     std::cout << "---" << std::endl;
     std::cout << "Write image " << path.generic_string() << std::endl;
-    PngWriter writer(path);
 
-    if (!writer.valid())
+    const uint32_t width = static_cast<uint32_t>(image.width());
+    const uint32_t height = static_cast<uint32_t>(image.height());
+
+    // Pack the Image's Pixels into a flat 16-bit RGB buffer (row major,
+    // top-left origin) for the session to encode.
+    std::vector<png_uint_16> pixels(static_cast<size_t>(width) * height * 3U);
+    for (size_t y = 0; y < image.height(); ++y)
     {
-        std::cout << "Failed to initialize png writer" << std::endl;
-        return;
+        for (size_t x = 0; x < image.width(); ++x)
+        {
+            const Pixel& p = image.getPixel(x, y);
+            const size_t base = ((y * image.width()) + x) * 3U;
+            pixels[base + 0] = p[0];
+            pixels[base + 1] = p[1];
+            pixels[base + 2] = p[2];
+        }
     }
 
-    // Set title
-    writer.setTitle(title);
-    writer.writeImage(image);
+    PngWriteSession session(path);
+    if (!session.valid())
+    {
+        std::cout << "Failed to initialize png writer for "
+                  << path.generic_string() << std::endl;
+        return false;
+    }
+
+    if (!session.writeRgb16(width, height, pixels, title))
+    {
+        std::cout << "Failed to write png " << path.generic_string()
+                  << std::endl;
+        return false;
+    }
+
+    return true;
 }

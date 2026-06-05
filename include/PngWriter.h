@@ -2,35 +2,19 @@
 
 #include "Image.h"
 
-#include <cstring>
 #include <filesystem>
-#include <png.h>
-#include <stdio.h>
 #include <string>
 
+// Thin convenience wrapper over PngWriteSession for the headless renderer's
+// 16-bit RGB Image output. All the libpng lifetime/error handling lives in
+// PngWriteSession; this just packs an Image into the RGB16 layout and routes it
+// through that single safe surface.
 class PngWriter
 {
 public:
-    PngWriter(const std::filesystem::path& path);
-    PngWriter(const PngWriter& other) = delete;
-    PngWriter(PngWriter&& other) noexcept;
-    ~PngWriter();
-
-    PngWriter& operator=(const PngWriter& other) = delete;
-    PngWriter& operator=(PngWriter&& other) noexcept;
-
-    bool valid() const noexcept;
-
-    png_structp structPtr() noexcept;
-    png_infop infoPtr() noexcept;
-
-    void setTitle(const std::string& title);
-    void writeImage(Image& image);
-
-    static void writeImage(const std::filesystem::path& path, Image& image, const std::string& title);
-
-private:
-    FILE* m_file = nullptr;
-    png_structp m_structPtr = nullptr;
-    png_infop m_infoPtr = nullptr;
+    // Write `image` to `path` as a 16-bit RGB PNG with an optional tEXt title.
+    // Returns true on success. Equivalent on-disk bytes to the previous
+    // hand-rolled writer.
+    static bool writeImage(const std::filesystem::path& path, Image& image,
+                           const std::string& title);
 };
