@@ -20,11 +20,14 @@
 //       dot < 0  -> entering (air -> glass): n1 = 1, n2 = ior, normal as given.
 //       dot > 0  -> exiting  (glass -> air): n1 = ior, n2 = 1, normal flipped.
 //
-// CAMERA SIDE (sharp): the gather traces BOTH lobes and weights them by R / 1-R.
-// PHOTON SIDE (forward pass): sample() picks ONE lobe stochastically by R
-// (Russian roulette), returning weight 1 (energy conserved by the choice), so a
-// single photon continues. Refracted photons that land on diffuse surfaces
-// deposit caustic energy into the density grid.
+// CAMERA SIDE and PHOTON SIDE now share one stochastic path: sample() picks ONE
+// lobe by Fresnel R (Russian roulette) — reflect w.p. R, refract w.p. 1-R —
+// returning weight = tint (energy conserved by the choice, the R / 1-R cancelling
+// the selection probability), so a single ray continues. The camera gather
+// averages multiple such samples per pixel to remove the choice noise; refracted
+// photons that land on diffuse surfaces deposit caustic energy into the density
+// grid. (The earlier camera-side both-lobe split was exponential per pixel and
+// has been removed.)
 class DielectricMaterial : public Material
 {
 public:
