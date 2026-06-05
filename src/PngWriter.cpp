@@ -1,5 +1,6 @@
 #include "PngWriter.h"
 
+#include <cstring>
 #include <iostream>
 
 PngWriter::PngWriter(const std::filesystem::path& path)
@@ -90,7 +91,9 @@ void PngWriter::setTitle(const std::string& title)
     // string literal key (avoids the ISO C++11 writable-string conversion that
     // -Wwritable-strings flags).
     std::vector<char> titleString(title.size() + 1, '\0');
-    strcpy(titleString.data(), title.c_str());
+    // Bounded copy (the vector is sized to title.size()+1 with a trailing NUL):
+    // memcpy with an explicit length avoids the unbounded-strcpy analyzer finding.
+    std::memcpy(titleString.data(), title.data(), title.size());
     title_text.compression = PNG_TEXT_COMPRESSION_NONE;
     title_text.key = const_cast<png_charp>("Title");
     title_text.text = titleString.data();

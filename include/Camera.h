@@ -27,7 +27,7 @@ public:
 
     Camera();
     Camera(size_t width, size_t height, double verticalFieldOfView);
-    virtual ~Camera() = default;
+    ~Camera() override = default;
 
     size_t width() const;
     size_t height() const;

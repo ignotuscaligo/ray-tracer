@@ -1,0 +1,57 @@
+# clang-tidy configuration for the ray-tracer project.
+#
+# Goal: catch real bugs and clear performance/correctness issues without churning
+# the codebase on stylistic nits. Enable the high-signal families (bugprone,
+# clang-analyzer, performance) plus a curated subset of modernize/readability,
+# then disable the noisy/opinionated individual checks.
+#
+# Run (after configuring the conan-release preset, which exports
+# compile_commands.json into build/Release):
+#
+#   run-clang-tidy -p build/Release $(git ls-files 'src/*.cpp' 'editor/*.cpp')
+#
+# or single file:
+#
+#   clang-tidy -p build/Release src/Worker.cpp
+
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-using,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-use-bool-literals,
+  modernize-loop-convert,
+  modernize-redundant-void-arg,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-redundant-member-init,
+  readability-simplify-boolean-expr,
+  readability-container-size-empty,
+  readability-non-const-parameter,
+  readability-static-definition-in-anonymous-namespace,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -readability-uppercase-literal-suffix,
+  -performance-avoid-endl
+
+# Treat no checks as errors by default; CI decides whether to fail. This keeps
+# local runs informational.
+WarningsAsErrors: ''
+
+# Only analyze our own headers (include/, editor/), not Conan deps or system
+# headers. Matches paths under the project tree.
+HeaderFilterRegex: '.*/(include|editor)/[^/]+\.h$'
+
+FormatStyle: none
