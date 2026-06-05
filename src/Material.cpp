@@ -1,5 +1,6 @@
 #include "Material.h"
 
+#include "Contracts.h"
 #include "Utility.h"
 
 #include <algorithm>
@@ -91,6 +92,35 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.lightId = parentLightId;
 
         const BSDFSample s = sample(incident, normal, generator);
+
+        // BSDF boundary postcondition. sample() is the public surface contract
+        // every Material subclass must honor; these were previously only checked
+        // in test_BSDF. Promoting them to an in-code postcondition catches a
+        // non-conforming subclass at the live call site (the worker's scatter),
+        // not just under the unit test. A valid sample must carry:
+        //   - finite, non-negative per-channel weight (the MC throughput f*cos/pdf;
+        //     never negative, never NaN/Inf — energy can't go negative or undefined),
+        //   - pdf >= 0 (a probability density; 0 iff a delta lobe),
+        //   - a finite, unit-length outgoing direction (every dot-product / scatter
+        //     downstream assumes the direction is normalized).
+        // Inert in release; the math is untouched.
+        POSTCONDITION_MSG(std::isfinite(s.weight.red) && std::isfinite(s.weight.green) &&
+                              std::isfinite(s.weight.blue),
+                          "BSDF sample weight must be finite");
+        POSTCONDITION_MSG(s.weight.red >= 0.0f && s.weight.green >= 0.0f && s.weight.blue >= 0.0f,
+                          "BSDF sample weight must be non-negative");
+        POSTCONDITION_MSG(std::isfinite(s.pdf) && s.pdf >= 0.0, "BSDF sample pdf must be finite and >= 0");
+        if (s.valid)
+        {
+            const double dirLen2 = Vector::dot(s.direction, s.direction);
+            POSTCONDITION_MSG(std::isfinite(dirLen2), "BSDF sampled direction must be finite");
+            POSTCONDITION_MSG(std::abs(dirLen2 - 1.0) < 1e-3,
+                              "BSDF sampled direction must be unit length");
+            // pdf == 0 iff the lobe is a Dirac delta (the gather/splat dispatch
+            // relies on this equivalence to skip delta materials).
+            POSTCONDITION_MSG((s.pdf == 0.0) == s.isDelta,
+                              "BSDF pdf == 0 iff isDelta");
+        }
 
         if (!s.valid)
         {

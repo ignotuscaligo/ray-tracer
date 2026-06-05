@@ -2,6 +2,7 @@
 
 #include "AnimationQuery.h"
 #include "Color.h"
+#include "Contracts.h"
 #include "Light.h"
 #include "Pixel.h"
 #include "Utility.h"
@@ -363,6 +364,20 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
                 g_splatLuminanceClamped.fetch_add(1, std::memory_order_relaxed);
             }
         }
+
+        // Deposit boundary: NO NaN/Inf may reach the camera buffer. A single
+        // poisoned channel (e.g. a NaN footprint from a degenerate
+        // tan(pixelHalfAngle), or an Inf from a collapsed area) corrupts a pixel
+        // permanently — the atomic float add propagates the NaN and the tonemap
+        // can't recover it. The geometric guards above (cosCamera > 0, r > 0,
+        // brightness > 0) should already exclude this; the contract pins that
+        // they actually do at the deposit edge. Also non-negative: the splat only
+        // ever adds energy.
+        PRECONDITION_MSG(std::isfinite(clamped.red) && std::isfinite(clamped.green) &&
+                             std::isfinite(clamped.blue),
+                         "NaN/Inf splat contribution reaching Buffer::addColor");
+        PRECONDITION_MSG(clamped.red >= 0.0f && clamped.green >= 0.0f && clamped.blue >= 0.0f,
+                         "negative splat contribution reaching Buffer::addColor");
 
         target.buffer->addColor(coord, clamped);
     }

@@ -63,6 +63,13 @@ if (RAYTRACER_SANITIZE)
         -fno-omit-frame-pointer
         -g
     )
+    # Keep design-by-contract assertions (include/Contracts.h) ACTIVE under a
+    # sanitizer build even though it is otherwise a Release config (NDEBUG set).
+    # A contract failure aborts, which the sanitizer/test harness catches — so
+    # the highest-leverage place to run contracts is exactly the sanitized job.
+    target_compile_definitions(ray-tracer-flags INTERFACE
+        RAYTRACER_SANITIZE_BUILD=1
+    )
     # Sanitizer runtime must be on the link line for every project target.
     target_link_options(ray-tracer-flags INTERFACE
         -fsanitize=${_rt_san}

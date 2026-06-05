@@ -1,5 +1,7 @@
 #include "SceneLoader.h"
 
+#include "Contracts.h"
+
 #include "AreaLight.h"
 #include "DielectricMaterial.h"
 #include "LambertianMaterial.h"
@@ -43,6 +45,34 @@ void setFromJsonIfPresent(T& output, json jsonContainer, const std::string& key,
             std::cout << "  Setting " << key << " to " << output << std::endl;
         }
     }
+}
+
+// Boundary contract: the scene file is external input, so a malformed render
+// config is a caller (scene-author) error, not an internal invariant. These
+// preconditions fail LOUDLY in debug/sanitizer builds instead of letting a
+// degenerate value silently produce a broken render (e.g. a 0-dim image, a
+// 0-photons-per-light splat that is silently disabled, or a densityCellScale
+// that Renderer.cpp clamps up to 0.05 with no warning). Inert in release.
+void validateRenderSettings(const RenderSettings& settings)
+{
+    PRECONDITION_MSG(settings.imageWidth > 0, "$width must be > 0");
+    PRECONDITION_MSG(settings.imageHeight > 0, "$height must be > 0");
+    PRECONDITION_MSG(settings.photonsPerLight > 0,
+                     "$photonsPerLight must be > 0 (0 silently disables the camera splat)");
+    PRECONDITION_MSG(settings.workerCount > 0, "$workerCount must be >= 1");
+    PRECONDITION_MSG(settings.fetchSize > 0, "$fetchSize must be > 0");
+    PRECONDITION_MSG(settings.photonQueueSize > 0, "$photonQueueSize must be > 0");
+    PRECONDITION_MSG(settings.bounceThreshold >= 1, "$bounceThreshold must be >= 1");
+    PRECONDITION_MSG(settings.terminationThreshold >= 0.0,
+                     "$terminationThreshold is an absolute magnitude floor; must be >= 0");
+    // densityCellScale is silently clamped to 0.05 in Renderer.cpp. Surface a
+    // non-positive value at the input boundary rather than letting the clamp hide it.
+    PRECONDITION_MSG(settings.densityCellScale > 0.0,
+                     "$densityCellScale must be > 0 (Renderer silently clamps it otherwise)");
+    PRECONDITION_MSG(settings.splatMinRadiusScale >= 0.0,
+                     "$splatMinRadiusScale must be >= 0 (0 disables the floor)");
+    PRECONDITION_MSG(settings.splatLuminanceClamp >= 0.0,
+                     "$splatLuminanceClamp must be >= 0 (0 disables the clamp)");
 }
 
 class VectorParseError : public std::runtime_error
@@ -759,6 +789,10 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
     {
         std::cout << "Parsed " << scene.objects.size() << " object(s) from json" << std::endl;
     }
+
+    // Boundary contract: reject degenerate render config (silently-clamped or
+    // illegal values) once both config blocks have been merged with defaults.
+    validateRenderSettings(settings);
 
     return scene;
 }
