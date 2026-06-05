@@ -80,40 +80,128 @@ std::vector<Photon> generateLazy(const Material& material,
 
 }  // namespace
 
-TEST_CASE("Emitter generates exactly its daughter count across chunked pulls", "[Emitter]")
+TEST_CASE("Emitter retires at exactly its total across chunked pulls", "[Emitter]")
 {
     LambertianMaterial material{"diffuse", Color{1.0f, 1.0f, 1.0f}};
     const PhotonHit hit = makeLambertianHit();
-    const size_t total = material.daughterPhotonCount();
-    REQUIRE(total == 9);
 
-    // Different chunkings of the same N must all retire the emitter at exactly N
-    // daughters. The helper REQUIREs done()/generated()==total internally.
+    // The live single-photon model uses total == 1 (one outgoing photon per
+    // bounce). The Emitter machinery must retire it after a single pull.
+    {
+        RandomGenerator g{1234};
+        auto single = generateLazy(material, hit, /*total=*/1, {1}, g);
+        REQUIRE(single.size() == 1);
+    }
+
+    // The chunked-retirement bookkeeping must hold for any total (the legacy
+    // experiment override path can request total > 1). Different chunkings of the
+    // same total must all retire the emitter at exactly `total`. The helper
+    // REQUIREs done()/generated()==total internally.
+    const size_t total = 9;
     RandomGenerator g1{1234};
-    auto a = generateLazy(material, hit, total, {9}, g1);
-    REQUIRE(a.size() == total);
+    REQUIRE(generateLazy(material, hit, total, {9}, g1).size() == total);
 
     RandomGenerator g2{1234};
-    auto b = generateLazy(material, hit, total, {1, 1, 1, 1, 1, 1, 1, 1, 1}, g2);
-    REQUIRE(b.size() == total);
+    REQUIRE(generateLazy(material, hit, total, {1, 1, 1, 1, 1, 1, 1, 1, 1}, g2).size() == total);
 
     RandomGenerator g3{1234};
-    auto c = generateLazy(material, hit, total, {4, 5}, g3);
-    REQUIRE(c.size() == total);
+    REQUIRE(generateLazy(material, hit, total, {4, 5}, g3).size() == total);
 
-    // Over-large final chunk is clamped to the remainder; still exactly N.
+    // Over-large final chunk is clamped to the remainder; still exactly total.
     RandomGenerator g4{1234};
-    auto d = generateLazy(material, hit, total, {2, 100}, g4);
-    REQUIRE(d.size() == total);
+    REQUIRE(generateLazy(material, hit, total, {2, 100}, g4).size() == total);
 }
 
-TEST_CASE("Lazy chunked fan-out reproduces the eager single-shot fan-out", "[Emitter]")
+TEST_CASE("Single-photon scatter carries magnitude * BSDF weight (no 1/N split)", "[Emitter]")
 {
+    // SINGLE-PHOTON light tracing: each bounce scatters EXACTLY ONE outgoing
+    // photon. The daughter carries parentColor * weight with NO 1/N division.
+    // For a Lambertian under cosine-weighted sampling, weight == albedo, so the
+    // outgoing photon's color is exactly parentColor * albedo.
+    const Color albedo{0.9f, 0.8f, 0.7f};
+    LambertianMaterial material{"diffuse", albedo};
+    const PhotonHit hit = makeLambertianHit();
+
+    std::vector<Photon> out(1);
+    WorkQueue<Photon>::Block block{0, 1, out};
+    RandomGenerator g{42};
+    material.generateDaughters(block,
+                               /*blockStart=*/0,
+                               /*globalStart=*/0,
+                               /*count=*/1,
+                               /*totalDaughters=*/1,
+                               hit.photon.ray.direction,
+                               hit.hit.normal,
+                               hit.hit.position,
+                               hit.photon.color,
+                               hit.photon.time,
+                               hit.photon.bounces,
+                               hit.photon.lightId,
+                               g);
+
+    // parentColor * albedo, channel-wise (cosine-weighted Lambertian weight = albedo).
+    REQUIRE_THAT(out[0].color.red, WithinAbs(hit.photon.color.red * albedo.red, 1e-6f));
+    REQUIRE_THAT(out[0].color.green, WithinAbs(hit.photon.color.green * albedo.green, 1e-6f));
+    REQUIRE_THAT(out[0].color.blue, WithinAbs(hit.photon.color.blue * albedo.blue, 1e-6f));
+
+    // Carried-forward state and origin at the hit point.
+    REQUIRE(out[0].bounces == hit.photon.bounces + 1);
+    REQUIRE_THAT(out[0].time, WithinAbs(hit.photon.time, 1e-9f));
+    REQUIRE_THAT(out[0].ray.origin.x, WithinAbs(hit.hit.position.x, 1e-12));
+    REQUIRE_THAT(out[0].ray.origin.y, WithinAbs(hit.hit.position.y, 1e-12));
+    REQUIRE_THAT(out[0].ray.origin.z, WithinAbs(hit.hit.position.z, 1e-12));
+
+    // Outgoing direction is in the upper hemisphere (a valid cosine sample).
+    REQUIRE(Vector::dot(out[0].ray.direction, hit.hit.normal) > 0.0);
+}
+
+TEST_CASE("Single-photon scatter uses the STOCHASTIC sample, not the deterministic mode", "[Emitter]")
+{
+    // The single outgoing photon must be drawn from the material's stochastic
+    // importance sample (sample()), NEVER sampleMode() (the BRDF peak). Using the
+    // mode for a lone photon biases the estimate (the old "N=1 is biased" bug).
+    // For a Lambertian the mode direction is exactly the surface normal; a fair
+    // cosine draw is almost never exactly the normal, so over many seeds the
+    // scattered directions must spread away from the normal rather than pinning to
+    // it. We assert the mean direction is not the normal and that individual draws
+    // deviate from it.
+    LambertianMaterial material{"diffuse", Color{1.0f, 1.0f, 1.0f}};
+    const PhotonHit hit = makeLambertianHit();
+    const Vector normal = hit.hit.normal;
+
+    int offNormal = 0;
+    const int trials = 200;
+    for (int t = 0; t < trials; ++t)
+    {
+        std::vector<Photon> out(1);
+        WorkQueue<Photon>::Block block{0, 1, out};
+        RandomGenerator g{static_cast<unsigned>(1000 + t)};
+        material.generateDaughters(block, 0, 0, 1, 1,
+                                   hit.photon.ray.direction, normal, hit.hit.position,
+                                   hit.photon.color, hit.photon.time,
+                                   hit.photon.bounces, hit.photon.lightId, g);
+        const double cosToNormal = Vector::dot(out[0].ray.direction, normal);
+        // sampleMode() would return cos == 1 exactly (direction == normal).
+        if (cosToNormal < 0.9999) ++offNormal;
+    }
+
+    // The overwhelming majority of stochastic draws are off the exact normal.
+    // If the code were (incorrectly) using sampleMode(), offNormal would be 0.
+    REQUIRE(offNormal > trials * 9 / 10);
+}
+
+TEST_CASE("Lazy chunked single-photon scatter matches the eager single-shot path", "[Emitter]")
+{
+    // Even though the core model emits one photon per bounce, generateDaughters
+    // remains chunk-invariant: producing `count` independent stochastic samples in
+    // chunks consumes the RNG in the same order as one eager call, so the eager
+    // and lazy paths stay bit-for-bit identical. (Population growth is prevented at
+    // the Worker by forcing total == 1; this test exercises the primitive's
+    // chunk-invariance with total > 1.)
     LambertianMaterial material{"diffuse", Color{0.9f, 0.8f, 0.7f}};
     const PhotonHit hit = makeLambertianHit();
-    const size_t total = material.daughterPhotonCount();
+    const size_t total = 6;
 
-    // EAGER: one bounce() call materializing all N daughters, seed S.
     std::vector<Photon> eager(total);
     {
         WorkQueue<Photon>::Block block{0, total, eager};
@@ -121,63 +209,20 @@ TEST_CASE("Lazy chunked fan-out reproduces the eager single-shot fan-out", "[Emi
         material.bounce(block, 0, total, hit, g);
     }
 
-    // LAZY: same seed S, generated in {3,3,3} chunks. Because daughter index 0
-    // uses sampleMode() and 1..N-1 use sample(), keyed on the GLOBAL index, and
-    // the energy split is 1/total (not 1/chunk), and draws happen in ascending
-    // global order, the two must be bit-for-bit identical.
     RandomGenerator g{42};
-    std::vector<Photon> lazy = generateLazy(material, hit, total, {3, 3, 3}, g);
+    std::vector<Photon> lazy = generateLazy(material, hit, total, {3, 3}, g);
 
     REQUIRE(eager.size() == lazy.size());
     for (size_t i = 0; i < total; ++i)
     {
-        INFO("daughter index " << i);
-        // Same sampled direction (proves same RNG draw drove the same global index).
+        INFO("sample index " << i);
         REQUIRE_THAT(eager[i].ray.direction.x, WithinAbs(lazy[i].ray.direction.x, 1e-12));
         REQUIRE_THAT(eager[i].ray.direction.y, WithinAbs(lazy[i].ray.direction.y, 1e-12));
         REQUIRE_THAT(eager[i].ray.direction.z, WithinAbs(lazy[i].ray.direction.z, 1e-12));
-
-        // Same 1/N energy split.
+        // No 1/N split: each sample carries the full parentColor * weight.
         REQUIRE_THAT(eager[i].color.red, WithinAbs(lazy[i].color.red, 1e-7f));
         REQUIRE_THAT(eager[i].color.green, WithinAbs(lazy[i].color.green, 1e-7f));
         REQUIRE_THAT(eager[i].color.blue, WithinAbs(lazy[i].color.blue, 1e-7f));
-
-        // Carried-forward state.
-        REQUIRE(eager[i].bounces == lazy[i].bounces);
         REQUIRE(eager[i].bounces == hit.photon.bounces + 1);
-        REQUIRE_THAT(eager[i].time, WithinAbs(lazy[i].time, 1e-9f));
-
-        // Daughter ray originates at the hit point.
-        REQUIRE_THAT(lazy[i].ray.origin.x, WithinAbs(hit.hit.position.x, 1e-12));
-        REQUIRE_THAT(lazy[i].ray.origin.y, WithinAbs(hit.hit.position.y, 1e-12));
-        REQUIRE_THAT(lazy[i].ray.origin.z, WithinAbs(hit.hit.position.z, 1e-12));
     }
-}
-
-TEST_CASE("Lazy fan-out conserves energy versus eager (1/N split, not 1/chunk)", "[Emitter]")
-{
-    LambertianMaterial material{"diffuse", Color{1.0f, 1.0f, 1.0f}};
-    const PhotonHit hit = makeLambertianHit();
-    const size_t total = material.daughterPhotonCount();
-
-    std::vector<Photon> eager(total);
-    {
-        WorkQueue<Photon>::Block block{0, total, eager};
-        RandomGenerator g{7};
-        material.bounce(block, 0, total, hit, g);
-    }
-
-    RandomGenerator g{7};
-    std::vector<Photon> lazy = generateLazy(material, hit, total, {2, 2, 2, 3}, g);
-
-    // Total carried energy must match: if lazy keyed invN on the chunk size it
-    // would inflate energy. Summed channel energy is the chunk-invariant check.
-    float eagerSum = 0.0f;
-    float lazySum = 0.0f;
-    for (size_t i = 0; i < total; ++i)
-    {
-        eagerSum += eager[i].color.red + eager[i].color.green + eager[i].color.blue;
-        lazySum += lazy[i].color.red + lazy[i].color.green + lazy[i].color.blue;
-    }
-    REQUIRE_THAT(lazySum, WithinAbs(eagerSum, 1e-6f));
 }

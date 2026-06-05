@@ -51,33 +51,33 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
                                  int parentLightId,
                                  RandomGenerator& generator) const
 {
-    // Energy split across the FULL daughter set N (= totalDaughters), not the
-    // size of this chunk. Each sample()'s `weight` already encodes f*cos/pdf —
-    // the standard Monte Carlo throughput — so averaging across N independent
-    // samples (the 1/N factor) gives the correct expected outgoing energy =
-    // incoming * albedo. Keying invN on the chunk size would inflate energy when
-    // the fan-out is split across multiple lazy pulls; keying on the total keeps
-    // it identical to the eager single-shot fan-out.
-    const size_t n = (totalDaughters > 0) ? totalDaughters : 1;
-    const float invN = 1.0f / static_cast<float>(n);
-
-    // Primary-bounce-first daughter generation, keyed on the GLOBAL daughter
-    // index so a daughter is produced from the same call regardless of how the N
-    // are chunked across lazy pulls:
-    //   global index 0       = sampleMode() — deterministic BRDF peak (cosine peak
-    //                          for Lambertian, perfect reflection for Mirror/Microfacet)
-    //   global indices 1..N-1 = sample() — drawn from the BRDF distribution
+    // SINGLE-PHOTON light tracing. Each bounce scatters EXACTLY ONE outgoing
+    // photon (the canonical light-tracing / forward-path-tracing model), so the
+    // photon population is constant: only light emission adds photons, every
+    // bounce is 1-in-1-out. `totalDaughters` is therefore 1 for the live pipeline.
     //
-    // This guarantees every bounce produces at least one photon along the
-    // dominant outgoing direction, which is the photon-mapping-correct fix for
-    // chrome-sphere starvation: without it, mirror surfaces only ever receive
-    // light from the rare cosine-sample that happened to point at them. With
-    // primary-mode-first, every diffuse hit produces a photon directly along
-    // its normal, which is the maximum-likelihood direction to reach a nearby
-    // specular surface and bounce off into the camera cone.
+    // No 1/N energy split: with a single outgoing photon there is no fan-out to
+    // average over. The photon carries forward magnitude * BSDF weight, where the
+    // weight already encodes f*cos/pdf (the Monte Carlo throughput). The expected
+    // outgoing energy of the single stochastic sample equals incoming * albedo,
+    // which is exactly energy-conserving — the same expectation the old N-daughter
+    // 1/N average produced, just with one sample instead of N.
+    //
+    // The outgoing direction is ALWAYS drawn from the material's STOCHASTIC
+    // importance sample (sample() — cosine-weighted / GGX / delta draw), never the
+    // deterministic sampleMode() peak. Using the mode for a single photon biases
+    // the estimate (the old "N=1 is biased" bug): the mode is the distribution
+    // peak, not a fair draw, so a lone mode photon over-weights the dominant lobe
+    // direction and under-represents the rest of the BRDF.
+    //
+    // (totalDaughters / globalStart are retained in the signature for the lazy
+    // emitter plumbing and any legacy multi-sample caller; when totalDaughters > 1
+    // this still produces independent stochastic samples, just with NO 1/N split.)
+    (void)globalStart;
+    (void)totalDaughters;
+
     for (size_t k = 0; k < count; ++k)
     {
-        const size_t globalIndex = globalStart + k;
         const size_t slot = blockStart + k;
 
         // Carry forward parent photon state, then overwrite the fields the bounce
@@ -90,10 +90,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.bounces = parentBounces + 1;
         out.lightId = parentLightId;
 
-        const bool primary = (globalIndex == 0);
-        BSDFSample s = primary
-            ? sampleMode(incident, normal, generator)
-            : sample(incident, normal, generator);
+        const BSDFSample s = sample(incident, normal, generator);
 
         if (!s.valid)
         {
@@ -104,7 +101,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         }
 
         out.ray = {position, s.direction};
-        out.color = parentColor * s.weight * invN;
+        out.color = parentColor * s.weight;
     }
 }
 

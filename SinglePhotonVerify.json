@@ -1,0 +1,88 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Lambertian",
+            "$color": [0.8, 0.2, 0.2]
+        },
+        "RightWall": {
+            "$type": "Lambertian",
+            "$color": [0.2, 0.8, 0.2]
+        },
+        "Wall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 8,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize": 5000000,
+        "$emittingQueueSize": 20000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 96,
+        "$height": 96,
+        "$photonsPerLight": 300000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "SinglePhotonVerify",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 90.0,
+            "$position": [0.0, 150, -300],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "Light": {
+            "$type": "AreaLight",
+            "$shape": "Square",
+            "$size": 120,
+            "$position": [0, 298, 0],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [90, 0, 0]
+            },
+            "$color": [1.0, 1.0, 1.0],
+            "$luminousFlux": 125663706
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            }
+        }
+    }
+}

@@ -446,24 +446,24 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
 
 size_t Worker::resolveDaughterCount(size_t materialCount) const
 {
-    // Override wins: force an exact count on every bounceable hit regardless of
-    // material. The 1/N energy split downstream keys on whatever count we return
-    // here (carried in the Emitter's total), so total outgoing energy stays
-    // correct — only sampling noise changes.
+    // SINGLE-PHOTON light tracing: every bounce scatters EXACTLY ONE outgoing
+    // photon, so the photon population stays constant (only emission adds
+    // photons; each bounce is 1-in-1-out). The material's native
+    // daughterPhotonCount() is intentionally IGNORED for the core model — the
+    // fan-out it described is gone.
+    //
+    // The legacy $daughterCount override is kept only as an explicit escape hatch
+    // (e.g. old N-sweep scenes): a value > 1 forces that many independent
+    // stochastic samples per bounce, growing the population again. With NO 1/N
+    // split downstream this multiplies energy by the count, so it is NOT
+    // energy-equivalent to single-photon and is for experiments only. The default
+    // (override 0) is the canonical single photon.
+    (void)materialCount;
     if (m_daughterCountOverride > 0)
     {
         return m_daughterCountOverride;
     }
-
-    // Otherwise scale the material's native count (rounded, min 1). Scale == 1
-    // (the default) returns the native count unchanged.
-    if (m_daughterCountScale != 1.0)
-    {
-        const long scaled = std::lround(static_cast<double>(materialCount) * m_daughterCountScale);
-        return static_cast<size_t>(std::max<long>(1, scaled));
-    }
-
-    return materialCount;
+    return 1;
 }
 
 void Worker::syncOverflowGauge()
