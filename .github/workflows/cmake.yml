@@ -10,6 +10,9 @@ env:
   BUILD_TYPE: Release
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Baseline build + test (unchanged behavior: builds all targets, runs Catch2).
+  # ---------------------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
     steps:
@@ -46,3 +49,127 @@ jobs:
         TESTBIN="$(find build -type f -name tests -perm -u+x | head -n 1)"
         echo "Running ${TESTBIN}"
         "${TESTBIN}"
+
+  # ---------------------------------------------------------------------------
+  # Warnings-as-errors build. The project is warning-clean under
+  # -Wall -Wextra -Wpedantic, so RAYTRACER_WERROR=ON should stay green; this job
+  # guards against new warnings creeping in. (Only the project's own targets get
+  # the flags; Conan deps and the third-party imgui backends are excluded.)
+  # ---------------------------------------------------------------------------
+  werror:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Conan 2
+      run: pipx install "conan>=2.0,<3"
+
+    - name: Detect Conan profile
+      run: conan profile detect --force
+
+    - name: Install dependencies (Conan 2)
+      run: >
+        conan install .
+        --build=missing
+        -s build_type=${{ env.BUILD_TYPE }}
+        -s compiler.cppstd=20
+        -c tools.system.package_manager:mode=install
+        -c tools.system.package_manager:sudo=True
+
+    - name: Configure (-Werror)
+      run: cmake --preset conan-release -DRAYTRACER_WERROR=ON
+
+    - name: Build (warnings are errors)
+      run: cmake --build --preset conan-release
+
+  # ---------------------------------------------------------------------------
+  # Sanitized build + test (ASan + UBSan). Highest-value job: exercises the
+  # multithreaded queue / atomic buffer code under AddressSanitizer and
+  # UndefinedBehaviorSanitizer. Leak detection (LSan) is available on Linux, so
+  # leaks surface here even though they don't on macOS.
+  # ---------------------------------------------------------------------------
+  sanitize:
+    runs-on: ubuntu-latest
+    env:
+      # halt_on_error=1 so any UBSan finding fails the job; print full traces.
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Conan 2
+      run: pipx install "conan>=2.0,<3"
+
+    - name: Detect Conan profile
+      run: conan profile detect --force
+
+    - name: Install dependencies (Conan 2)
+      run: >
+        conan install .
+        --build=missing
+        -s build_type=${{ env.BUILD_TYPE }}
+        -s compiler.cppstd=20
+        -c tools.system.package_manager:mode=install
+        -c tools.system.package_manager:sudo=True
+
+    # Sanitizer flags are applied only to the project's own targets via the
+    # ray-tracer-flags interface target, NOT to the Conan dependency builds
+    # above (which were already built without sanitizers).
+    - name: Configure (ASan + UBSan)
+      run: cmake --preset conan-release -DRAYTRACER_SANITIZE="address;undefined"
+
+    - name: Build tests (sanitized)
+      run: cmake --build --preset conan-release --target tests
+
+    - name: Run tests under ASan + UBSan
+      run: |
+        TESTBIN="$(find build -type f -name tests -perm -u+x | head -n 1)"
+        echo "Running ${TESTBIN} under ASan+UBSan"
+        "${TESTBIN}"
+
+  # ---------------------------------------------------------------------------
+  # clang-tidy over the project sources, using the compile_commands.json the
+  # Conan preset exports. Informational by default (does not fail the build on
+  # findings) — flip to failing once the remaining performance/readability
+  # findings are triaged. The bugprone/analyzer families that matter are wired
+  # in via the repo-root .clang-tidy.
+  # ---------------------------------------------------------------------------
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Conan 2
+      run: pipx install "conan>=2.0,<3"
+
+    - name: Install clang-tidy
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy
+
+    - name: Detect Conan profile
+      run: conan profile detect --force
+
+    - name: Install dependencies (Conan 2)
+      run: >
+        conan install .
+        --build=missing
+        -s build_type=${{ env.BUILD_TYPE }}
+        -s compiler.cppstd=20
+        -c tools.system.package_manager:mode=install
+        -c tools.system.package_manager:sudo=True
+
+    # Configure to generate build/Release/compile_commands.json
+    # (CMAKE_EXPORT_COMPILE_COMMANDS is ON in CMakeLists.txt).
+    - name: Configure (export compile commands)
+      run: cmake --preset conan-release
+
+    # run-clang-tidy takes positional args as regexes matched against the
+    # compilation-database entry paths; restrict to our own src/ and editor/
+    # translation units (the .clang-tidy HeaderFilterRegex scopes header
+    # diagnostics to include/ and editor/). Informational: do not fail the job.
+    - name: Run clang-tidy (informational)
+      run: |
+        run-clang-tidy -p build/Release -quiet '.*/(src|editor)/.*\.cpp' \
+          | tee clang-tidy.log || true
+        echo "clang-tidy finding count: $(grep -c 'warning:' clang-tidy.log || echo 0)"
