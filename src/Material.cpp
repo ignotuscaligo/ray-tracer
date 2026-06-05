@@ -104,29 +104,3 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.color = parentColor * s.weight;
     }
 }
-
-Color Material::colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const
-{
-    if (isDelta())
-    {
-        // Delta BRDF: probability of any non-delta direction (such as the line to the
-        // camera) is zero. Forward photon tracing's camera splat cannot resolve specular
-        // contributions; that's a known limitation that bidirectional path tracing or
-        // photon-map gathering would address.
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-
-    // `incident` here is the direction the photon CAME FROM (opposite of travel direction).
-    const Vector wi = -photonHit.photon.ray.direction;
-    // `wo` is the direction toward the camera (opposite of the pixel-to-hit direction).
-    const Vector wo = -pixelDirection;
-
-    const double cosOut = std::max(0.0, Vector::dot(wo, photonHit.hit.normal));
-    if (cosOut <= 0.0)
-    {
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-
-    Color f = evaluate(wi, wo, photonHit.hit.normal);
-    return photonHit.photon.color * f * static_cast<float>(cosOut);
-}

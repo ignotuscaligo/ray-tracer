@@ -122,11 +122,6 @@ public:
                                    int parentLightId,
                                    RandomGenerator& generator) const;
 
-    // Default implementation evaluates the BRDF against the camera direction and modulates
-    // by the photon's color. Delta materials return black (a delta bounce has zero
-    // probability of landing exactly on the camera, so direct splat contribution is zero).
-    virtual Color colorForHit(const Vector& pixelDirection, const PhotonHit& photonHit) const;
-
 private:
     std::string m_name;
 };
