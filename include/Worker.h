@@ -91,8 +91,6 @@ public:
     std::shared_ptr<LightQueue> lightQueue;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
     std::shared_ptr<MaterialLibrary> materialLibrary;
-    std::shared_ptr<Buffer> buffer;
-    std::shared_ptr<Image> image;
     // Storage pivot: the QUANTIZED DENSITY GRID. Each non-delta photon bounce is
     // accumulated into the grid CELL it lands in (add(position, power)) instead of
     // stored as a per-photon record. Bounded by occupied cells, not photon count.

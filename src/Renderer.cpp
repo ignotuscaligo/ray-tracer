@@ -208,8 +208,6 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->camera = scene.camera;
         worker->objects = scene.objects;
         worker->photonQueue = photonQueue;
-        worker->buffer = buffer;
-        worker->image = image;
         worker->materialLibrary = scene.materialLibrary;
         worker->lightQueue = lightQueue;
         worker->animationQuery = animationQuery;
