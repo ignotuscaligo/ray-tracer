@@ -76,11 +76,59 @@ jobs:
         -c tools.system.package_manager:mode=install
         -c tools.system.package_manager:sudo=True
 
-    - name: Configure (-Werror)
-      run: cmake --preset conan-release -DRAYTRACER_WERROR=ON
+    # -Wshadow is enabled here as a FAILING gate alongside -Werror: the codebase
+    # is shadow-clean and a shadowed numeric/index variable in renderer math is a
+    # real footgun, so new shadows should break the build. (-Wconversion is NOT
+    # enabled here — it is informational; see the wconversion job below.)
+    - name: Configure (-Werror + -Wshadow)
+      run: cmake --preset conan-release -DRAYTRACER_WERROR=ON -DRAYTRACER_WSHADOW=ON
 
     - name: Build (warnings are errors)
       run: cmake --build --preset conan-release
+
+  # ---------------------------------------------------------------------------
+  # -Wconversion (INFORMATIONAL — does not fail the build). A numeric-heavy
+  # renderer surfaces many implicit double<->float<->size_t narrowings; most are
+  # benign value-preserving conversions. The genuinely dangerous data-losing /
+  # sign-changing ones in the hot math and indices have been fixed in-tree (e.g.
+  # LightQueue::m_remaining widened from atomic_uint32_t to atomic<size_t> so a
+  # 10-300M photon count can't truncate). The remaining ~30 findings are mostly
+  # in the editor's OBJ loader / ImGui glue and PNG IHDR int->uint16 writes.
+  # To get to ZERO and flip this to failing: introduce strong index types
+  # (MaterialId etc., see code-review-2 §4c-3) so the size_t/-1 sentinel
+  # conversions are explicit, and add explicit casts at the editor<->size_t
+  # boundaries. Until then this job reports the count without blocking.
+  # ---------------------------------------------------------------------------
+  wconversion:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Conan 2
+      run: pipx install "conan>=2.0,<3"
+
+    - name: Detect Conan profile
+      run: conan profile detect --force
+
+    - name: Install dependencies (Conan 2)
+      run: >
+        conan install .
+        --build=missing
+        -s build_type=${{ env.BUILD_TYPE }}
+        -s compiler.cppstd=20
+        -c tools.system.package_manager:mode=install
+        -c tools.system.package_manager:sudo=True
+
+    # Configure with -Wconversion ON but -Werror OFF so findings are reported,
+    # not fatal. Tee the build log and count the conversion-family warnings.
+    - name: Configure (-Wconversion, informational)
+      run: cmake --preset conan-release -DRAYTRACER_WCONVERSION=ON
+
+    - name: Build and count -Wconversion findings (non-failing)
+      run: |
+        cmake --build --preset conan-release 2>&1 | tee wconversion.log || true
+        COUNT=$(grep -cE '\[-W(conversion|sign-conversion|shorten-64-to-32|implicit-int-conversion|float-conversion|implicit-float-conversion)\]' wconversion.log || echo 0)
+        echo "-Wconversion finding count: ${COUNT}"
 
   # ---------------------------------------------------------------------------
   # Sanitized build + test (ASan + UBSan). Highest-value job: exercises the

@@ -81,19 +81,21 @@ size_t Tree<T>::Node::nodeCount() const noexcept
 template<typename T>
 size_t Tree<T>::Node::nodeDepth() const noexcept
 {
-    size_t depth = 1;
+    // `height` (not `depth`) so it does not shadow the Node::depth field (the
+    // node's stored kd-tree split depth); this local is the subtree height.
+    size_t height = 1;
 
     if (left)
     {
-        depth = std::max(depth, left->nodeDepth() + 1);
+        height = std::max(height, left->nodeDepth() + 1);
     }
 
     if (right)
     {
-        depth = std::max(depth, right->nodeDepth() + 1);
+        height = std::max(height, right->nodeDepth() + 1);
     }
 
-    return depth;
+    return height;
 }
 
 template<typename T>

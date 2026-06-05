@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -38,5 +39,9 @@ private:
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, size_t> m_photons;
     std::unordered_map<std::string, double> m_flux;
-    std::atomic_uint32_t m_remaining;
+    // size_t (not uint32) to match the photon-count domain: counts are size_t
+    // everywhere else here, and the renderer routinely emits 10-300M photons per
+    // light — summing several lights could approach the uint32 ceiling, and the
+    // narrowing on fetch_add/fetch_sub silently lost the high bits. Zero-init.
+    std::atomic<std::size_t> m_remaining{0};
 };

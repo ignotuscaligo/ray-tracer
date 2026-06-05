@@ -27,6 +27,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # in particular must NOT leak into deps (the runtime would be linked twice and
 # warnings/-Werror in third-party headers are not ours to fix).
 option(RAYTRACER_WERROR "Treat project warnings as errors (-Werror)" OFF)
+# -Wshadow is clean on this codebase and wired as a FAILING CI job: a shadowed
+# variable in numeric/index-heavy renderer code is a real footgun (an inner
+# `i`/`r`/`t` silently hiding an outer one), and the cleanup cost was bounded.
+option(RAYTRACER_WSHADOW "Enable -Wshadow on project targets" OFF)
+# -Wconversion surfaces many findings on a double<->float<->size_t-heavy renderer;
+# most are benign value-preserving narrowings. It is wired as an INFORMATIONAL
+# (non-failing) CI job, NOT -Werror, until the remaining findings are triaged to
+# zero. The genuinely dangerous narrowings (data-losing / sign-changing ones in
+# hot math and indices) are fixed in-tree; see the CI note in .github/workflows.
+option(RAYTRACER_WCONVERSION "Enable -Wconversion on project targets" OFF)
 set(RAYTRACER_SANITIZE "" CACHE STRING
     "Semicolon/comma list of sanitizers to enable on project targets, \
 e.g. \"address;undefined\". Empty disables sanitizers.")
@@ -47,6 +57,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # includes Vector.h. The suppression is applied locally in Vector.h via a
     # _Pragma guard (portable across GCC and Clang) rather than globally here, so
     # -Wpedantic still polices the rest of the codebase.
+
+    if (RAYTRACER_WSHADOW)
+        target_compile_options(ray-tracer-flags INTERFACE -Wshadow)
+    endif()
+
+    if (RAYTRACER_WCONVERSION)
+        target_compile_options(ray-tracer-flags INTERFACE -Wconversion)
+    endif()
 
     if (RAYTRACER_WERROR)
         target_compile_options(ray-tracer-flags INTERFACE -Werror)
