@@ -549,9 +549,7 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.workerCount, workerConfiguration, "$workerCount", logToStdout);
         setFromJsonIfPresent(settings.fetchSize, workerConfiguration, "$fetchSize", logToStdout);
         setFromJsonIfPresent(settings.photonQueueSize, workerConfiguration, "$photonQueueSize", logToStdout);
-        setFromJsonIfPresent(settings.hitQueueSize, workerConfiguration, "$hitQueueSize", logToStdout);
         setFromJsonIfPresent(settings.emittingQueueSize, workerConfiguration, "$emittingQueueSize", logToStdout);
-        setFromJsonIfPresent(settings.finalQueueSize, workerConfiguration, "$finalQueueSize", logToStdout);
     }
 
     if (jsonData.contains("$renderConfiguration"))

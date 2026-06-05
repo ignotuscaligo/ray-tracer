@@ -86,9 +86,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
     std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(settings.photonQueueSize);
-    std::shared_ptr<WorkQueue<PhotonHit>> hitQueue = std::make_shared<WorkQueue<PhotonHit>>(settings.hitQueueSize);
     std::shared_ptr<EmitterQueue> emitterQueue = std::make_shared<EmitterQueue>(settings.emittingQueueSize);
-    std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue = std::make_shared<WorkQueue<PhotonHit>>(settings.finalQueueSize);
 
     // Continuous-time animation oracle. Default is static; if the scene contains
     // an object named "MirrorSphere", attach a translation animation so the
@@ -212,9 +210,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->camera = scene.camera;
         worker->objects = scene.objects;
         worker->photonQueue = photonQueue;
-        worker->hitQueue = hitQueue;
         worker->emitterQueue = emitterQueue;
-        worker->finalHitQueue = finalHitQueue;
         worker->buffer = buffer;
         worker->image = image;
         worker->materialLibrary = scene.materialLibrary;
@@ -260,9 +256,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     size_t photonsToEmit = lightQueue->remainingPhotons();
     size_t photonsAllocated = photonQueue->allocated();
-    size_t hitsAllocated = hitQueue->allocated();
     size_t emittingAllocated = emitterQueue->allocated();
-    size_t finalHitsAllocated = finalHitQueue->allocated();
 
     std::exception_ptr workerException;
     bool aborted = false;
@@ -282,15 +276,13 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     };
     size_t overflowPending = pendingOverflowTotal();
 
-    while (photonsAllocated > 0 || hitsAllocated > 0 || emittingAllocated > 0 || finalHitsAllocated > 0 || photonsToEmit > 0 || overflowPending > 0)
+    while (photonsAllocated > 0 || emittingAllocated > 0 || photonsToEmit > 0 || overflowPending > 0)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
         photonsToEmit = lightQueue->remainingPhotons();
         photonsAllocated = photonQueue->allocated();
-        hitsAllocated = hitQueue->allocated();
         emittingAllocated = emitterQueue->allocated();
-        finalHitsAllocated = finalHitQueue->allocated();
         overflowPending = pendingOverflowTotal();
 
         for (auto& worker : workers)
@@ -309,7 +301,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
         if (progress)
         {
-            const size_t remainingWork = photonsToEmit + photonsAllocated + hitsAllocated + emittingAllocated + finalHitsAllocated;
+            const size_t remainingWork = photonsToEmit + photonsAllocated + emittingAllocated;
             if (!progress(remainingWork))
             {
                 aborted = true;
@@ -341,9 +333,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     // Wave 3 memory evidence: high-water-mark occupancy of each queue.
     result.peakPhotonQueue = photonQueue->largestAllocated();
-    result.peakHitQueue = hitQueue->largestAllocated();
     result.peakEmitterQueue = emitterQueue->largestAllocated();
-    result.peakFinalQueue = finalHitQueue->largestAllocated();
 
     // The compact reflection store (bounded by occupied cells, not photon count).
     result.densityGrid = densityGrid;

@@ -125,11 +125,9 @@ public:
     std::vector<std::shared_ptr<Object>> objects;
     std::shared_ptr<LightQueue> lightQueue;
     std::shared_ptr<WorkQueue<Photon>> photonQueue;
-    std::shared_ptr<WorkQueue<PhotonHit>> hitQueue;
-    std::shared_ptr<WorkQueue<PhotonHit>> finalHitQueue;
     // EmitterQueue holds compact daughter-photon PRODUCERS (Wave 3) awaiting lazy
-    // fan-out. processPhotons pushes one Emitter per bounceable hit here, in
-    // parallel with the full-hit push to hitQueue. processEmissions pulls an
+    // fan-out. processPhotons pushes one Emitter per bounceable hit here.
+    // processEmissions pulls an
     // emitter back, RESERVES photon-queue space first (claim-output-first), and
     // generates only as many daughters as fit, requeuing the emitter while it
     // still has daughters left. This replaces Wave 2's eager all-N fan-out: the

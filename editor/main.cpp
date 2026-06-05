@@ -119,11 +119,9 @@ int runRenderTest(int argc, char** argv)
         // The emitter queue now holds compact producers (a fraction of a
         // PhotonHit each) and the photon queue no longer needs N-daughter
         // contiguous headroom per bounce-hit.
-        std::printf("peak-occupancy: photon=%zu hit=%zu emitter=%zu final=%zu\n",
+        std::printf("peak-occupancy: photon=%zu emitter=%zu\n",
                     result.peakPhotonQueue,
-                    result.peakHitQueue,
-                    result.peakEmitterQueue,
-                    result.peakFinalQueue);
+                    result.peakEmitterQueue);
 
         // Storage pivot: the QUANTIZED DENSITY GRID replaces the per-photon cloud.
         // Report occupied cells (the memory driver), total deposits accumulated,

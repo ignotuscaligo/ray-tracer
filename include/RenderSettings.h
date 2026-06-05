@@ -12,9 +12,7 @@ struct RenderSettings
     static constexpr size_t kThousand = 1000;
 
     size_t photonQueueSize = 20 * kMillion;
-    size_t hitQueueSize = 5 * kMillion;
     size_t emittingQueueSize = 20 * kMillion;
-    size_t finalQueueSize = 100 * kThousand;
     size_t photonsPerLight = 20 * kMillion;
     size_t workerCount = 32;
     size_t fetchSize = 100000;

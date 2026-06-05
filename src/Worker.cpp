@@ -139,7 +139,7 @@ void Worker::exec()
 {
     try
     {
-        if (!photonQueue || !hitQueue || !finalHitQueue || !emitterQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+        if (!photonQueue || !emitterQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
         {
             std::cout << m_index << ": ABORT: missing required references!" << std::endl;
             m_running = false;

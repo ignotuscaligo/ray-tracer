@@ -66,9 +66,7 @@ struct RenderResult
     // daughter-path memory pressure drops versus the eager path. Reported by the
     // render-test CLI.
     size_t peakPhotonQueue = 0;
-    size_t peakHitQueue = 0;
     size_t peakEmitterQueue = 0;
-    size_t peakFinalQueue = 0;
 
     // Storage pivot: the QUANTIZED DENSITY GRID built during the photon pass. This
     // is the compact reflection store that replaces the per-photon BounceCloud +
