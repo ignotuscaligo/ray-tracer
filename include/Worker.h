@@ -183,7 +183,15 @@ private:
     // footprint radius at the hit depth (same footprint the gather computes), and
     // N = photonsPerLight. Summed over all photons landing in a pixel's footprint
     // this equals the gather's invN/(pi r^2) * sum(BRDF*power) estimate.
+    //
+    // TESTABILITY (renderer-single-photon test net): declaration moved from private
+    // to public so the foreshortening / facing / occlusion behavior can be unit-
+    // tested directly (tests/test_SplatToCamera.cpp). No logic change — the body and
+    // all call sites are unchanged; this only widens visibility.
+public:
     void splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Material>& material);
+
+private:
 
 public:
     // Storage pivot M3 (multi-camera): a camera the splat targets, paired with the

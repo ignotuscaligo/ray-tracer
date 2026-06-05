@@ -44,6 +44,12 @@ target_sources(tests
         test_Emitter.cpp
         test_DensityGrid.cpp
         test_SplatRadiusFloor.cpp
+        test_AreaLight.cpp
+        test_EmissiveGather.cpp
+        test_MirrorGather.cpp
+        test_DecayTermination.cpp
+        test_SinglePhotonScatter.cpp
+        test_SplatToCamera.cpp
         test_main.cpp
         test_OrbitCamera.cpp
         test_RasterMesh.cpp

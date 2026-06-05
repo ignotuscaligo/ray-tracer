@@ -153,6 +153,56 @@ TEST_CASE("Fresnel: low reflectance at normal incidence, ->1 at grazing", "[Diel
     REQUIRE(rMid < rGrazing);
 }
 
+TEST_CASE("Fresnel reflectance is continuous across the entering/exiting boundary",
+          "[Dielectric]")
+{
+    // Review gap: assert the cosForFresnel side-selection (DielectricMaterial.cpp:97)
+    // makes reflectance continuous as the incidence sweeps from just-entering (air->
+    // glass, n1<n2, uses cosI) to just-exiting (glass->air, n1>n2, uses cosT). Probe
+    // resolve() at a small angle on each side; both should report ~R0 (~0.04) and be
+    // close to each other rather than jumping.
+    const double smallAngle = Utility::radians(3.0);
+
+    // Entering: ray opposes the outward +z normal (dot < 0), air -> glass.
+    const Vector enterDir =
+        Vector::normalized(Vector{std::sin(smallAngle), 0.0, -std::cos(smallAngle)});
+    const auto entering = DielectricMaterial::resolve(enterDir, Vector{0, 0, 1}, kIor);
+    REQUIRE(entering.entering == true);
+    REQUIRE(entering.totalInternalReflection == false);
+
+    // Exiting: ray travels with the outward +z normal (dot > 0), glass -> air. A 3-deg
+    // internal angle is well under the ~41.8-deg critical angle, so no TIR.
+    const Vector exitDir =
+        Vector::normalized(Vector{std::sin(smallAngle), 0.0, std::cos(smallAngle)});
+    const auto exiting = DielectricMaterial::resolve(exitDir, Vector{0, 0, 1}, kIor);
+    REQUIRE(exiting.entering == false);
+    REQUIRE(exiting.totalInternalReflection == false);
+
+    // Both sides near-normal incidence report ~R0 = 0.04 and agree closely: no
+    // discontinuity at the boundary.
+    REQUIRE_THAT(entering.reflectance, WithinAbs(0.04, 5e-3));
+    REQUIRE_THAT(exiting.reflectance, WithinAbs(0.04, 5e-3));
+    REQUIRE_THAT(entering.reflectance, WithinAbs(exiting.reflectance, 5e-3));
+}
+
+TEST_CASE("Schlick reflectance increases monotonically toward grazing", "[Dielectric]")
+{
+    // Review gap (grazing emphasis): reflectance is low near normal incidence and
+    // rises monotonically to 1 at grazing. Sweep cosTheta from 1 (normal) to 0
+    // (grazing) and assert a strictly increasing R.
+    double previous = DielectricMaterial::schlickReflectance(1.0, 1.0, kIor);
+    REQUIRE_THAT(previous, WithinAbs(0.04, 1e-6));
+    for (int i = 9; i >= 0; --i)
+    {
+        const double cosTheta = static_cast<double>(i) / 10.0;
+        const double r = DielectricMaterial::schlickReflectance(cosTheta, 1.0, kIor);
+        REQUIRE(r > previous);  // strictly increasing as the angle approaches grazing
+        previous = r;
+    }
+    // At exact grazing R -> 1.
+    REQUIRE_THAT(DielectricMaterial::schlickReflectance(0.0, 1.0, kIor), WithinAbs(1.0, 1e-9));
+}
+
 TEST_CASE("Stochastic sample picks reflect/refract roughly by Fresnel R", "[Dielectric]")
 {
     // At ~normal incidence R ~ 0.04, so ~96% of samples should be the refracted
