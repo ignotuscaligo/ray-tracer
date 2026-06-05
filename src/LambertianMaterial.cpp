@@ -49,7 +49,7 @@ LambertianMaterial::LambertianMaterial(const std::string& name, const Color& alb
 {
 }
 
-BSDFSample LambertianMaterial::sample(const Vector& /*incident*/, const Vector& normal, RandomGenerator& generator) const
+BSDFSample LambertianMaterial::sample(const Vector& /*incident*/, const UnitVector& normal, RandomGenerator& generator) const
 {
     Vector tangent, bitangent;
     buildBasis(normal, tangent, bitangent);
@@ -74,7 +74,7 @@ BSDFSample LambertianMaterial::sample(const Vector& /*incident*/, const Vector& 
     return s;
 }
 
-BSDFSample LambertianMaterial::sampleMode(const Vector& /*incident*/, const Vector& normal, RandomGenerator& /*generator*/) const
+BSDFSample LambertianMaterial::sampleMode(const Vector& /*incident*/, const UnitVector& normal, RandomGenerator& /*generator*/) const
 {
     // Cosine-weighted hemisphere peaks along the normal (cos(theta) is maximal
     // at theta=0). Throughput at the peak is the same as for any cosine sample:
@@ -91,7 +91,7 @@ BSDFSample LambertianMaterial::sampleMode(const Vector& /*incident*/, const Vect
     return s;
 }
 
-Color LambertianMaterial::evaluate(const Vector& /*wi*/, const Vector& wo, const Vector& normal) const
+Color LambertianMaterial::evaluate(const Vector& /*wi*/, const Vector& wo, const UnitVector& normal) const
 {
     if (Vector::dot(wo, normal) <= 0.0)
     {
@@ -100,7 +100,7 @@ Color LambertianMaterial::evaluate(const Vector& /*wi*/, const Vector& wo, const
     return m_albedo * static_cast<float>(1.0 / Utility::pi);
 }
 
-double LambertianMaterial::pdf(const Vector& /*wi*/, const Vector& wo, const Vector& normal) const
+double LambertianMaterial::pdf(const Vector& /*wi*/, const Vector& wo, const UnitVector& normal) const
 {
     const double cosTheta = Vector::dot(wo, normal);
     if (cosTheta <= 0.0)

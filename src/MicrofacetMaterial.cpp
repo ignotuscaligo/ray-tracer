@@ -102,7 +102,7 @@ MicrofacetMaterial::MicrofacetMaterial(const std::string& name, const Color& alb
 {
 }
 
-BSDFSample MicrofacetMaterial::sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const
+BSDFSample MicrofacetMaterial::sample(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const
 {
     // wi is the direction the photon came FROM, in standard BRDF convention.
     const Vector wi = -incident;
@@ -167,7 +167,7 @@ BSDFSample MicrofacetMaterial::sample(const Vector& incident, const Vector& norm
     return s;
 }
 
-BSDFSample MicrofacetMaterial::sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& /*generator*/) const
+BSDFSample MicrofacetMaterial::sampleMode(const Vector& incident, const UnitVector& normal, RandomGenerator& /*generator*/) const
 {
     // GGX D peaks at h = normal, which means the BRDF lobe peaks at
     // wo = reflect(wi, normal) — perfect-reflection direction. As alpha -> 0
@@ -209,7 +209,7 @@ BSDFSample MicrofacetMaterial::sampleMode(const Vector& incident, const Vector& 
     return s;
 }
 
-Color MicrofacetMaterial::evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const
+Color MicrofacetMaterial::evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const
 {
     const double cosThetaI = Vector::dot(wi, normal);
     const double cosThetaO = Vector::dot(wo, normal);
@@ -249,7 +249,7 @@ size_t MicrofacetMaterial::daughterPhotonCount() const
     return static_cast<size_t>(std::max<long>(1, n));
 }
 
-double MicrofacetMaterial::pdf(const Vector& wi, const Vector& wo, const Vector& normal) const
+double MicrofacetMaterial::pdf(const Vector& wi, const Vector& wo, const UnitVector& normal) const
 {
     const double cosThetaI = Vector::dot(wi, normal);
     const double cosThetaO = Vector::dot(wo, normal);

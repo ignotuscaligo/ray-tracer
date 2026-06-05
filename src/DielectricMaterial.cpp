@@ -101,7 +101,7 @@ DielectricMaterial::Interaction DielectricMaterial::resolve(const Vector& incide
 }
 
 BSDFSample DielectricMaterial::sample(const Vector& incident,
-                                      const Vector& normal,
+                                      const UnitVector& normal,
                                       RandomGenerator& generator) const
 {
     const Interaction it = resolve(incident, normal, m_ior);
@@ -135,12 +135,12 @@ BSDFSample DielectricMaterial::sample(const Vector& incident,
     return s;
 }
 
-Color DielectricMaterial::evaluate(const Vector& /*wi*/, const Vector& /*wo*/, const Vector& /*normal*/) const
+Color DielectricMaterial::evaluate(const Vector& /*wi*/, const Vector& /*wo*/, const UnitVector& /*normal*/) const
 {
     return Color{0.0f, 0.0f, 0.0f};
 }
 
-double DielectricMaterial::pdf(const Vector& /*wi*/, const Vector& /*wo*/, const Vector& /*normal*/) const
+double DielectricMaterial::pdf(const Vector& /*wi*/, const Vector& /*wo*/, const UnitVector& /*normal*/) const
 {
     return 0.0;
 }

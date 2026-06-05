@@ -28,10 +28,10 @@ public:
     MicrofacetMaterial();
     MicrofacetMaterial(const std::string& name, const Color& albedo = {1.0f, 1.0f, 1.0f}, double roughness = kDefaultRoughness);
 
-    BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
-    BSDFSample sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
-    Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
-    double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
+    BSDFSample sample(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const override;
+    BSDFSample sampleMode(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const override;
+    Color evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
+    double pdf(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
 
     // Scale fan-out by roughness: a near-mirror lobe needs only a handful of samples
     // (the cone is narrow), while a near-diffuse rough surface benefits from full

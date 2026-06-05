@@ -33,7 +33,7 @@ namespace
 Color gatherReflected(const LambertianMaterial& material,
                       const DensityGrid& grid,
                       const Vector& surfacePoint,
-                      const Vector& normal,
+                      const UnitVector& normal,
                       const Vector& wo)
 {
     const Color brdf = material.evaluate(wo, wo, normal);
@@ -53,7 +53,7 @@ TEST_CASE("MirrorGather reflected radiance = BRDF * power/cellArea, no 1/N", "[M
     LambertianMaterial diffuse{"d", albedo};
 
     const Vector p{1.0, 1.0, 1.0};   // falls in cell (0,0,0)
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector wo{0, 0, 1};        // viewer above the surface (same-side)
 
     // Deposit a known TOTAL power E into the cell across several deposits.
@@ -85,7 +85,7 @@ TEST_CASE("MirrorGather is additive: independent deposits sum", "[MirrorGather]"
     LambertianMaterial diffuse{"d", Color{1.0f, 1.0f, 1.0f}};
 
     const Vector p{0.5, 0.5, 0.5};
-    const Vector n{0, 0, 1};
+    const UnitVector n = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector wo{0, 0, 1};
 
     grid.add(p, Color{3.0f, 0.0f, 0.0f});
@@ -107,7 +107,7 @@ TEST_CASE("MirrorGather scales with total energy, NOT with deposit count", "[Mir
     const double cellSize = 1.0;
     LambertianMaterial diffuse{"d", Color{1.0f, 1.0f, 1.0f}};
     const Vector p{0.5, 0.5, 0.5};
-    const Vector n{0, 0, 1};
+    const UnitVector n = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector wo{0, 0, 1};
 
     // Grid A: total power 10.0 deposited as ONE deposit.
@@ -140,7 +140,7 @@ TEST_CASE("MirrorGather reflected radiance scales inversely with cell area", "[M
     // power yields 1/4 the irradiance and 1/4 the reflected radiance.
     LambertianMaterial diffuse{"d", Color{1.0f, 1.0f, 1.0f}};
     const Vector p{0.25, 0.25, 0.25};
-    const Vector n{0, 0, 1};
+    const UnitVector n = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector wo{0, 0, 1};
 
     DensityGrid fine(1.0);

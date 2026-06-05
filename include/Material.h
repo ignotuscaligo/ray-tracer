@@ -3,6 +3,7 @@
 #include "Color.h"
 #include "Photon.h"
 #include "RandomGenerator.h"
+#include "UnitVector.h"
 #include "Vector.h"
 #include "WorkQueue.h"
 
@@ -44,7 +45,7 @@ public:
     // Draw a Monte Carlo sample of an outgoing direction for an incoming photon. `incident`
     // points along the incoming photon's travel direction (into the surface). `normal` is
     // the outward surface normal.
-    virtual BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const = 0;
+    virtual BSDFSample sample(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const = 0;
 
     // Deterministic BRDF "mode" direction — the peak of the sampling distribution. Used
     // for the primary-bounce-first daughter (index 0) in the fan-out:
@@ -54,7 +55,7 @@ public:
     // The throughput weight returned should match what a Monte Carlo sample at this
     // direction would carry. Default implementation falls through to sample() — subclasses
     // override for a deterministic peak direction.
-    virtual BSDFSample sampleMode(const Vector& incident, const Vector& normal, RandomGenerator& generator) const
+    virtual BSDFSample sampleMode(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const
     {
         return sample(incident, normal, generator);
     }
@@ -63,11 +64,11 @@ public:
     // point away from the surface in this convention (wi is the direction the incoming
     // photon came FROM, wo is the direction energy is leaving toward — e.g. the camera).
     // Returns the BRDF value per channel (not multiplied by cos theta).
-    virtual Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const = 0;
+    virtual Color evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const = 0;
 
     // Probability density (solid-angle measure) of sampling `wo` given `wi`. Returns 0 for
     // delta distributions.
-    virtual double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const = 0;
+    virtual double pdf(const Vector& wi, const Vector& wo, const UnitVector& normal) const = 0;
 
     virtual bool isDelta() const { return false; }
 

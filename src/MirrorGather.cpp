@@ -112,7 +112,8 @@ Color reflectedRadiance(const Context& ctx,
     // `weight * child` bookkeeping. Glass and photon passes now share sample().
     if (material->isDelta())
     {
-        const BSDFSample s = material->sample(direction, hit->normal, generator);
+        const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
+        const BSDFSample s = material->sample(direction, hitNormal, generator);
         if (!s.valid)
         {
             return Color{0.0f, 0.0f, 0.0f};
@@ -142,8 +143,10 @@ Color reflectedRadiance(const Context& ctx,
 
     const Vector wo = -direction;
     // wi is unused by Lambertian::evaluate; pass wo so any hemisphere check in a
-    // glossy material treats this as a same-side query.
-    const Color brdf = material->evaluate(wo, wo, hit->normal);
+    // glossy material treats this as a same-side query. The hit normal is unit by
+    // construction (geometry producers normalize it); wrap for the typed BSDF API.
+    const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
+    const Color brdf = material->evaluate(wo, wo, hitNormal);
     const Color irradiance = ctx.grid.lookupIrradiance(hit->position);
 
     return brdf * irradiance;
@@ -202,11 +205,12 @@ void gatherRows(size_t rowBegin,
             Color accumulated{0.0f, 0.0f, 0.0f};
             bool anyValid = false;
 
+            const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
             for (int sample = 0; sample < sampleCount; ++sample)
             {
                 // Single delta extension: sample() makes the (stochastic, for glass;
                 // deterministic, for mirror) outgoing pick and returns its weight.
-                const BSDFSample s = material->sample(dir, hit->normal, generator);
+                const BSDFSample s = material->sample(dir, hitNormal, generator);
                 if (!s.valid)
                 {
                     continue;

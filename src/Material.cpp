@@ -77,6 +77,13 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
     (void)globalStart;
     (void)totalDaughters;
 
+    // The hit normal arrives as a bare Vector from the pipeline; the geometry
+    // producers (Ray.cpp / Volume.cpp / EmissiveGather.cpp) all emit it
+    // normalized, so wrap it once here as a UnitVector for the typed BSDF
+    // interface. alreadyNormalized's contract catches a non-unit normal slipping
+    // through in debug/sanitizer builds; it is zero-cost in release.
+    const UnitVector unitNormal = UnitVector::alreadyNormalized(normal);
+
     for (size_t k = 0; k < count; ++k)
     {
         const size_t slot = blockStart + k;
@@ -91,7 +98,7 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
         out.bounces = parentBounces + 1;
         out.lightId = parentLightId;
 
-        const BSDFSample s = sample(incident, normal, generator);
+        const BSDFSample s = sample(incident, unitNormal, generator);
 
         // BSDF boundary postcondition. sample() is the public surface contract
         // every Material subclass must honor; these were previously only checked
@@ -116,10 +123,13 @@ void Material::generateDaughters(WorkQueue<Photon>::Block photonBlock,
             POSTCONDITION_MSG(std::isfinite(dirLen2), "BSDF sampled direction must be finite");
             POSTCONDITION_MSG(std::abs(dirLen2 - 1.0) < 1e-3,
                               "BSDF sampled direction must be unit length");
-            // pdf == 0 iff the lobe is a Dirac delta (the gather/splat dispatch
-            // relies on this equivalence to skip delta materials).
-            POSTCONDITION_MSG((s.pdf == 0.0) == s.isDelta,
-                              "BSDF pdf == 0 iff isDelta");
+            // NOTE: the "pdf == 0 iff delta" relation (review-2 §4b-3) is a
+            // property of the pdf() QUERY method (a delta lobe has measure-zero
+            // solid-angle density), NOT of the BSDFSample::pdf field returned by
+            // sample(). By this codebase's convention a delta sample reports
+            // pdf == 1.0 (the throughput is the bare reflectance; pdf == 1 means
+            // "no division"), verified in test_BSDF. So it is deliberately NOT
+            // asserted on the sample here — only the general pdf >= 0 above.
         }
 
         if (!s.valid)

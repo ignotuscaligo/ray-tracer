@@ -55,7 +55,7 @@ TEST_CASE("Mirror BSDF is a perfect-reflection delta lobe", "[BSDF]")
     MirrorMaterial mirror{"m", Color{0.8f, 0.7f, 0.6f}};
     RandomGenerator g{1};
 
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector incident = Vector::normalized(Vector{0.3, 0.0, -1.0});  // travelling into surface
 
     const BSDFSample s = mirror.sample(incident, normal, g);
@@ -90,7 +90,7 @@ TEST_CASE("Mirror sample is invalid when reflection points below the surface", "
     MirrorMaterial mirror{"m", Color{1.0f, 1.0f, 1.0f}};
     RandomGenerator g{1};
 
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     // A photon travelling away from the surface (same side as the normal) reflects
     // to the back side; the sample must be flagged invalid so the gather drops it.
     const Vector incident = Vector::normalized(Vector{0.0, 0.0, 1.0});
@@ -104,7 +104,7 @@ TEST_CASE("Lambert BSDF throughput equals albedo and stays in the hemisphere", "
     LambertianMaterial diffuse{"d", albedo};
     RandomGenerator g{1234};
 
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector incident = Vector::normalized(Vector{0.1, -0.2, -1.0});
 
     for (int i = 0; i < 256; ++i)
@@ -130,7 +130,7 @@ TEST_CASE("Lambert evaluate is the constant albedo/pi over the hemisphere", "[BS
 {
     const Color albedo{0.9f, 0.6f, 0.3f};
     LambertianMaterial diffuse{"d", albedo};
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     const float invPi = static_cast<float>(1.0 / Utility::pi);
 
@@ -159,7 +159,7 @@ TEST_CASE("Lambert sampleMode peaks along the normal", "[BSDF]")
 {
     LambertianMaterial diffuse{"d", Color{1.0f, 1.0f, 1.0f}};
     RandomGenerator g{1};
-    const Vector normal = Vector::normalized(Vector{0.2, 0.3, 1.0});
+    const UnitVector normal = UnitVector::normalize(Vector{0.2, 0.3, 1.0});
     const Vector incident = Vector::normalized(Vector{0.0, 0.0, -1.0});
 
     const BSDFSample s = diffuse.sampleMode(incident, normal, g);
@@ -171,7 +171,7 @@ TEST_CASE("Microfacet sampleMode peaks at the perfect-reflection direction", "[B
 {
     MicrofacetMaterial glossy{"g", Color{0.5f, 0.5f, 0.5f}, /*roughness=*/0.3};
     RandomGenerator g{1};
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector incident = Vector::normalized(Vector{0.4, 0.0, -1.0});
 
     const BSDFSample s = glossy.sampleMode(incident, normal, g);
@@ -188,7 +188,7 @@ TEST_CASE("Microfacet samples stay in the hemisphere with bounded throughput", "
 {
     MicrofacetMaterial glossy{"g", Color{0.8f, 0.8f, 0.8f}, /*roughness=*/0.5};
     RandomGenerator g{99};
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector incident = Vector::normalized(Vector{0.2, 0.1, -1.0});
 
     int valid = 0;

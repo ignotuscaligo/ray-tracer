@@ -37,11 +37,11 @@ public:
     double ior() const { return m_ior; }
 
     // Forward (photon) sample: stochastically pick reflect or refract by Fresnel.
-    BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
+    BSDFSample sample(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const override;
 
     // Delta lobes contribute nothing to the density gather / splat.
-    Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
-    double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
+    Color evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
+    double pdf(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
     bool isDelta() const override { return true; }
 
     // One stochastic continuation per hit, like the mirror.

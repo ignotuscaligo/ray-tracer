@@ -15,9 +15,9 @@ public:
     MirrorMaterial();
     MirrorMaterial(const std::string& name, const Color& albedo = {1.0f, 1.0f, 1.0f});
 
-    BSDFSample sample(const Vector& incident, const Vector& normal, RandomGenerator& generator) const override;
-    Color evaluate(const Vector& wi, const Vector& wo, const Vector& normal) const override;
-    double pdf(const Vector& wi, const Vector& wo, const Vector& normal) const override;
+    BSDFSample sample(const Vector& incident, const UnitVector& normal, RandomGenerator& generator) const override;
+    Color evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
+    double pdf(const Vector& wi, const Vector& wo, const UnitVector& normal) const override;
     bool isDelta() const override { return true; }
 
     // Delta BRDF — only one valid outgoing direction.

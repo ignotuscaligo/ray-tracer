@@ -12,7 +12,7 @@ MirrorMaterial::MirrorMaterial(const std::string& name, const Color& albedo)
 {
 }
 
-BSDFSample MirrorMaterial::sample(const Vector& incident, const Vector& normal, RandomGenerator& /*generator*/) const
+BSDFSample MirrorMaterial::sample(const Vector& incident, const UnitVector& normal, RandomGenerator& /*generator*/) const
 {
     BSDFSample s;
     s.direction = Vector::normalized(Vector::reflected(incident, normal));
@@ -26,12 +26,12 @@ BSDFSample MirrorMaterial::sample(const Vector& incident, const Vector& normal, 
     return s;
 }
 
-Color MirrorMaterial::evaluate(const Vector& /*wi*/, const Vector& /*wo*/, const Vector& /*normal*/) const
+Color MirrorMaterial::evaluate(const Vector& /*wi*/, const Vector& /*wo*/, const UnitVector& /*normal*/) const
 {
     return Color{0.0f, 0.0f, 0.0f};
 }
 
-double MirrorMaterial::pdf(const Vector& /*wi*/, const Vector& /*wo*/, const Vector& /*normal*/) const
+double MirrorMaterial::pdf(const Vector& /*wi*/, const Vector& /*wo*/, const UnitVector& /*normal*/) const
 {
     return 0.0;
 }

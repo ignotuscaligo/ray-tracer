@@ -335,7 +335,11 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
             continue;
         }
 
-        const Color brdf = material->evaluate(wi, toCameraDir, photonHit.hit.normal);
+        // The hit normal is unit by construction (the geometry producers
+        // normalize it); wrap it for the typed BSDF interface. The contract in
+        // alreadyNormalized catches a non-unit normal in debug/sanitizer builds.
+        const UnitVector hitNormal = UnitVector::alreadyNormalized(photonHit.hit.normal);
+        const Color brdf = material->evaluate(wi, toCameraDir, hitNormal);
 
         const double area = Utility::pi * r * r;
         const float scale = static_cast<float>(cosCamera / area);

@@ -30,7 +30,7 @@ TEST_CASE("Dielectric is a delta material with zero evaluate/pdf", "[Dielectric]
     REQUIRE(glass.isDelta() == true);
     REQUIRE(glass.daughterPhotonCount() == 1);
 
-    const Vector n{0, 0, 1};
+    const UnitVector n = UnitVector::alreadyNormalized(Vector{0, 0, 1});
     const Vector a = Vector::normalized(Vector{0.2, 0.1, 1.0});
     const Vector b = Vector::normalized(Vector{-0.2, -0.1, 1.0});
     const Color f = glass.evaluate(a, b, n);
@@ -46,7 +46,7 @@ TEST_CASE("Entering: normal-incidence refraction passes straight through", "[Die
     // incidence the transmitted ray is undeviated and the reflected ray bounces
     // straight back.
     const Vector incident{0, 0, -1};
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     const auto it = DielectricMaterial::resolve(incident, normal, kIor);
     REQUIRE(it.entering == true);
@@ -70,7 +70,7 @@ TEST_CASE("Entering: Snell's law bends the ray toward the normal", "[Dielectric]
     // sin(theta_t) = sin(45)/1.5 -> theta_t = asin(sin45/1.5).
     const double thetaI = Utility::radians(45.0);
     const Vector incident = Vector::normalized(Vector{std::sin(thetaI), 0.0, -std::cos(thetaI)});
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     const auto it = DielectricMaterial::resolve(incident, normal, kIor);
     REQUIRE(it.totalInternalReflection == false);
@@ -92,7 +92,7 @@ TEST_CASE("Exiting: flips the normal and uses glass->air indices", "[Dielectric]
     // dot(dir, normal) > 0 -> exiting. Small angle so no TIR.
     const double thetaI = Utility::radians(10.0);
     const Vector incident = Vector::normalized(Vector{std::sin(thetaI), 0.0, std::cos(thetaI)});
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     const auto it = DielectricMaterial::resolve(incident, normal, kIor);
     REQUIRE(it.entering == false);
@@ -211,7 +211,7 @@ TEST_CASE("Stochastic sample picks reflect/refract roughly by Fresnel R", "[Diel
     RandomGenerator rng{7};
 
     const Vector incident{0, 0, -1};
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     int refracted = 0;
     const int trials = 4000;
@@ -239,7 +239,7 @@ TEST_CASE("Sample under TIR always reflects", "[Dielectric]")
     const double critical = std::asin(1.0 / kIor);
     const double thetaI = critical + Utility::radians(5.0);
     const Vector incident = Vector::normalized(Vector{std::sin(thetaI), 0.0, std::cos(thetaI)});
-    const Vector normal{0, 0, 1};
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0, 0, 1});
 
     for (int i = 0; i < 500; ++i)
     {
