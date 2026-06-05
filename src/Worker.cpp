@@ -156,7 +156,9 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
 
 void Worker::setTerminationThreshold(double terminationThreshold)
 {
-    m_terminationThreshold = std::max(0.0, terminationThreshold);
+    // Wrap into Flux at the config boundary (the scene file carries a bare
+    // double). Clamp negatives away first — a floor below zero is meaningless.
+    m_terminationThreshold = Flux{std::max(0.0, terminationThreshold)};
 }
 
 void Worker::setPhotonsPerLight(double photonsPerLight)

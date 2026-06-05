@@ -23,7 +23,7 @@ namespace
 
 // The worker's continuation predicate (mirrors Worker.cpp:688). Returns true iff the
 // photon should push another bounce.
-bool continuesWalk(const Photon& photon, double terminationThreshold, size_t bounceThreshold)
+bool continuesWalk(const Photon& photon, Flux terminationThreshold, size_t bounceThreshold)
 {
     const bool decayAlive = photonDecayAlive(photon, terminationThreshold);
     return decayAlive && photon.bounces < static_cast<int>(bounceThreshold);
@@ -41,20 +41,20 @@ Photon photonWith(float magnitude, int bounces)
 
 TEST_CASE("Decay alone: photon dies when magnitude falls below the absolute floor", "[Decay]")
 {
-    const double threshold = 1.0;
+    const Flux threshold{1.0};
     // Above the floor -> alive; at-or-below -> dead (strictly-greater predicate).
-    REQUIRE(photonDecayAlive(/*current=*/1.001f, threshold));
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/1.0f, threshold));
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.999f, threshold));
+    REQUIRE(photonDecayAlive(/*current=*/Flux{1.001}, threshold));
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{1.0}, threshold));
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{0.999}, threshold));
 
     // Absolute, not relative-to-emission: a brighter photon survives deeper.
-    REQUIRE(photonDecayAlive(/*current=*/100.0f, threshold));
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.5f, threshold));
+    REQUIRE(photonDecayAlive(/*current=*/Flux{100.0}, threshold));
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{0.5}, threshold));
 }
 
 TEST_CASE("Bounce cap alone: photon dies once bounces reaches the cap", "[Decay]")
 {
-    const double threshold = 0.0;  // decay disabled (any positive magnitude is alive)
+    const Flux threshold{0.0};  // decay disabled (any positive magnitude is alive)
     const size_t cap = 3;
 
     // A bright photon (decay never fires) is bounded purely by the cap.
@@ -68,7 +68,7 @@ TEST_CASE("Bounce cap alone: photon dies once bounces reaches the cap", "[Decay]
 TEST_CASE("Whichever first: a bright photon dies at the cap, a dim one dies on decay",
           "[Decay]")
 {
-    const double threshold = 1.0;
+    const Flux threshold{1.0};
     const size_t cap = 5;
 
     // A BRIGHT photon stays above the decay floor, so the BOUNCE CAP terminates it
@@ -87,7 +87,7 @@ TEST_CASE("Whichever first: a bright photon dies at the cap, a dim one dies on d
 
 TEST_CASE("Decay predicate uses the max colour channel as current magnitude", "[Decay]")
 {
-    const double threshold = 1.0;
+    const Flux threshold{1.0};
     // Max channel above the floor -> alive.
     Photon bright;
     bright.color = Color{0.1f, 1.5f, 0.2f};  // max 1.5 > 1.0

@@ -165,7 +165,9 @@ private:
     size_t m_bounceThreshold = 1;
 
     // Single-photon decay-termination ABSOLUTE floor (see setTerminationThreshold).
-    double m_terminationThreshold = 1.0;
+    // Stored as Flux so the decay comparison is unit-checked (Flux > Flux); the
+    // public setter still takes a bare double from the scene config boundary.
+    Flux m_terminationThreshold{1.0};
 
     // Storage pivot M2: photons-per-light N for the direct splat's 1/N divide.
     // 0 disables the splat (no normalization possible).

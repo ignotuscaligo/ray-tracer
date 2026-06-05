@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Color.h"
+#include "Flux.h"
 #include "Ray.h"
 #include "Hit.h"
 
@@ -47,16 +48,25 @@ struct PhotonHit
 // NOTE: photon magnitudes are absolute emitted flux / photon-count, so they can
 // be large (hundreds+) and are scene-dependent; the bounce cap below is the real
 // safety bound on path depth.
-inline bool photonDecayAlive(float currentMagnitude,
-                             double terminationThreshold) noexcept
+// Both arguments are Flux (absolute flux-bundle units) so the comparison is
+// unit-checked: you cannot compare a magnitude against a value in different units
+// (a luminance, a pdf, a [0,1] reflectance) without an explicit Flux{...} wrap
+// that documents the unit assertion. See Flux.h / DESIGN.md §2a (the units trap).
+inline bool photonDecayAlive(Flux currentMagnitude,
+                             Flux terminationThreshold) noexcept
 {
-    return currentMagnitude > static_cast<float>(terminationThreshold);
+    return currentMagnitude > terminationThreshold;
 }
 
-// Convenience overload: the photon's current magnitude is the max colour channel.
-inline bool photonDecayAlive(const Photon& photon, double terminationThreshold) noexcept
+// Convenience overload: a photon's current magnitude is its max colour channel,
+// in the same absolute flux-bundle units as the threshold.
+inline Flux photonMagnitude(const Photon& photon) noexcept
 {
-    const float currentMagnitude =
-        std::max({photon.color.red, photon.color.green, photon.color.blue});
-    return photonDecayAlive(currentMagnitude, terminationThreshold);
+    return Flux{static_cast<double>(
+        std::max({photon.color.red, photon.color.green, photon.color.blue}))};
+}
+
+inline bool photonDecayAlive(const Photon& photon, Flux terminationThreshold) noexcept
+{
+    return photonDecayAlive(photonMagnitude(photon), terminationThreshold);
 }

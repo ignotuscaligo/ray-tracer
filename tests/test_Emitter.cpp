@@ -229,21 +229,21 @@ TEST_CASE("Lazy chunked single-photon scatter matches the eager single-shot path
 
 TEST_CASE("Decay termination cutoff is an absolute magnitude floor", "[Decay]")
 {
-    const double threshold = 1.0;
+    const Flux threshold{1.0};
 
     // A photon stays alive while its current magnitude exceeds the absolute floor,
     // regardless of how bright it was emitted (emission magnitude no longer plays
     // any role in the predicate).
-    REQUIRE(photonDecayAlive(/*current=*/2.0f, threshold));   // 2.0 > 1.0
-    REQUIRE(photonDecayAlive(/*current=*/500.0f, threshold)); // 500 > 1.0
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.5f, threshold)); // 0.5 < 1.0
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/1.0f, threshold)); // not strictly greater
+    REQUIRE(photonDecayAlive(/*current=*/Flux{2.0}, threshold));   // 2.0 > 1.0
+    REQUIRE(photonDecayAlive(/*current=*/Flux{500.0}, threshold)); // 500 > 1.0
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{0.5}, threshold)); // 0.5 < 1.0
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{1.0}, threshold)); // not strictly greater
 
     // NOT scale-invariant (by design): a brighter photon survives deeper. With the
     // same absolute floor, current 5.0 lives while current 0.5 dies — the relative
     // ratio to some emission magnitude is irrelevant.
-    REQUIRE(photonDecayAlive(/*current=*/5.0f, threshold));
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.5f, threshold));
+    REQUIRE(photonDecayAlive(/*current=*/Flux{5.0}, threshold));
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/Flux{0.5}, threshold));
 
     // The Photon overload uses the max colour channel as the current magnitude.
     Photon bright;
