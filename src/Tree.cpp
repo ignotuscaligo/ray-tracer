@@ -5,7 +5,6 @@
 #include "Ray.h"
 #include "Triangle.h"
 #include "Utility.h"
-#include "Photon.h"
 
 #include <algorithm>
 #include <iostream>
@@ -162,11 +161,11 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const noexcep
 }
 
 // getPivot / getBounds primary templates are intentionally left undeclared-here
-// (declared but undefined): every instantiated element type (Triangle,
-// PhotonHit) provides explicit specializations below, so the primary-template
-// bodies were never selected. Leaving them undefined turns any accidental
-// unspecialized instantiation into a link error instead of silently returning a
-// zero/default. (rayIntersectsObject is likewise specialized per type below.)
+// (declared but undefined): every instantiated element type (Triangle) provides
+// explicit specializations below, so the primary-template bodies were never
+// selected. Leaving them undefined turns any accidental unspecialized
+// instantiation into a link error instead of silently returning a zero/default.
+// (rayIntersectsObject is likewise specialized per type below.)
 
 template<typename T>
 double Tree<T>::axisMedian(const std::vector<T>& objects, Axis axis)
@@ -397,41 +396,3 @@ template std::vector<Triangle> Tree<Triangle>::fetchWithinPyramid(const Pyramid&
 template double Tree<Triangle>::axisMedian(const std::vector<Triangle>& objects, Axis axis);
 template void Tree<Triangle>::castRayIntoNode(const Ray& ray, Tree<Triangle>::Node& node, std::vector<Hit>& hits);
 template std::shared_ptr<typename Tree<Triangle>::Node> Tree<Triangle>::generateTree(const std::vector<Triangle>& objects, Axis axis);
-
-template<>
-const Vector& Tree<PhotonHit>::getPivot(const PhotonHit& object) noexcept
-{
-    return object.hit.position;
-}
-
-template<>
-double Tree<PhotonHit>::getPivot(const PhotonHit& object, Axis axis) noexcept
-{
-    return object.hit.position.getAxis(axis);
-}
-
-template<>
-Bounds Tree<PhotonHit>::getBounds(const PhotonHit& object) noexcept
-{
-    return {object.hit.position};
-}
-
-template<>
-std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& /*ray*/, const PhotonHit& /*object*/) noexcept
-{
-    return std::nullopt;
-}
-
-template size_t Tree<PhotonHit>::Node::size() const noexcept;
-template size_t Tree<PhotonHit>::Node::nodeCount() const noexcept;
-template size_t Tree<PhotonHit>::Node::nodeDepth() const noexcept;
-template Tree<PhotonHit>::Tree(const std::vector<PhotonHit>& objects, size_t pageSize);
-template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::root() noexcept;
-template size_t Tree<PhotonHit>::size() const noexcept;
-template size_t Tree<PhotonHit>::nodeCount() const noexcept;
-template size_t Tree<PhotonHit>::nodeDepth() const noexcept;
-template std::optional<Hit> Tree<PhotonHit>::castRay(const Ray& ray, std::vector<Hit>& castBuffer) const;
-template std::vector<PhotonHit> Tree<PhotonHit>::fetchWithinPyramid(const Pyramid& pyramid) const noexcept;
-template double Tree<PhotonHit>::axisMedian(const std::vector<PhotonHit>& objects, Axis axis);
-template void Tree<PhotonHit>::castRayIntoNode(const Ray& ray, Tree<PhotonHit>::Node& node, std::vector<Hit>& hits);
-template std::shared_ptr<typename Tree<PhotonHit>::Node> Tree<PhotonHit>::generateTree(const std::vector<PhotonHit>& objects, Axis axis);
