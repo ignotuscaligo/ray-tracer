@@ -231,9 +231,9 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
     m_bounceThreshold = bounceThreshold;
 }
 
-void Worker::setTerminationFraction(double terminationFraction)
+void Worker::setTerminationThreshold(double terminationThreshold)
 {
-    m_terminationFraction = std::max(0.0, terminationFraction);
+    m_terminationThreshold = std::max(0.0, terminationThreshold);
 }
 
 void Worker::setRussianRoulette(const RussianRouletteConfig& config)
@@ -520,15 +520,10 @@ bool Worker::processLights()
 
         // Stamp the source light-id on every freshly-emitted photon (emit() resets
         // bounces/ray/color but leaves lightId for us to set here, so emit()
-        // implementations don't each need to know their scene index). Also stamp
-        // the EMISSION magnitude (max colour channel) used as the scale-invariant
-        // reference for decay termination — captured here, after emit() has set the
-        // photon's emission colour, so no Light subclass needs to know about it.
+        // implementations don't each need to know their scene index).
         for (auto& photon : photons)
         {
             photon.lightId = lightIndex;
-            photon.initialMagnitude =
-                std::max({photon.color.red, photon.color.green, photon.color.blue});
         }
 
         // Stamp each freshly-emitted photon with a random time within the camera's
@@ -672,26 +667,23 @@ bool Worker::processPhotons()
             // the photon is discarded — no per-photon storage for the direct path.
             splatToCamera(photonHit, material);
 
-            // Continue the random walk only while BOTH terminators allow it:
-            //   1. DETERMINISTIC DECAY (the real terminator): kill the photon once
-            //      its current magnitude has decayed below a cutoff RELATIVE to its
-            //      emission magnitude. This is monotonic (the magnitude only ever
-            //      decreases across bounces, since every BSDF weight is <= 1) and
-            //      scale-invariant: the cutoff is terminationFraction *
-            //      initialMagnitude, so a photon emitted 10x brighter is traced to
-            //      the same NUMBER of bounces as a 10x-dimmer one — the
-            //      "100 x 1.0 == 10 x 10.0" emission equivalence holds. An ABSOLUTE
-            //      cutoff would trace bright photons deeper and break that.
+            // Continue the random walk only while BOTH terminators allow it; the
+            // photon dies at WHICHEVER fires FIRST:
+            //   1. BOUNCE CAP (the scene's $bounceThreshold): a HARD per-photon
+            //      ceiling on path depth. A photon that has already bounced
+            //      m_bounceThreshold times is terminal — no further emitter is
+            //      pushed. This is the real depth bound: scenes set bounceThreshold
+            //      2 or 3 expecting short paths, and that value is honored exactly.
+            //   2. ABSOLUTE DECAY: kill the photon once its current magnitude falls
+            //      below a fixed absolute floor (terminationThreshold, in photon-
+            //      magnitude / flux units). This is monotonic — every BSDF weight is
+            //      <= 1, so magnitude only decreases across bounces. Because the
+            //      floor is absolute (not relative to emission), a BRIGHTER photon
+            //      survives MORE bounces than a dimmer one before crossing it; the
+            //      bounce cap above is what keeps that bounded.
             //      No Russian-roulette survivor reweight: termination is a hard
-            //      monotonic decay + cutoff, NOT a probabilistic 1/p boost.
-            //   2. bounceThreshold: a hard safety CAP only (kept large) so a near-
-            //      unity-albedo path can't loop forever; decay is the real cutoff.
-            // (photonDecayAlive: alive iff currentMagnitude >
-            // terminationFraction * initialMagnitude. A photon with no recorded
-            // emission magnitude — e.g. a synthetic test hit — never decay-
-            // terminates; only the bounce cap governs it. Live photons always
-            // carry a positive initialMagnitude.)
-            const bool decayAlive = photonDecayAlive(photonHit.photon, m_terminationFraction);
+            //      decay + cutoff, NOT a probabilistic 1/p boost.
+            const bool decayAlive = photonDecayAlive(photonHit.photon, m_terminationThreshold);
 
             if (decayAlive && photonHit.photon.bounces < static_cast<int>(m_bounceThreshold))
             {
@@ -819,7 +811,6 @@ bool Worker::processEmissions()
                 emitter.time,
                 emitter.bounces,
                 emitter.lightId,
-                emitter.initialMagnitude,
                 m_generator);
 
             emitter.advance(static_cast<std::uint32_t>(produce));

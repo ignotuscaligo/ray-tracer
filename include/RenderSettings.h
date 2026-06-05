@@ -25,12 +25,20 @@ struct RenderSettings
     size_t bounceThreshold = 1;
 
     // ===== Single-photon decay termination =====
-    // The canonical terminator for the single-photon light-tracing model. A
-    // photon is killed once its current magnitude (max colour channel) falls
-    // below terminationFraction * its EMISSION magnitude — a cutoff relative to
-    // emission, so it is scale-invariant ("100 x 1.0 == 10 x 10.0"). bounceThreshold
-    // above is then only a hard safety cap (kept large). Default 1e-3.
-    double terminationFraction = 1e-3;
+    // A photon is killed once its current magnitude (max colour channel) falls
+    // below this ABSOLUTE threshold, expressed in photon-magnitude units (the same
+    // emitted flux / photon-count units the photon's colour carries — NOT a
+    // fraction of emission). A brighter photon therefore survives more bounces
+    // than a dimmer one; bounceThreshold above is the hard per-photon depth cap and
+    // the real safety bound.
+    //
+    // UNITS CAVEAT: because emission magnitude is absolute flux / photonsPerLight,
+    // the magnitude scale is scene-dependent (a high-flux light over few photons
+    // yields per-photon magnitudes in the hundreds). A single fixed default is
+    // therefore NOT robust across all scenes; tune $terminationThreshold per scene
+    // if the floor matters. Default 1.0 (a conservative floor; the bounce cap is
+    // what actually bounds path depth on normal scenes).
+    double terminationThreshold = 1.0;
 
     // ===== Russian roulette (LEGACY — superseded by decay termination) =====
     // Retained as config fields for back-compat scene loading; the single-photon

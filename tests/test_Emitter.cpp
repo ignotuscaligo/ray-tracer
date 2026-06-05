@@ -66,7 +66,6 @@ std::vector<Photon> generateLazy(const Material& material,
                                    emitter.time,
                                    emitter.bounces,
                                    emitter.lightId,
-                                   emitter.initialMagnitude,
                                    generator);
         emitter.advance(static_cast<std::uint32_t>(produce));
         slot += produce;
@@ -138,7 +137,6 @@ TEST_CASE("Single-photon scatter carries magnitude * BSDF weight (no 1/N split)"
                                hit.photon.time,
                                hit.photon.bounces,
                                hit.photon.lightId,
-                               hit.photon.initialMagnitude,
                                g);
 
     // parentColor * albedo, channel-wise (cosine-weighted Lambertian weight = albedo).
@@ -181,8 +179,7 @@ TEST_CASE("Single-photon scatter uses the STOCHASTIC sample, not the determinist
         material.generateDaughters(block, 0, 0, 1, 1,
                                    hit.photon.ray.direction, normal, hit.hit.position,
                                    hit.photon.color, hit.photon.time,
-                                   hit.photon.bounces, hit.photon.lightId,
-                                   hit.photon.initialMagnitude, g);
+                                   hit.photon.bounces, hit.photon.lightId, g);
         const double cosToNormal = Vector::dot(out[0].ray.direction, normal);
         // sampleMode() would return cos == 1 exactly (direction == normal).
         if (cosToNormal < 0.9999) ++offNormal;
@@ -230,49 +227,29 @@ TEST_CASE("Lazy chunked single-photon scatter matches the eager single-shot path
     }
 }
 
-TEST_CASE("Single-photon scatter carries the emission magnitude forward", "[Emitter]")
+TEST_CASE("Decay termination cutoff is an absolute magnitude floor", "[Decay]")
 {
-    // Decay termination compares a photon's CURRENT magnitude against its EMISSION
-    // magnitude, so initialMagnitude must survive a bounce verbatim (the bounce
-    // only attenuates color, never the emission reference).
-    LambertianMaterial material{"diffuse", Color{0.5f, 0.5f, 0.5f}};
-    PhotonHit hit = makeLambertianHit();
-    hit.photon.initialMagnitude = 4.2f;
+    const double threshold = 1.0;
 
-    std::vector<Photon> out(1);
-    WorkQueue<Photon>::Block block{0, 1, out};
-    RandomGenerator g{99};
-    material.generateDaughters(block, 0, 0, 1, 1,
-                               hit.photon.ray.direction, hit.hit.normal, hit.hit.position,
-                               hit.photon.color, hit.photon.time,
-                               hit.photon.bounces, hit.photon.lightId,
-                               hit.photon.initialMagnitude, g);
+    // A photon stays alive while its current magnitude exceeds the absolute floor,
+    // regardless of how bright it was emitted (emission magnitude no longer plays
+    // any role in the predicate).
+    REQUIRE(photonDecayAlive(/*current=*/2.0f, threshold));   // 2.0 > 1.0
+    REQUIRE(photonDecayAlive(/*current=*/500.0f, threshold)); // 500 > 1.0
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.5f, threshold)); // 0.5 < 1.0
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/1.0f, threshold)); // not strictly greater
 
-    REQUIRE_THAT(out[0].initialMagnitude, WithinAbs(4.2f, 1e-9f));
-}
+    // NOT scale-invariant (by design): a brighter photon survives deeper. With the
+    // same absolute floor, current 5.0 lives while current 0.5 dies — the relative
+    // ratio to some emission magnitude is irrelevant.
+    REQUIRE(photonDecayAlive(/*current=*/5.0f, threshold));
+    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.5f, threshold));
 
-TEST_CASE("Decay termination cutoff is relative to emission magnitude (scale-invariant)", "[Decay]")
-{
-    const double frac = 1e-3;
-
-    // A photon stays alive while its current magnitude exceeds frac * initial.
-    REQUIRE(photonDecayAlive(/*current=*/1.0f, /*initial=*/1.0f, frac));      // 1.0 > 0.001
-    REQUIRE(photonDecayAlive(/*current=*/0.01f, /*initial=*/1.0f, frac));     // 0.01 > 0.001
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.0005f, /*initial=*/1.0f, frac)); // below cutoff
-
-    // SCALE INVARIANCE: a 10x-brighter emission has a 10x-higher cutoff, so the
-    // SAME magnitude RATIO terminates at the SAME point. current/initial = 0.0005
-    // (below frac) terminates whether emitted at 1.0 or 10.0.
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.005f, /*initial=*/10.0f, frac)); // ratio 5e-4 < frac
-    REQUIRE(photonDecayAlive(/*current=*/0.02f, /*initial=*/10.0f, frac));        // ratio 2e-3 > frac
-    // The dim-emission analogue of the same ratios behaves identically.
-    REQUIRE_FALSE(photonDecayAlive(/*current=*/0.0005f, /*initial=*/1.0f, frac));
-    REQUIRE(photonDecayAlive(/*current=*/0.002f, /*initial=*/1.0f, frac));
-
-    // An un-stamped photon (initial 0) never decay-terminates regardless of how
-    // dim it is (as long as it still carries energy) — only the bounce cap can
-    // stop it. A genuinely black (current 0) photon is dead and is dropped earlier
-    // in the pipeline by the brightness check, not by decay.
-    REQUIRE(photonDecayAlive(/*current=*/1e-9f, /*initial=*/0.0f, frac));
-    REQUIRE(photonDecayAlive(/*current=*/123.0f, /*initial=*/0.0f, frac));
+    // The Photon overload uses the max colour channel as the current magnitude.
+    Photon bright;
+    bright.color = Color{0.2f, 1.5f, 0.1f}; // max channel 1.5 > 1.0 → alive
+    REQUIRE(photonDecayAlive(bright, threshold));
+    Photon dim;
+    dim.color = Color{0.2f, 0.4f, 0.1f};    // max channel 0.4 < 1.0 → dead
+    REQUIRE_FALSE(photonDecayAlive(dim, threshold));
 }

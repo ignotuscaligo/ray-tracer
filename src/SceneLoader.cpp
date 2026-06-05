@@ -569,10 +569,10 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.endFrame, renderConfiguration, "$endFrame", logToStdout);
         setFromJsonIfPresent(settings.bounceThreshold, renderConfiguration, "$bounceThreshold", logToStdout);
 
-        // Single-photon decay termination: kill a photon once its magnitude decays
-        // below this fraction of its emission magnitude (scale-invariant cutoff).
-        // bounceThreshold is then only a hard safety cap. Default 1e-3.
-        setFromJsonIfPresent(settings.terminationFraction, renderConfiguration, "$terminationFraction", logToStdout);
+        // Single-photon decay termination: kill a photon once its magnitude drops
+        // below this ABSOLUTE floor (in photon-magnitude / flux units, scene-
+        // dependent). bounceThreshold is the hard per-photon depth cap. Default 1.0.
+        setFromJsonIfPresent(settings.terminationThreshold, renderConfiguration, "$terminationThreshold", logToStdout);
 
         // Russian roulette (unbiased path termination). Default off for back-compat.
         setFromJsonIfPresent(settings.russianRoulette, renderConfiguration, "$russianRoulette", logToStdout);

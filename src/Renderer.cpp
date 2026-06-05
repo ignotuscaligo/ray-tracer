@@ -222,7 +222,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->animationQuery = animationQuery;
         worker->densityGrid = densityGrid;
         worker->setBounceThreshold(settings.bounceThreshold);
-        worker->setTerminationFraction(settings.terminationFraction);
+        worker->setTerminationThreshold(settings.terminationThreshold);
         worker->setRussianRoulette(Worker::RussianRouletteConfig{
             settings.russianRoulette,
             settings.russianRouletteMinBounces,
