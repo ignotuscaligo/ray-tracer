@@ -293,9 +293,13 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
         }
 
         // Outgoing radiance toward the camera: BRDF(wi -> wo) * cos(theta) * power,
-        // normalized by the photon count (1/N) and the pixel's world-space footprint
-        // area (pi r^2) so the buffer holds physical luminance the existing tonemap
-        // consumes unchanged. cos(theta) = dot(normal, toCameraDir) is the foreshortening
+        // divided ONLY by the pixel's world-space footprint area (pi r^2) so the
+        // buffer holds physical luminance the existing tonemap consumes unchanged.
+        // There is NO 1/N count-normalization here: the photon already carries its
+        // Phi/N magnitude baked at emission (LightQueue::registerLight,
+        // src/LightQueue.cpp:16), so the splat is a pure additive accumulate (see
+        // DESIGN.md section 3). m_photonsPerLight gates the splat on/off only, it is
+        // not a divisor. cos(theta) = dot(normal, toCameraDir) is the foreshortening
         // term (captured above as cosCamera). r is the footprint radius at the hit depth.
         const double pixelHalfAngle =
             0.5 * Utility::radians(cam->verticalFieldOfView()) /
