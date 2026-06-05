@@ -4,7 +4,6 @@
 #include "Color.h"
 #include "DensityGrid.h"
 #include "EmissiveGather.h"
-#include "EmitterQueue.h"
 #include "MirrorGather.h"
 #include "LightQueue.h"
 #include "Light.h"
@@ -86,7 +85,6 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
     std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(settings.photonQueueSize);
-    std::shared_ptr<EmitterQueue> emitterQueue = std::make_shared<EmitterQueue>(settings.emittingQueueSize);
 
     // Continuous-time animation oracle. Default is static; if the scene contains
     // an object named "MirrorSphere", attach a translation animation so the
@@ -210,7 +208,6 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
         worker->camera = scene.camera;
         worker->objects = scene.objects;
         worker->photonQueue = photonQueue;
-        worker->emitterQueue = emitterQueue;
         worker->buffer = buffer;
         worker->image = image;
         worker->materialLibrary = scene.materialLibrary;
@@ -249,34 +246,22 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
     size_t photonsToEmit = lightQueue->remainingPhotons();
     size_t photonsAllocated = photonQueue->allocated();
-    size_t emittingAllocated = emitterQueue->allocated();
 
     std::exception_ptr workerException;
     bool aborted = false;
 
-    // Per-worker claim-output-first overflow: hits a worker has dequeued/produced
-    // but not yet been able to enqueue downstream. This work lives outside the
-    // shared queues, so it MUST be part of the completion test — otherwise the
-    // loop could observe every queue empty while a worker still holds parked hits
-    // and stop the pipeline before those hits are splatted.
-    auto pendingOverflowTotal = [&workers]() {
-        size_t total = 0;
-        for (auto& worker : workers)
-        {
-            total += worker->pendingOverflow();
-        }
-        return total;
-    };
-    size_t overflowPending = pendingOverflowTotal();
-
-    while (photonsAllocated > 0 || emittingAllocated > 0 || photonsToEmit > 0 || overflowPending > 0)
+    // Completion test for the single-photon trace-to-completion pipeline: work is
+    // done when the lights owe no more photons AND no photons remain allocated in
+    // the queue. A batch a worker has fetched but not finished tracing keeps the
+    // queue's allocation non-zero (the source slots are released only after the
+    // whole batch is traced to completion), so in-flight bounce work is covered by
+    // photonsAllocated — there is no separate emitter queue or overflow to track.
+    while (photonsAllocated > 0 || photonsToEmit > 0)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
         photonsToEmit = lightQueue->remainingPhotons();
         photonsAllocated = photonQueue->allocated();
-        emittingAllocated = emitterQueue->allocated();
-        overflowPending = pendingOverflowTotal();
 
         for (auto& worker : workers)
         {
@@ -294,7 +279,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
 
         if (progress)
         {
-            const size_t remainingWork = photonsToEmit + photonsAllocated + emittingAllocated;
+            const size_t remainingWork = photonsToEmit + photonsAllocated;
             if (!progress(remainingWork))
             {
                 aborted = true;
@@ -324,9 +309,8 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     // keep exposure parameters for the per-camera tonemap.
     const double photonsEmitted = static_cast<double>(settings.photonsPerLight);
 
-    // Wave 3 memory evidence: high-water-mark occupancy of each queue.
+    // Memory evidence: high-water-mark occupancy of the (now sole) photon queue.
     result.peakPhotonQueue = photonQueue->largestAllocated();
-    result.peakEmitterQueue = emitterQueue->largestAllocated();
 
     // The compact reflection store (bounded by occupied cells, not photon count).
     result.densityGrid = densityGrid;

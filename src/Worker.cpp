@@ -87,7 +87,7 @@ void Worker::exec()
 {
     try
     {
-        if (!photonQueue || !emitterQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
+        if (!photonQueue || !image || !camera || !buffer || !materialLibrary || !lightQueue)
         {
             std::cout << m_index << ": ABORT: missing required references!" << std::endl;
             m_running = false;
@@ -103,10 +103,10 @@ void Worker::exec()
 
             bool drainedAnything = false;
 
-            // Gate light emission on headroom in the PhotonQueue. With the dual-source
-            // pipeline below, fan-out is back-pressured via the EmitterQueue rather than
-            // happening in-line at bounce time, so we no longer need the 64x worst-case
-            // headroom that the old immediate-spawn loop required.
+            // Emit a batch of fresh photons whenever the light still owes some and
+            // the photon queue has headroom. Single-photon trace-to-completion keeps
+            // the population constant (one outgoing photon per bounce), so a small
+            // fixed headroom margin is all the gate needs.
             if (lightQueue->remainingPhotons() > 0 && photonQueue->freeSpace() > m_fetchSize * 2)
             {
                 if (!processLights())
@@ -116,15 +116,12 @@ void Worker::exec()
                 drainedAnything = true;
             }
 
-            // Stage 1: raycast pending photons. Wave 4b: a batch of fetchSize
-            // photons produces bounce-hits that are DEPOSITED into the cloud
-            // (gather source) and, for bounceable hits, one compact Emitter each
-            // to the EmitterQueue (lazy daughter path). The forward-splat hitQueue
-            // push is removed. processPhotons flushes any emitter overflow from a
-            // prior iteration and only fetches new source photons when the emitter
-            // overflow is empty — so nothing is dropped, only deferred.
-            const bool photonOverflowPending = !m_emitterOverflow.empty();
-            if (photonQueue->available() > 0 || photonOverflowPending)
+            // Trace pending photons to completion: each fetched photon is followed
+            // through all its bounces (intersect -> deposit + splat -> scatter one
+            // continuation) inside processPhotons, with no per-bounce requeue. The
+            // image is produced by the camera splat during the pass plus the
+            // post-pass gather over the density grid.
+            if (photonQueue->available() > 0)
             {
                 if (!processPhotons())
                 {
@@ -132,29 +129,6 @@ void Worker::exec()
                 }
                 drainedAnything = true;
             }
-
-            // Stage 2: LAZY daughter fan-out. Pull compact emitters from the
-            // EmitterQueue, RESERVE photon-queue space first (claim-output-first),
-            // and generate only as many daughters as fit into the reservation.
-            // An emitter with daughters still remaining goes back in the queue;
-            // when its count hits zero it is done. No emitter is dropped — if no
-            // space can be reserved this round it is left in / returned to the
-            // queue for a later iteration (lossless).
-            if (emitterQueue->available() > 0 || !m_emitterOverflow.empty())
-            {
-                if (!processEmissions())
-                {
-                    break;
-                }
-                drainedAnything = true;
-            }
-
-            // Wave 4b: Stage 3 (camera-visibility check, processHits) and the
-            // splat sink (processFinalHits) are REMOVED. The forward splat that
-            // turned the camera into an accumulator is gone; the image is produced
-            // after the pass by the gather over the deposit cloud. Only the
-            // photon pass (emit -> raycast+deposit -> lazy daughter fan-out) runs
-            // here now.
 
             if (!drainedAnything)
             {
@@ -390,18 +364,6 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
     }
 }
 
-void Worker::syncOverflowGauge()
-{
-    m_pendingOverflowGauge.store(
-        m_emitterOverflow.size(),
-        std::memory_order_relaxed);
-}
-
-size_t Worker::pendingOverflow() const
-{
-    return m_pendingOverflowGauge.load(std::memory_order_relaxed);
-}
-
 bool Worker::processLights()
 {
     auto workStart = std::chrono::system_clock::now();
@@ -622,143 +584,6 @@ bool Worker::processPhotons()
     auto workEnd = std::chrono::system_clock::now();
     auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
     photonDuration += workDuration.count();
-
-    return true;
-}
-
-bool Worker::processEmissions()
-{
-    auto workStart = std::chrono::system_clock::now();
-
-    // Claim-output-first, mirror of processPhotons: before pulling more emitters,
-    // drain any parked from a prior iteration (new emitters that didn't fit, or
-    // partially-consumed emitters returned for another pass). If the overflow
-    // can't fully drain, do NOT fetch this round — let other stages free room.
-    if (!m_emitterOverflow.empty())
-    {
-        flushIntoQueue(m_emitterOverflow, *emitterQueue);
-        syncOverflowGauge();
-
-        auto workEnd = std::chrono::system_clock::now();
-        emitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
-        return true;
-    }
-
-    auto emitterBlock = emitterQueue->fetch(m_fetchSize);
-
-    if (emitterBlock.size() == 0)
-    {
-        emitterQueue->release(emitterBlock);
-        auto workEnd = std::chrono::system_clock::now();
-        emitDuration += std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart).count();
-        return true;
-    }
-
-    // Total daughters this batch of emitters still owes. A well-formed emitter
-    // always has a valid material (it was built from a real hit), so we count its
-    // full remaining; a (defensively handled) emitter with a missing material can
-    // make no progress and is retired without reserving slots, so it does not
-    // contribute to `owed`. This keeps `owed` equal to the number of slots the
-    // fill loop below can actually consume, which guarantees we fill exactly the
-    // slots we reserve (see the ready() note).
-    size_t owed = 0;
-    for (auto& emitter : emitterBlock)
-    {
-        std::shared_ptr<Material> material = materialLibrary->fetchByIndex(emitter.material);
-        if (material)
-        {
-            owed += emitter.remaining();
-        }
-        else
-        {
-            emitter.advance(emitter.remaining()); // retire — unreachable in practice
-        }
-    }
-
-    // RESERVE photon-queue space FIRST (claim-output-first preserves Wave 1's
-    // losslessness — daughters are only ever materialized into space we already
-    // hold, never speculatively). Reserve min(owed, freeSpace); initialize()
-    // clamps again to the true remaining capacity, so a lost race just yields a
-    // shorter block. Because the fill loop produces exactly min(owed, reserved)
-    // daughters and reserved <= owed, every reserved slot gets filled.
-    const size_t want = std::min(owed, photonQueue->freeSpace());
-    auto reserved = photonQueue->initialize(want);
-    const size_t reservedSlots = reserved.size();
-
-    // Fill the reserved block by walking emitters in order, generating as many of
-    // each emitter's REMAINING daughters as fit. An emitter generates its
-    // daughters in ascending global-index order across pulls (Emitter::generated
-    // tracks the cursor), so the lazy fan-out produces exactly the same daughters
-    // as the eager path — only chunked across reserved-space pulls. Any emitter
-    // not fully drained this pass is requeued; exhausted emitters are dropped.
-    size_t slot = 0;
-    std::vector<Emitter> requeue;
-
-    for (size_t i = 0; i < emitterBlock.size(); ++i)
-    {
-        Emitter& emitter = emitterBlock[i];
-
-        if (slot < reservedSlots && !emitter.done())
-        {
-            const size_t room = reservedSlots - slot;
-            const size_t produce = std::min<size_t>(emitter.remaining(), room);
-
-            std::shared_ptr<Material> material = materialLibrary->fetchByIndex(emitter.material);
-            // material is non-null here: null-material emitters were retired above
-            // (done()), so they never enter this branch.
-            material->generateDaughters(
-                reserved,
-                /*blockStart=*/slot,
-                /*globalStart=*/emitter.generated(),
-                /*count=*/produce,
-                /*totalDaughters=*/emitter.total(),
-                emitter.incident,
-                emitter.normal,
-                emitter.position,
-                emitter.color,
-                emitter.time,
-                emitter.bounces,
-                emitter.lightId,
-                m_generator);
-
-            emitter.advance(static_cast<std::uint32_t>(produce));
-            slot += produce;
-        }
-
-        if (!emitter.done())
-        {
-            requeue.push_back(emitter);
-        }
-    }
-
-    // Publish the reserved daughters. By the reservation invariant slot ==
-    // reservedSlots, so the whole reserved block is filled and ready()'d intact
-    // (its endIndex matches what initialize() registered — required by the
-    // WorkQueue ready bookkeeping).
-    if (reservedSlots > 0)
-    {
-        photonQueue->ready(reserved);
-    }
-
-    // Lossless requeue: the un-finished emitters live in `requeue` (copies).
-    // Release the fetched block, then re-enqueue. Anything that still doesn't fit
-    // is parked in the persistent overflow and flushed by the claim-output-first
-    // head of this function — never dropped.
-    emitterQueue->release(emitterBlock);
-
-    if (!requeue.empty())
-    {
-        flushIntoQueue(requeue, *emitterQueue);
-        if (!requeue.empty())
-        {
-            m_emitterOverflow.insert(m_emitterOverflow.end(), requeue.begin(), requeue.end());
-        }
-        syncOverflowGauge();
-    }
-
-    auto workEnd = std::chrono::system_clock::now();
-    auto workDuration = std::chrono::duration_cast<std::chrono::microseconds>(workEnd - workStart);
-    emitDuration += workDuration.count();
 
     return true;
 }

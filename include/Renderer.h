@@ -59,14 +59,12 @@ struct RenderResult
     // CameraRender::gatherSeconds.
     double photonPassSeconds = 0.0;
 
-    // Peak (high-water-mark) slot occupancy of each pipeline queue over the whole
-    // render. Wave 3 evidence: with lazy emitter fan-out the photon queue no
-    // longer needs N-daughter contiguous headroom per bounce-hit, and the emitter
-    // queue holds compact producers rather than N-multiplied PhotonHits, so the
-    // daughter-path memory pressure drops versus the eager path. Reported by the
+    // Peak (high-water-mark) slot occupancy of the photon queue over the whole
+    // render. Single-photon trace-to-completion keeps the population constant (one
+    // outgoing photon per bounce), so the queue only ever holds emitted batches in
+    // flight — there is no separate emitter / overflow queue. Reported by the
     // render-test CLI.
     size_t peakPhotonQueue = 0;
-    size_t peakEmitterQueue = 0;
 
     // Storage pivot: the QUANTIZED DENSITY GRID built during the photon pass. This
     // is the compact reflection store that replaces the per-photon BounceCloud +

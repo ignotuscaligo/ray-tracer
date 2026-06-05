@@ -104,13 +104,11 @@ int runRenderTest(int argc, char** argv)
                               static_cast<double>(splatTotal)
                         : 0.0);
 
-        // Wave 3 memory evidence: high-water-mark slot occupancy of each queue.
-        // The emitter queue now holds compact producers (a fraction of a
-        // PhotonHit each) and the photon queue no longer needs N-daughter
-        // contiguous headroom per bounce-hit.
-        std::printf("peak-occupancy: photon=%zu emitter=%zu\n",
-                    result.peakPhotonQueue,
-                    result.peakEmitterQueue);
+        // Memory evidence: high-water-mark slot occupancy of the photon queue. With
+        // single-photon trace-to-completion the population is constant, so the queue
+        // only ever holds emitted batches in flight (no emitter / overflow queue).
+        std::printf("peak-occupancy: photon=%zu\n",
+                    result.peakPhotonQueue);
 
         // Storage pivot: the QUANTIZED DENSITY GRID replaces the per-photon cloud.
         // Report occupied cells (the memory driver), total deposits accumulated,
