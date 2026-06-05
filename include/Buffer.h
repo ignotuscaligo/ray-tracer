@@ -34,7 +34,10 @@ public:
 
 private:
     const size_t m_width;
-    const size_t m_height;
+    // Retained as part of the buffer's logical dimensions; bounds checks use
+    // m_count (= width*height*3). Marked maybe_unused to keep the dimension
+    // documented without tripping -Wunused-private-field.
+    [[maybe_unused]] const size_t m_height;
     const size_t m_count;
     std::unique_ptr<std::atomic<float>[]> m_buffer;
 };

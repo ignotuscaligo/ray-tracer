@@ -14,7 +14,7 @@ PlaneVolume::PlaneVolume(size_t materialIndex)
     registerType<PlaneVolume>();
 }
 
-std::optional<Hit> PlaneVolume::castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const
+std::optional<Hit> PlaneVolume::castTransformedRay(const Ray& ray, std::vector<Hit>& /*castBuffer*/) const
 {
     return rayIntersectsPlane(ray, m_plane);
 }

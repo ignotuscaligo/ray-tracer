@@ -162,19 +162,25 @@ std::vector<T> Tree<T>::fetchWithinPyramid(const Pyramid& pyramid) const noexcep
 }
 
 template<typename T>
-const Vector& Tree<T>::getPivot(const T& object) noexcept
+const Vector& Tree<T>::getPivot(const T& /*object*/) noexcept
 {
-    return {};
+    // Primary-template stub: every instantiated type (Triangle, PhotonHit)
+    // provides an explicit specialization, so this body is never selected at a
+    // real call site. Return a reference to a function-local static rather than
+    // to a temporary — `return {};` here bound a dangling reference to a stack
+    // temporary (UB if ever called), which -Wreturn-stack-address flagged.
+    static const Vector zero{};
+    return zero;
 }
 
 template<typename T>
-double Tree<T>::getPivot(const T& object, Axis axis) noexcept
+double Tree<T>::getPivot(const T& /*object*/, Axis /*axis*/) noexcept
 {
     return 0.0;
 }
 
 template<typename T>
-Bounds Tree<T>::getBounds(const T& object) noexcept
+Bounds Tree<T>::getBounds(const T& /*object*/) noexcept
 {
     return {};
 }
@@ -296,7 +302,7 @@ void Tree<T>::fetchWithinPyramidFromNode(const Pyramid& pyramid, std::shared_ptr
 }
 
 template<typename T>
-std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& ray, const T& object) noexcept
+std::optional<Hit> Tree<T>::rayIntersectsObject(const Ray& /*ray*/, const T& /*object*/) noexcept
 {
     return std::nullopt;
 }
@@ -434,7 +440,7 @@ Bounds Tree<PhotonHit>::getBounds(const PhotonHit& object) noexcept
 }
 
 template<>
-std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& ray, const PhotonHit& object) noexcept
+std::optional<Hit> Tree<PhotonHit>::rayIntersectsObject(const Ray& /*ray*/, const PhotonHit& /*object*/) noexcept
 {
     return std::nullopt;
 }

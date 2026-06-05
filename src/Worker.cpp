@@ -617,7 +617,7 @@ bool Worker::processPhotons()
             size_t minIndex = 0;
             bool validHit = false;
 
-            for (int i = 0; i < m_volumeHitBuffer.size(); ++i)
+            for (size_t i = 0; i < m_volumeHitBuffer.size(); ++i)
             {
                 if (m_volumeHitBuffer[i].hit.distance < minDistance && m_volumeHitBuffer[i].hit.distance > selfHitThreshold)
                 {

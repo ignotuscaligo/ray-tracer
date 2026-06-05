@@ -41,7 +41,7 @@ double SphereVolume::radius() const
     return m_sphere.radius;
 }
 
-std::optional<Hit> SphereVolume::castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const
+std::optional<Hit> SphereVolume::castTransformedRay(const Ray& ray, std::vector<Hit>& /*castBuffer*/) const
 {
     return rayIntersectsSphere(ray, m_sphere);
 }

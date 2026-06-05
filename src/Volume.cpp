@@ -48,8 +48,9 @@ std::optional<Hit> Volume::castRayAt(const Ray& ray, std::vector<Hit>& castBuffe
     return hit;
 }
 
-std::optional<Hit> Volume::castTransformedRay(const Ray& ray, std::vector<Hit>& castBuffer) const
+std::optional<Hit> Volume::castTransformedRay(const Ray& /*ray*/, std::vector<Hit>& /*castBuffer*/) const
 {
+    // Base no-op: concrete volumes (PlaneVolume, SphereVolume, MeshVolume) override.
     return std::nullopt;
 }
 

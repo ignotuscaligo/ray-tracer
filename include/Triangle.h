@@ -24,4 +24,7 @@ struct Triangle
     Vector getNormal(const Vector& coords) const noexcept;
 };
 
-static Triangle operator+(const Triangle& lhs, const Vector& rhs) noexcept;
+// Declared with external linkage to match the out-of-line definition in
+// Triangle.cpp. (Was `static`, which gave every including TU its own unused
+// internal-linkage declaration — 46 -Wunused-function warnings.)
+Triangle operator+(const Triangle& lhs, const Vector& rhs) noexcept;

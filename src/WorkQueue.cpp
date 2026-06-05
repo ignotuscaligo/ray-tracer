@@ -80,14 +80,18 @@ std::vector<T> WorkQueue<T>::Block::toVector() const
 
 template<typename T>
 WorkQueue<T>::WorkQueue(size_t size)
-    : m_queue(size)
-    , m_size(size)
+    // Order must match member declaration order in WorkQueue.h to avoid
+    // -Wreorder-ctor (members are initialized in declaration order regardless
+    // of the order written here).
+    : m_size(size)
+    , m_queue(size)
     , m_memoryHead(0)
     , m_memoryTail(0)
     , m_readyHead(0)
     , m_readyTail(0)
     , m_allocated(0)
     , m_available(0)
+    , m_largestAllocated(0)
 {
 }
 
@@ -145,7 +149,6 @@ void WorkQueue<T>::ready(Block block)
             m_initializing.erase(it);
         }
 
-        size_t prev = m_readyHead;
         m_readyHead = head % m_size;
 
         m_available.fetch_add(block.endIndex - block.startIndex);
@@ -200,7 +203,6 @@ void WorkQueue<T>::release(Block block)
             tail = *m_processing.begin();
         }
 
-        size_t prev = m_memoryTail;
         m_memoryTail = tail % m_size;
 
         m_allocated.fetch_sub(block.endIndex - block.startIndex);

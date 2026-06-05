@@ -78,10 +78,21 @@ union Vector
     __m256d data;
 #endif
 
+    // Anonymous struct aliasing the AVX lane with named accessors. This is a
+    // GNU/MSVC extension (not ISO C++); silence -Wpedantic's "anonymous structs"
+    // diagnostic locally so the flag still applies everywhere else. Portable
+    // across GCC and Clang.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
     struct alignas(double)
     {
         double x, y, z, _w;
     };
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 Vector operator+(const Vector& lhs, const Vector& rhs) noexcept;

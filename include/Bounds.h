@@ -5,6 +5,10 @@
 struct Limits
 {
     Limits() = default;
+    // Explicitly default the copy ctor: this type provides a user-defined copy
+    // assignment operator, which deprecates the implicit copy constructor
+    // (-Wdeprecated-copy-with-user-provided-copy). Memberwise copy is correct.
+    Limits(const Limits&) = default;
     Limits(double min, double max) noexcept;
     Limits(double value) noexcept;
 
@@ -21,6 +25,9 @@ struct Limits
 struct Bounds
 {
     Bounds() = default;
+    // See Limits above: user-defined copy assignment deprecates the implicit
+    // copy ctor; default it explicitly. Memberwise copy is correct.
+    Bounds(const Bounds&) = default;
     Bounds(Limits x, Limits y, Limits z) noexcept;
     Bounds(Vector vector) noexcept;
     Bounds(Vector min, Vector max) noexcept;

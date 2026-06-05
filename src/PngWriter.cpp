@@ -85,11 +85,14 @@ void PngWriter::setTitle(const std::string& title)
     }
 
     png_text title_text{};
-    std::vector<char> titleString;
-    titleString.reserve(title.size() + 1);
+    // libpng's png_text fields are non-const char*, but png_set_text does not
+    // modify the key/text. Keep mutable backing storage and const_cast the
+    // string literal key (avoids the ISO C++11 writable-string conversion that
+    // -Wwritable-strings flags).
+    std::vector<char> titleString(title.size() + 1, '\0');
     strcpy(titleString.data(), title.c_str());
     title_text.compression = PNG_TEXT_COMPRESSION_NONE;
-    title_text.key = "Title";
+    title_text.key = const_cast<png_charp>("Title");
     title_text.text = titleString.data();
     png_set_text(m_structPtr, m_infoPtr, &title_text, 1);
 }

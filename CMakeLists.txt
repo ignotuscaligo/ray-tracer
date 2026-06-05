@@ -15,6 +15,60 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_BINARY_DIR})
 
+# Export compile_commands.json for clang-tidy / IDE tooling.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# ===== Static-analysis / sanitizer harness
+#
+# These options drive a "ray-tracer-flags" INTERFACE target that we link only
+# into the project's OWN targets (ray-tracer-lib, ray-tracer, tests, editor).
+# We deliberately do NOT set any of these as global CMAKE_CXX_FLAGS, because
+# that would also rebuild the Conan dependencies with these flags — sanitizers
+# in particular must NOT leak into deps (the runtime would be linked twice and
+# warnings/-Werror in third-party headers are not ours to fix).
+option(RAYTRACER_WERROR "Treat project warnings as errors (-Werror)" OFF)
+set(RAYTRACER_SANITIZE "" CACHE STRING
+    "Semicolon/comma list of sanitizers to enable on project targets, \
+e.g. \"address;undefined\". Empty disables sanitizers.")
+
+add_library(ray-tracer-flags INTERFACE)
+
+# Baseline warning set for GCC/Clang. MSVC is not a CI target here.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(ray-tracer-flags INTERFACE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+
+    # Vector.h deliberately uses an anonymous struct inside a union to alias the
+    # AVX `__m256d data` lane with named `.x/.y/.z` accessors. Anonymous structs
+    # are a GNU/MSVC extension (not ISO C++), so -Wpedantic flags every TU that
+    # includes Vector.h. The suppression is applied locally in Vector.h via a
+    # _Pragma guard (portable across GCC and Clang) rather than globally here, so
+    # -Wpedantic still polices the rest of the codebase.
+
+    if (RAYTRACER_WERROR)
+        target_compile_options(ray-tracer-flags INTERFACE -Werror)
+    endif()
+endif()
+
+# Sanitizers. Accept either ';' or ',' separated values and normalize to the
+# comma form the compiler wants (-fsanitize=address,undefined).
+if (RAYTRACER_SANITIZE)
+    string(REPLACE ";" "," _rt_san "${RAYTRACER_SANITIZE}")
+    message(STATUS "ray-tracer: sanitizers enabled: ${_rt_san}")
+    target_compile_options(ray-tracer-flags INTERFACE
+        -fsanitize=${_rt_san}
+        -fno-omit-frame-pointer
+        -g
+    )
+    # Sanitizer runtime must be on the link line for every project target.
+    target_link_options(ray-tracer-flags INTERFACE
+        -fsanitize=${_rt_san}
+    )
+endif()
+
 find_package(nlohmann_json REQUIRED)
 find_package(PNG REQUIRED)
 find_package(tinyobjloader REQUIRED)
@@ -67,6 +121,12 @@ target_link_libraries(ray-tracer-lib
         PNG::PNG
         tinyobjloader::tinyobjloader
 )
+
+# Project warning / sanitizer flags. PRIVATE compile flags (so they apply when
+# compiling ray-tracer-lib's own TUs but are not forced onto deps), but the
+# sanitizer link options must reach final executables, so the link side is made
+# to propagate via the executables linking ray-tracer-flags directly below.
+target_link_libraries(ray-tracer-lib PRIVATE ray-tracer-flags)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_link_libraries(ray-tracer-lib
@@ -251,6 +311,7 @@ set_target_properties(ray-tracer
 target_link_libraries(ray-tracer
     PRIVATE
         ray-tracer-lib
+        ray-tracer-flags
 )
 
 target_sources(ray-tracer
@@ -309,10 +370,23 @@ target_include_directories(editor
 target_link_libraries(editor
     PRIVATE
         ray-tracer-lib
+        ray-tracer-flags
         imgui::imgui
         glfw
         glm::glm
 )
+
+# The Dear ImGui backend sources are third-party; they are compiled into the
+# editor target but are not ours to keep warning-clean. Suppress warnings on
+# just those two TUs so -Wall/-Wextra/-Werror only police our own code. (The
+# sanitizer/-g flags from ray-tracer-flags still apply, which is fine.)
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        "${IMGUI_BINDINGS_DIR}/imgui_impl_glfw.cpp"
+        "${IMGUI_BINDINGS_DIR}/imgui_impl_opengl3.cpp"
+        PROPERTIES COMPILE_OPTIONS "-w"
+    )
+endif()
 
 # macOS: OpenGL is provided by the system OpenGL framework. glfw (via Conan)
 # pulls in Cocoa/IOKit/CoreVideo transitively, but linking OpenGL explicitly is

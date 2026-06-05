@@ -45,6 +45,7 @@ double Light::luminousFlux() const
     return m_intensityCandela * m_emissionSolidAngle;
 }
 
-void Light::emit(WorkQueue<Photon>::Block photonBlock, double photonFlux, RandomGenerator& generator) const
+void Light::emit(WorkQueue<Photon>::Block /*photonBlock*/, double /*photonFlux*/, RandomGenerator& /*generator*/) const
 {
+    // Base no-op: concrete light types (OmniLight, SpotLight, ...) override this.
 }

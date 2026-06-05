@@ -11,6 +11,7 @@ find_package(Threads REQUIRED)
 target_link_libraries(tests
     PRIVATE
         ray-tracer-lib
+        ray-tracer-flags
         Catch2::Catch2WithMain
         glm::glm
         Threads::Threads
