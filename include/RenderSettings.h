@@ -38,20 +38,6 @@ struct RenderSettings
     // what actually bounds path depth on normal scenes).
     double terminationThreshold = 1.0;
 
-    // ===== Configurable daughter fan-out (Milestone 2) =====
-    // Override or scale the per-material daughterPhotonCount() without
-    // recompiling. Default behavior (override = 0, scale = 1) leaves each
-    // material's native count untouched.
-    //   - daughterCountOverride > 0 forces EXACTLY this many daughters on every
-    //     bounceable hit, regardless of material (so 9/3/1 sweeps come from the
-    //     scene file). The 1/N energy split tracks the forced N, so total
-    //     outgoing energy stays correct — only sampling noise changes.
-    //   - daughterCountScale multiplies the material's native count (rounded,
-    //     min 1) when no override is set.
-    // Override takes precedence over scale.
-    size_t daughterCountOverride = 0;
-    double daughterCountScale = 1.0;
-
     // Hash-grid cell edge length (world units). Defaults to the expected gather
     // radius so a radius-r query touches a 3x3x3 cell neighborhood. Built over
     // the cloud after the photon pass drains.

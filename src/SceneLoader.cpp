@@ -572,11 +572,6 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         // dependent). bounceThreshold is the hard per-photon depth cap. Default 1.0.
         setFromJsonIfPresent(settings.terminationThreshold, renderConfiguration, "$terminationThreshold", logToStdout);
 
-        // Configurable daughter fan-out (Milestone 2). Override forces an exact
-        // count; scale multiplies the material's native count. Defaults are no-ops.
-        setFromJsonIfPresent(settings.daughterCountOverride, renderConfiguration, "$daughterCount", logToStdout);
-        setFromJsonIfPresent(settings.daughterCountScale, renderConfiguration, "$daughterCountScale", logToStdout);
-
         // Density-grid cell-size fallback (world units). Cell size is normally
         // derived from FOV/depth by the Renderer; this override is the fallback
         // when the footprint can't be derived (and is for diagnostics).

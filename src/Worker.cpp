@@ -184,12 +184,6 @@ void Worker::setTerminationThreshold(double terminationThreshold)
     m_terminationThreshold = std::max(0.0, terminationThreshold);
 }
 
-void Worker::setDaughterCount(size_t countOverride, double scale)
-{
-    m_daughterCountOverride = countOverride;
-    m_daughterCountScale = scale;
-}
-
 void Worker::setPhotonsPerLight(double photonsPerLight)
 {
     m_photonsPerLight = photonsPerLight;
@@ -394,28 +388,6 @@ void Worker::splatToCamera(const PhotonHit& photonHit, const std::shared_ptr<Mat
 
         target.buffer->addColor(coord, clamped);
     }
-}
-
-size_t Worker::resolveDaughterCount(size_t materialCount) const
-{
-    // SINGLE-PHOTON light tracing: every bounce scatters EXACTLY ONE outgoing
-    // photon, so the photon population stays constant (only emission adds
-    // photons; each bounce is 1-in-1-out). The material's native
-    // daughterPhotonCount() is intentionally IGNORED for the core model — the
-    // fan-out it described is gone.
-    //
-    // The legacy $daughterCount override is kept only as an explicit escape hatch
-    // (e.g. old N-sweep scenes): a value > 1 forces that many independent
-    // stochastic samples per bounce, growing the population again. With NO 1/N
-    // split downstream this multiplies energy by the count, so it is NOT
-    // energy-equivalent to single-photon and is for experiments only. The default
-    // (override 0) is the canonical single photon.
-    (void)materialCount;
-    if (m_daughterCountOverride > 0)
-    {
-        return m_daughterCountOverride;
-    }
-    return 1;
 }
 
 void Worker::syncOverflowGauge()
@@ -631,14 +603,9 @@ bool Worker::processPhotons()
             if (decayAlive && photonHit.photon.bounces < static_cast<int>(m_bounceThreshold))
             {
                 // Single-photon continuation: push ONE compact Emitter carrying the
-                // hit's generation state. resolveDaughterCount returns 1 (constant
-                // population) unless an experiment override forces more.
-                const size_t materialCount = material ? material->daughterPhotonCount() : 1;
-                const size_t n = resolveDaughterCount(materialCount);
-                if (n > 0)
-                {
-                    m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(n));
-                }
+                // hit's generation state. Every bounce scatters exactly one outgoing
+                // photon, so the population stays constant.
+                m_emitterOverflow.emplace_back(photonHit, static_cast<std::uint32_t>(1));
             }
         }
 

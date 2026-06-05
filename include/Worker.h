@@ -67,11 +67,6 @@ public:
     // below terminationThreshold. The bounce cap is the hard depth bound.
     void setTerminationThreshold(double terminationThreshold);
 
-    // Configurable daughter fan-out. `countOverride` (when > 0) forces an exact
-    // count; otherwise the material's native daughterPhotonCount() is multiplied
-    // by `scale` (rounded, min 1). Default (override 0, scale 1) is a no-op.
-    void setDaughterCount(size_t countOverride, double scale);
-
     // Storage pivot M2: photons-per-light N used by the direct splat to normalize
     // each contribution by 1/N (the single count divide the gather applied at
     // lookup). Must be set before the worker starts; default 0 disables the splat.
@@ -250,9 +245,6 @@ private:
     // Single-photon decay-termination ABSOLUTE floor (see setTerminationThreshold).
     double m_terminationThreshold = 1.0;
 
-    size_t m_daughterCountOverride = 0;
-    double m_daughterCountScale = 1.0;
-
     // Storage pivot M2: photons-per-light N for the direct splat's 1/N divide.
     // 0 disables the splat (no normalization possible).
     double m_photonsPerLight = 0.0;
@@ -268,10 +260,6 @@ private:
     // Storage pivot M3: the cameras + buffers the splat accumulates into (one per
     // scene camera). Set by the Renderer before the worker starts.
     std::vector<SplatTarget> m_splatTargets;
-
-    // Resolve the daughter count for a bounceable hit, applying the override /
-    // scale config on top of the material's native daughterPhotonCount().
-    size_t resolveDaughterCount(size_t materialCount) const;
 
     std::thread m_thread;
 
