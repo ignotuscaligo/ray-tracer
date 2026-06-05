@@ -27,8 +27,8 @@ bool AutomationServer::start(uint16_t port, Handler handler)
 
     m_handler = std::move(handler);
 
-    m_listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (m_listenFd < 0)
+    const int listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (listenFd < 0)
     {
         std::fprintf(stderr, "AutomationServer: socket() failed: %s\n",
                      std::strerror(errno));
@@ -36,7 +36,7 @@ bool AutomationServer::start(uint16_t port, Handler handler)
     }
 
     int yes = 1;
-    ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    ::setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -44,24 +44,25 @@ bool AutomationServer::start(uint16_t port, Handler handler)
     // 127.0.0.1 ONLY — never INADDR_ANY. No external exposure.
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+    if (::bind(listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
     {
         std::fprintf(stderr, "AutomationServer: bind(127.0.0.1:%u) failed: %s\n",
                      static_cast<unsigned>(port), std::strerror(errno));
-        ::close(m_listenFd);
-        m_listenFd = -1;
+        ::close(listenFd);
         return false;
     }
 
-    if (::listen(m_listenFd, 4) < 0)
+    if (::listen(listenFd, 4) < 0)
     {
         std::fprintf(stderr, "AutomationServer: listen() failed: %s\n",
                      std::strerror(errno));
-        ::close(m_listenFd);
-        m_listenFd = -1;
+        ::close(listenFd);
         return false;
     }
 
+    // Publish the fd before spawning the accept thread so the thread observes a
+    // fully-initialized, listening socket.
+    m_listenFd.store(listenFd);
     m_port = port;
     m_running.store(true);
     m_acceptThread = std::thread([this]() { acceptLoop(); });
@@ -83,12 +84,14 @@ void AutomationServer::stop()
         return;
     }
 
-    // Shut down the listening socket to unblock accept().
-    if (m_listenFd >= 0)
+    // Shut down the listening socket to unblock accept(). Clear m_running
+    // (done above via exchange) before tearing the fd down so the accept loop
+    // treats the resulting accept() failure as a shutdown, not an error.
+    const int listenFd = m_listenFd.exchange(-1);
+    if (listenFd >= 0)
     {
-        ::shutdown(m_listenFd, SHUT_RDWR);
-        ::close(m_listenFd);
-        m_listenFd = -1;
+        ::shutdown(listenFd, SHUT_RDWR);
+        ::close(listenFd);
     }
 
     if (m_acceptThread.joinable())
@@ -120,8 +123,13 @@ void AutomationServer::acceptLoop()
     {
         sockaddr_in clientAddr{};
         socklen_t len = sizeof(clientAddr);
+        const int listenFd = m_listenFd.load();
+        if (listenFd < 0)
+        {
+            break;  // stop() closed the socket.
+        }
         int clientFd =
-            ::accept(m_listenFd, reinterpret_cast<sockaddr*>(&clientAddr), &len);
+            ::accept(listenFd, reinterpret_cast<sockaddr*>(&clientAddr), &len);
         if (clientFd < 0)
         {
             if (!m_running.load())

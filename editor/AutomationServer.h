@@ -83,7 +83,7 @@ private:
 
     Handler m_handler;
 
-    int m_listenFd = -1;
+    std::atomic<int> m_listenFd{-1};
     uint16_t m_port = 0;
     std::thread m_acceptThread;
     std::atomic<bool> m_running{false};
