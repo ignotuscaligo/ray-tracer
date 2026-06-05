@@ -549,7 +549,9 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.workerCount, workerConfiguration, "$workerCount", logToStdout);
         setFromJsonIfPresent(settings.fetchSize, workerConfiguration, "$fetchSize", logToStdout);
         setFromJsonIfPresent(settings.photonQueueSize, workerConfiguration, "$photonQueueSize", logToStdout);
-        setFromJsonIfPresent(settings.emittingQueueSize, workerConfiguration, "$emittingQueueSize", logToStdout);
+        // $emittingQueueSize is accepted-and-ignored: the emitter/back-pressure
+        // queue it sized was removed with the single-photon trace-to-completion
+        // pipeline. Left unparsed so legacy scenes that still specify it load.
     }
 
     if (jsonData.contains("$renderConfiguration"))
