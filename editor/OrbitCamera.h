@@ -43,6 +43,36 @@ public:
         if (distance < 1e-3f) distance = 1e-3f;
     }
 
+    // Pan the camera by sliding the target within the camera's view plane.
+    // `deltaRight`/`deltaUp` are in target-space world units (the caller scales
+    // raw pixel deltas by distance so panning feels consistent at any zoom).
+    // Because eye() is derived from target, moving the target moves the whole
+    // camera rig — the classic DCC "track" / "truck" pan.
+    void pan(float deltaRight, float deltaUp)
+    {
+        const glm::vec3 forward = glm::normalize(target - eye());
+        const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+        glm::vec3 right = glm::cross(forward, worldUp);
+        const float rightLen = glm::length(right);
+        // Near the poles forward ~ worldUp; fall back to a stable right vector.
+        right = rightLen > 1e-5f ? right / rightLen : glm::vec3(1.0f, 0.0f, 0.0f);
+        const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+        target += right * deltaRight + up * deltaUp;
+    }
+
+    // Default framing for an empty scene: look at the world origin from a
+    // three-quarter angle above the XZ ground plane (the standard DCC startup
+    // pose). The grid fills the lower view and the gnomon sits at screen center.
+    void frameOrigin(float viewDistance = 12.0f)
+    {
+        target = glm::vec3(0.0f, 0.0f, 0.0f);
+        distance = viewDistance;
+        yaw = glm::radians(45.0f);
+        pitch = glm::radians(30.0f);
+        nearPlane = 0.05f;
+        farPlane = std::max(viewDistance * 100.0f, 1000.0f);
+    }
+
     glm::vec3 eye() const
     {
         const float cosPitch = std::cos(pitch);
