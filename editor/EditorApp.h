@@ -7,6 +7,8 @@
 #include "Scene.h"
 #include "ViewportGrid.h"
 
+#include <glm/glm.hpp>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -78,6 +80,14 @@ public:
     // error string on failure, empty on success.
     std::string loadMeshFromPath(const std::string& path);
 
+    // Load a renderer scene JSON INTO the in-memory model (camera, materials,
+    // objects), upload each object's geometry for the viewport, frame the orbit
+    // camera on the scene, and remember the path for render-from-view. Returns
+    // an error string on failure, empty on success. Requires a GL context.
+    std::string loadSceneFromPath(const std::string& path);
+
+    nlohmann::json cmdLoadScene(const nlohmann::json& req);
+
     // Capture pixels to a PNG. target is "window" | "viewport" | "render".
     // Returns empty on success, else an error string. Requires a GL context.
     std::string captureScreenshot(const std::string& path, const std::string& target);
@@ -99,6 +109,19 @@ private:
     // File > New: initialize an empty scene and show the viewport. The substrate
     // for later waves (object insertion, render-from-view, save) — see Scene.h.
     void newScene();
+
+    // Rebuild the GL geometry for the current m_scene model: load each
+    // MeshVolume's named OBJ sub-shape, tessellate a proxy sphere per
+    // SphereVolume, and build a wireframe gizmo per light. Requires a GL context.
+    void buildSceneGl();
+
+    // Draw all uploaded scene objects (meshes + sphere proxies) and light gizmos
+    // into the bound viewport FBO using the given view/projection.
+    void drawSceneObjects(const glm::mat4& view, const glm::mat4& proj);
+
+    // The scene-explorer panel: a tree/list of the scene's objects + camera.
+    // Selecting a row sets m_selectedObject and records each row's pixel rect.
+    void drawSceneExplorer();
 
     // Phase 3: kick off a path-traced render of the current scene on a worker
     // thread and poll its completion in the UI loop.
@@ -139,6 +162,33 @@ private:
     // The in-memory scene model (maps to the renderer's scene JSON). Empty until
     // File > New (or, later, a load) runs. See Scene.h.
     Scene m_scene;
+
+    // ----- scene-object GL display ----------------------------------------
+    // One drawable per scene object. Meshes + sphere proxies share the lit mesh
+    // shader and carry a model matrix + base color; light gizmos are wireframe
+    // line geometry drawn with the flat line shader. Index into m_scene.objects
+    // is kept so the explorer's selected object can be highlighted.
+    struct SceneDrawable
+    {
+        std::unique_ptr<RasterMesh> mesh;  // shaded geometry (mesh or sphere proxy)
+        glm::mat4 model{1.0f};
+        glm::vec3 color{0.75f};
+        std::size_t objectIndex = 0;       // index into m_scene.objects
+        bool isLight = false;              // lights also get a line gizmo (below)
+
+        // Line gizmo geometry (lights): a wireframe quad/disc in world space,
+        // interleaved position+color, drawn with the line shader. Empty for
+        // non-light drawables.
+        unsigned int gizmoVao = 0;
+        unsigned int gizmoVbo = 0;
+        std::size_t gizmoVertexCount = 0;
+    };
+    std::vector<SceneDrawable> m_sceneDrawables;
+
+    // The currently selected scene object (index into m_scene.objects), or -1.
+    // Set by the scene explorer; used to highlight the row + (next wave) drive
+    // the properties panel.
+    int m_selectedObject = -1;
 
     // Raster viewport state.
     RasterMesh m_mesh;

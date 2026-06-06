@@ -7,21 +7,16 @@
 
 #include <limits>
 
-MeshData loadObjMeshData(const std::string& path)
+namespace
+{
+
+// Shared extraction: pull triangles from the parsed OBJ into MeshData. When
+// `shapeFilter` is non-empty, only the shape with that exact name is extracted
+// (the renderer's $mesh-by-name convention); otherwise all shapes are merged.
+MeshData extractMeshData(const tinyobj::ObjReader& reader, const std::string& path,
+                         const std::string& shapeFilter)
 {
     MeshData out;
-
-    tinyobj::ObjReaderConfig config;
-    config.triangulate = true;
-
-    tinyobj::ObjReader reader;
-    if (!reader.ParseFromFile(path, config))
-    {
-        out.valid = false;
-        out.error = reader.Error().empty() ? ("Failed to parse OBJ: " + path)
-                                           : reader.Error();
-        return out;
-    }
 
     const tinyobj::attrib_t& attrib = reader.GetAttrib();
     const std::vector<tinyobj::shape_t>& shapes = reader.GetShapes();
@@ -31,6 +26,10 @@ MeshData loadObjMeshData(const std::string& path)
 
     for (const auto& shape : shapes)
     {
+        if (!shapeFilter.empty() && shape.name != shapeFilter)
+        {
+            continue;
+        }
         const auto& mesh = shape.mesh;
         size_t indexOffset = 0;
         for (size_t f = 0; f < mesh.num_face_vertices.size(); ++f)
@@ -90,7 +89,9 @@ MeshData loadObjMeshData(const std::string& path)
     if (out.vertices.empty())
     {
         out.valid = false;
-        out.error = "OBJ contained no triangles: " + path;
+        out.error = shapeFilter.empty()
+                        ? ("OBJ contained no triangles: " + path)
+                        : ("OBJ shape '" + shapeFilter + "' not found or empty in: " + path);
         return out;
     }
 
@@ -98,4 +99,48 @@ MeshData loadObjMeshData(const std::string& path)
     out.maxBound = maxB;
     out.valid = true;
     return out;
+}
+
+tinyobj::ObjReader parseObj(const std::string& path, MeshData& out, bool& ok)
+{
+    tinyobj::ObjReaderConfig config;
+    config.triangulate = true;
+
+    tinyobj::ObjReader reader;
+    if (!reader.ParseFromFile(path, config))
+    {
+        out.valid = false;
+        out.error = reader.Error().empty() ? ("Failed to parse OBJ: " + path)
+                                           : reader.Error();
+        ok = false;
+        return reader;
+    }
+    ok = true;
+    return reader;
+}
+
+}  // namespace
+
+MeshData loadObjMeshData(const std::string& path)
+{
+    MeshData out;
+    bool ok = false;
+    tinyobj::ObjReader reader = parseObj(path, out, ok);
+    if (!ok)
+    {
+        return out;
+    }
+    return extractMeshData(reader, path, /*shapeFilter=*/"");
+}
+
+MeshData loadObjShapeData(const std::string& path, const std::string& shapeName)
+{
+    MeshData out;
+    bool ok = false;
+    tinyobj::ObjReader reader = parseObj(path, out, ok);
+    if (!ok)
+    {
+        return out;
+    }
+    return extractMeshData(reader, path, shapeName);
 }

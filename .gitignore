@@ -7,3 +7,7 @@ CMakeUserPresets.json
 
 # ImGui runtime layout file, written next to the editor binary / CWD.
 imgui.ini
+
+# Editor render-from-current-view temp scenes (written next to the source scene
+# so relative $meshes / $renderPath still resolve). Regenerated every render.
+.editor_view_*

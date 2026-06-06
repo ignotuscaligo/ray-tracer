@@ -33,6 +33,13 @@ struct MeshData
 // false and MeshData::error describes the problem. Pure CPU work — no GL calls.
 MeshData loadObjMeshData(const std::string& path);
 
+// Load a single NAMED sub-shape (an OBJ `o <name>` group) from an OBJ file. This
+// is how the renderer's scene format references mesh pieces ($mesh: "Floor",
+// "Knot", ...): one OBJ contains several named objects and a MeshVolume picks one
+// by name. If `shapeName` is empty, behaves like loadObjMeshData (all shapes).
+// On a missing shape, MeshData::valid is false. Pure CPU work — no GL calls.
+MeshData loadObjShapeData(const std::string& path, const std::string& shapeName);
+
 // Owns the GL VAO/VBO for a mesh and knows how to draw it. Construction is
 // cheap; upload() requires a current GL context.
 class RasterMesh

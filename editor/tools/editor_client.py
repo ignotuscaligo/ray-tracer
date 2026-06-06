@@ -102,6 +102,16 @@ class EditorClient:
     def load_mesh(self, path: str) -> Dict[str, Any]:
         return self._command("load_mesh", path=path)
 
+    def load_scene(self, path: str) -> Dict[str, Any]:
+        """Load a renderer scene JSON into the in-memory model + viewport.
+
+        Populates the scene explorer with the scene's named objects, uploads each
+        object's geometry for the orbit viewport, frames the camera on the scene,
+        and sets it as the render target (render-from-current-view). Returns the
+        loaded object-name list.
+        """
+        return self._command("load_scene", path=path)
+
     def set_camera(
         self,
         eye: Optional[list] = None,
@@ -232,6 +242,9 @@ def _build_parser() -> argparse.ArgumentParser:
     lm = sub.add_parser("load-mesh")
     lm.add_argument("path")
 
+    ls = sub.add_parser("load-scene")
+    ls.add_argument("path")
+
     sc = sub.add_parser("set-camera")
     sc.add_argument("--eye", type=float, nargs=3)
     sc.add_argument("--target", type=float, nargs=3)
@@ -283,6 +296,8 @@ def main(argv: Optional[list] = None) -> int:
             result = client.get_state()
         elif args.command == "load-mesh":
             result = client.load_mesh(args.path)
+        elif args.command == "load-scene":
+            result = client.load_scene(args.path)
         elif args.command == "set-camera":
             result = client.set_camera(
                 eye=args.eye,

@@ -55,11 +55,12 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `cmd` | Fields | Effect |
 |---|---|---|
 | `ping` | — | Liveness check. Returns `pong`, `version`. |
-| `get_state` | — | Mesh path/label, camera (eye/target/fov/yaw/pitch/distance), render settings + status, viewport + window sizes. |
+| `get_state` | — | Mesh path/label, camera (eye/target/fov/yaw/pitch/distance), render settings + status, viewport + window sizes, **`scene` model summary (name/objects/material_count/camera_present), and `selected_object` / `selected_index`**. |
 | `load_mesh` | `path` | Load an OBJ into the viewport (GL upload + reframe camera). |
+| `load_scene` | `path` | Load a renderer scene JSON INTO the in-memory model (camera, materials, named objects), upload each object's geometry to the viewport, frame the orbit camera on the scene, and set it as the render target. Returns the object-name list. |
 | `set_camera` | any of `eye[3]`, `target[3]`, `fov`, `orbit_yaw`, `orbit_pitch`, `dolly` | Move the orbit camera. `eye` is converted to yaw/pitch/distance about `target`. |
 | `set_render_settings` | any of `resolution`, `photons` (millions), `scene_path` | Configure the path-traced render. |
-| `render` | `wait` (default true), `timeout` (s, default 600) | Path-trace `scene_path` on a worker thread. With `wait`, blocks until done. |
+| `render` | `wait` (default true), `timeout` (s, default 600) | Path-trace the loaded scene **from the LIVE orbit camera** (eye/target/fov are baked into a temp scene next to the source) on a worker thread. With `wait`, blocks until done. |
 | `screenshot` | `path`, `target` (`window`\|`viewport`\|`render`) | Capture pixels to an 8-bit RGBA PNG. |
 | `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path (drives camera nav + ImGui). |
 | `query_layout` | `name` (optional) | Pixel rect(s) of named UI elements recorded last frame. With `name`: one rect; without: all. |
@@ -133,11 +134,14 @@ that element; without, returns all. Rects carry `x,y,width,height` and a
 `center: [cx,cy]` an agent can click directly.
 
 Currently registered names: `menu_bar`, `menu_File`, `menu_Insert`,
-`panel_controls`, `panel_render`, `button_render`, `viewport`. The viewport rect
-doubles as the gate the nav handlers use to decide whether a press/scroll is a
-viewport gesture, so injected and real input are gated against the same rect.
-Future panels/widgets register the same way (one `m_layout.record(...)` call as
-the widget is submitted).
+`panel_controls`, `panel_render`, `panel_explorer`, `button_render`, `viewport`,
+plus the scene-explorer rows: `explorer_row_camera`, `explorer_row_<objectName>`
+(e.g. `explorer_row_MirrorKnot`, `explorer_row_Light`), and a positional alias
+`explorer_row_index_<i>`. Clicking a row's `center` selects that object (verify
+via `get_state.selected_object`). The viewport rect doubles as the gate the nav
+handlers use to decide whether a press/scroll is a viewport gesture, so injected
+and real input are gated against the same rect. Future panels/widgets register
+the same way (one `m_layout.record(...)` call as the widget is submitted).
 
 ## Python client
 

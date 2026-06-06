@@ -3,6 +3,7 @@
 #include "AutomationServer.h"
 #include "GlHeaders.h"
 #include "PngExport.h"
+#include "SceneModelLoader.h"
 #include "Shaders.h"
 
 #include "Image.h"
@@ -16,6 +17,8 @@
 #include <imgui_impl_opengl3.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include <chrono>
@@ -23,7 +26,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
+#include <utility>
 
 using nlohmann::json;
 
@@ -110,6 +115,74 @@ std::filesystem::path findUpwards(const std::string& relative, int maxLevels = 6
         dir = dir.parent_path();
     }
     return {};
+}
+
+// Build the same quaternion the renderer's Quaternion::fromPitchYawRoll produces
+// (pitch/yaw/roll in RADIANS), as a glm::quat, so the viewport's model transform
+// matches the renderer's transform exactly. Component order here mirrors
+// src/Quaternion.cpp::fromPitchYawRoll.
+glm::quat rendererQuat(float pitch, float yaw, float roll)
+{
+    const float p = pitch * 0.5f, y = yaw * 0.5f, r = roll * 0.5f;
+    const float cp = std::cos(p), cy = std::cos(y), cr = std::cos(r);
+    const float sp = std::sin(p), sy = std::sin(y), sr = std::sin(r);
+    glm::quat q;
+    q.x = sp * cy * cr + cp * sy * sr;
+    q.y = cp * sy * cr - sp * cy * sr;
+    q.z = cp * cy * sr + sp * sy * cr;
+    q.w = cp * cy * cr - sp * sy * sr;
+    return q;
+}
+
+// Model matrix for a scene object: translate to world position, then rotate by
+// the renderer-convention euler (degrees). Scale is applied last (objects here
+// use unit scale, but the seam is kept for later waves).
+glm::mat4 objectModelMatrix(const glm::vec3& position, const glm::vec3& eulerDegrees,
+                            const glm::vec3& scale)
+{
+    const glm::quat q = rendererQuat(glm::radians(eulerDegrees.x), glm::radians(eulerDegrees.y),
+                                     glm::radians(eulerDegrees.z));
+    glm::mat4 m(1.0f);
+    m = glm::translate(m, position);
+    m = m * glm::mat4_cast(q);
+    m = glm::scale(m, scale);
+    return m;
+}
+
+// Tessellate a UV sphere of `radius` centered at `center` into flat triangle
+// MeshData (position + normal), for drawing a SphereVolume proxy in the viewport.
+MeshData makeSphereMesh(const glm::vec3& center, float radius, int stacks = 16, int slices = 24)
+{
+    MeshData out;
+    auto pointAt = [&](int i, int j) {
+        const float v = static_cast<float>(i) / static_cast<float>(stacks);  // 0..1 top->bottom
+        const float u = static_cast<float>(j) / static_cast<float>(slices);  // 0..1 around
+        const float phi = v * 3.14159265358979f;            // 0..pi
+        const float theta = u * 2.0f * 3.14159265358979f;   // 0..2pi
+        const glm::vec3 n{std::sin(phi) * std::cos(theta), std::cos(phi),
+                          std::sin(phi) * std::sin(theta)};
+        return std::pair<glm::vec3, glm::vec3>{center + n * radius, n};
+    };
+    for (int i = 0; i < stacks; ++i)
+    {
+        for (int j = 0; j < slices; ++j)
+        {
+            auto a = pointAt(i, j);
+            auto b = pointAt(i + 1, j);
+            auto c = pointAt(i + 1, j + 1);
+            auto d = pointAt(i, j + 1);
+            out.vertices.push_back(RasterVertex{a.first, a.second});
+            out.vertices.push_back(RasterVertex{b.first, b.second});
+            out.vertices.push_back(RasterVertex{c.first, c.second});
+            out.vertices.push_back(RasterVertex{a.first, a.second});
+            out.vertices.push_back(RasterVertex{c.first, c.second});
+            out.vertices.push_back(RasterVertex{d.first, d.second});
+        }
+    }
+    out.minBound = center - glm::vec3(radius);
+    out.maxBound = center + glm::vec3(radius);
+    out.valid = true;
+    return out;
 }
 
 }  // namespace
@@ -285,7 +358,270 @@ void EditorApp::newScene()
     m_meshPath.clear();
     m_meshLabel = "(empty scene)";
 
+    // Drop any uploaded scene-object geometry + selection.
+    for (auto& d : m_sceneDrawables)
+    {
+        if (d.gizmoVbo) glDeleteBuffers(1, &d.gizmoVbo);
+        if (d.gizmoVao) glDeleteVertexArrays(1, &d.gizmoVao);
+    }
+    m_sceneDrawables.clear();
+    m_selectedObject = -1;
+
     m_camera.frameOrigin();
+}
+
+std::string EditorApp::loadSceneFromPath(const std::string& path)
+{
+    if (!std::filesystem::exists(path))
+    {
+        return "scene file not found: " + path;
+    }
+
+    SceneModel model;
+    std::string err;
+    if (!SceneModelLoader::loadFromFile(path, model, err))
+    {
+        return err;
+    }
+
+    // Adopt the parsed model, then (re)build viewport geometry from it.
+    m_scene = std::move(model);
+    m_scenePath = path;          // render-from-view re-serializes this scene
+    m_selectedObject = -1;
+    m_meshLabel = m_scene.name;
+
+    buildSceneGl();
+
+    // Frame the orbit camera on the whole scene's bounds so the box + knot + light
+    // all sit in view from the orbit camera.
+    glm::vec3 minB(std::numeric_limits<float>::max());
+    glm::vec3 maxB(std::numeric_limits<float>::lowest());
+    bool any = false;
+    for (const auto& d : m_sceneDrawables)
+    {
+        if (!d.mesh || !d.mesh->hasMesh())
+        {
+            continue;
+        }
+        // The drawable's bounds are in object space; transform the 8 corners.
+        const glm::vec3 lo = d.mesh->minBound();
+        const glm::vec3 hi = d.mesh->maxBound();
+        for (int c = 0; c < 8; ++c)
+        {
+            const glm::vec3 corner((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y,
+                                   (c & 4) ? hi.z : lo.z);
+            const glm::vec3 w = glm::vec3(d.model * glm::vec4(corner, 1.0f));
+            minB = glm::min(minB, w);
+            maxB = glm::max(maxB, w);
+            any = true;
+        }
+    }
+    if (any)
+    {
+        m_camera.frameBounds(minB, maxB);
+    }
+    else
+    {
+        m_camera.frameOrigin();
+    }
+
+    return {};
+}
+
+void EditorApp::buildSceneGl()
+{
+    // Release any previous scene geometry.
+    for (auto& d : m_sceneDrawables)
+    {
+        if (d.gizmoVbo) glDeleteBuffers(1, &d.gizmoVbo);
+        if (d.gizmoVao) glDeleteVertexArrays(1, &d.gizmoVao);
+    }
+    m_sceneDrawables.clear();
+
+    for (std::size_t i = 0; i < m_scene.objects.size(); ++i)
+    {
+        const SceneModel::ObjectNode& obj = m_scene.objects[i];
+
+        // Resolve the object's display color from its material (lights glow,
+        // groups/unknowns are skipped for drawing but still listed in explorer).
+        glm::vec3 color(0.75f);
+        if (const SceneModel::Material* mat = m_scene.findMaterial(obj.materialName))
+        {
+            color = mat->color;
+            if (mat->type == "Mirror")
+            {
+                color = glm::vec3(0.6f, 0.7f, 0.85f);  // tint so mirror reads as metal
+            }
+            else if (mat->type == "Glass")
+            {
+                color = glm::vec3(0.7f, 0.85f, 0.9f);
+            }
+        }
+
+        if (obj.kind == SceneModel::Kind::MeshVolume)
+        {
+            // Find the mesh sub-shape across the scene's OBJ files.
+            MeshData data;
+            data.valid = false;
+            for (const auto& objFile : m_scene.meshFiles)
+            {
+                MeshData candidate = loadObjShapeData(objFile, obj.meshName);
+                if (candidate.valid)
+                {
+                    data = std::move(candidate);
+                    break;
+                }
+            }
+            if (!data.valid)
+            {
+                continue;  // mesh not found; listed in explorer, just not drawn
+            }
+            SceneDrawable d;
+            d.mesh = std::make_unique<RasterMesh>();
+            d.mesh->upload(data);
+            d.model = objectModelMatrix(obj.position, obj.eulerDegrees, obj.scale);
+            d.color = color;
+            d.objectIndex = i;
+            m_sceneDrawables.push_back(std::move(d));
+        }
+        else if (obj.kind == SceneModel::Kind::SphereVolume)
+        {
+            // Sphere proxy: tessellate at the local center/radius; the model
+            // matrix places it (the renderer applies $position on top of $center).
+            MeshData data = makeSphereMesh(obj.center, static_cast<float>(obj.radius));
+            SceneDrawable d;
+            d.mesh = std::make_unique<RasterMesh>();
+            d.mesh->upload(data);
+            d.model = objectModelMatrix(obj.position, obj.eulerDegrees, obj.scale);
+            d.color = color;
+            d.objectIndex = i;
+            m_sceneDrawables.push_back(std::move(d));
+        }
+        else if (obj.kind == SceneModel::Kind::AreaLight ||
+                 obj.kind == SceneModel::Kind::OmniLight)
+        {
+            // Light gizmo: a wireframe quad (area light) or a small wire octahedron
+            // (omni). Built in object/local space and placed by the model matrix.
+            std::vector<float> verts;  // interleaved pos(3) + color(3)
+            const glm::vec3 gizmoColor(1.0f, 0.95f, 0.4f);
+            auto addLine = [&](const glm::vec3& a, const glm::vec3& b) {
+                verts.insert(verts.end(), {a.x, a.y, a.z, gizmoColor.r, gizmoColor.g, gizmoColor.b});
+                verts.insert(verts.end(), {b.x, b.y, b.z, gizmoColor.r, gizmoColor.g, gizmoColor.b});
+            };
+
+            if (obj.kind == SceneModel::Kind::AreaLight)
+            {
+                const float hw = static_cast<float>(obj.lightWidth) * 0.5f;
+                const float hh = static_cast<float>(obj.lightHeight) * 0.5f;
+                // Quad in the local XY plane (the renderer's area light spans
+                // right/up; the object's rotation orients it).
+                const glm::vec3 p0(-hw, -hh, 0.0f), p1(hw, -hh, 0.0f), p2(hw, hh, 0.0f),
+                    p3(-hw, hh, 0.0f);
+                addLine(p0, p1);
+                addLine(p1, p2);
+                addLine(p2, p3);
+                addLine(p3, p0);
+                // Diagonals so a filled-looking marker is visible.
+                addLine(p0, p2);
+                addLine(p1, p3);
+            }
+            else
+            {
+                const float r = 8.0f;  // fixed gizmo size for omni
+                const glm::vec3 px(r, 0, 0), nx(-r, 0, 0), py(0, r, 0), ny(0, -r, 0),
+                    pz(0, 0, r), nz(0, 0, -r);
+                addLine(px, py); addLine(py, nx); addLine(nx, ny); addLine(ny, px);
+                addLine(px, pz); addLine(pz, nx); addLine(nx, nz); addLine(nz, px);
+                addLine(py, pz); addLine(pz, ny); addLine(ny, nz); addLine(nz, py);
+            }
+
+            SceneDrawable d;
+            d.isLight = true;
+            d.objectIndex = i;
+            d.model = objectModelMatrix(obj.position, obj.eulerDegrees, obj.scale);
+            d.gizmoVertexCount = verts.size() / 6;
+
+            glGenVertexArrays(1, &d.gizmoVao);
+            glGenBuffers(1, &d.gizmoVbo);
+            glBindVertexArray(d.gizmoVao);
+            glBindBuffer(GL_ARRAY_BUFFER, d.gizmoVbo);
+            glBufferData(GL_ARRAY_BUFFER,
+                         static_cast<GLsizeiptr>(verts.size() * sizeof(float)), verts.data(),
+                         GL_STATIC_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                                  reinterpret_cast<void*>(0));
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                                  reinterpret_cast<void*>(3 * sizeof(float)));
+            glBindVertexArray(0);
+
+            m_sceneDrawables.push_back(std::move(d));
+        }
+        // Groups / Other: listed in the explorer but draw nothing.
+    }
+}
+
+void EditorApp::drawSceneObjects(const glm::mat4& view, const glm::mat4& proj)
+{
+    // Shaded meshes + sphere proxies.
+    if (m_shaderProgram)
+    {
+        glUseProgram(m_shaderProgram);
+        glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uView"), 1, GL_FALSE,
+                           glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uProjection"), 1, GL_FALSE,
+                           glm::value_ptr(proj));
+        const glm::vec3 lightDir = glm::normalize(m_camera.target - m_camera.eye());
+        glUniform3fv(glGetUniformLocation(m_shaderProgram, "uLightDir"), 1,
+                     glm::value_ptr(lightDir));
+
+        for (const auto& d : m_sceneDrawables)
+        {
+            if (!d.mesh || !d.mesh->hasMesh())
+            {
+                continue;
+            }
+            glm::vec3 color = d.color;
+            // Highlight the selected object.
+            if (m_selectedObject >= 0 &&
+                d.objectIndex == static_cast<std::size_t>(m_selectedObject))
+            {
+                color = glm::mix(color, glm::vec3(1.0f, 0.55f, 0.1f), 0.6f);
+            }
+            glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uModel"), 1, GL_FALSE,
+                               glm::value_ptr(d.model));
+            glUniform3fv(glGetUniformLocation(m_shaderProgram, "uBaseColor"), 1,
+                         glm::value_ptr(color));
+            d.mesh->draw();
+        }
+        glUseProgram(0);
+    }
+
+    // Light gizmos (line shader). The line shader has no uModel, so bake the
+    // model transform into a combined view matrix (view * model) per gizmo.
+    if (m_lineProgram)
+    {
+        glUseProgram(m_lineProgram);
+        glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uProjection"), 1, GL_FALSE,
+                           glm::value_ptr(proj));
+        glDisable(GL_DEPTH_TEST);
+        for (const auto& d : m_sceneDrawables)
+        {
+            if (!d.isLight || d.gizmoVao == 0)
+            {
+                continue;
+            }
+            const glm::mat4 vm = view * d.model;
+            glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uView"), 1, GL_FALSE,
+                               glm::value_ptr(vm));
+            glBindVertexArray(d.gizmoVao);
+            glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(d.gizmoVertexCount));
+        }
+        glBindVertexArray(0);
+        glEnable(GL_DEPTH_TEST);
+        glUseProgram(0);
+    }
 }
 
 void EditorApp::resizeFbo(int width, int height)
@@ -370,6 +706,9 @@ void EditorApp::renderViewport()
         glUseProgram(0);
     }
 
+    // Draw the in-memory scene's objects (meshes, sphere proxies, light gizmos).
+    drawSceneObjects(viewMat, projMat);
+
     if (m_mesh.hasMesh() && m_shaderProgram)
     {
         glUseProgram(m_shaderProgram);
@@ -423,11 +762,26 @@ void EditorApp::drawMenuBar()
             {
                 newScene();
             }
+            // Open the bundled Cornell-box mirror-knot proof scene. (A native
+            // file picker isn't wired in this environment; automation loads
+            // arbitrary scenes via the load_scene command. This convenience item
+            // opens the canonical scene so the menu path is exercised.)
+            if (ImGui::MenuItem("Open CornellBoxMirrorKnot", "Cmd+O"))
+            {
+                std::filesystem::path scene = findUpwards("CornellBoxMirrorKnot.json");
+                if (!scene.empty())
+                {
+                    std::string err = loadSceneFromPath(scene.string());
+                    if (!err.empty())
+                    {
+                        std::fprintf(stderr, "Open scene failed: %s\n", err.c_str());
+                    }
+                }
+            }
             ImGui::Separator();
-            // Stubs for later waves — visible so the shape is clear, disabled so
-            // they can't be triggered before they're implemented.
+            // Save stubs for later waves — visible so the shape is clear, disabled
+            // so they can't be triggered before they're implemented.
             ImGui::BeginDisabled();
-            ImGui::MenuItem("Open...", "Cmd+O");
             ImGui::MenuItem("Save", "Cmd+S");
             ImGui::MenuItem("Save As...", "Shift+Cmd+S");
             ImGui::EndDisabled();
@@ -455,6 +809,87 @@ void EditorApp::drawMenuBar()
         }
 
         ImGui::EndMainMenuBar();
+    }
+}
+
+namespace
+{
+const char* kindLabel(SceneModel::Kind k)
+{
+    switch (k)
+    {
+        case SceneModel::Kind::SphereVolume: return "Sphere";
+        case SceneModel::Kind::MeshVolume: return "Mesh";
+        case SceneModel::Kind::AreaLight: return "AreaLight";
+        case SceneModel::Kind::OmniLight: return "OmniLight";
+        case SceneModel::Kind::Group: return "Group";
+        case SceneModel::Kind::Other: return "Object";
+    }
+    return "Object";
+}
+}  // namespace
+
+void EditorApp::drawSceneExplorer()
+{
+    ImGui::Text("Scene Explorer");
+
+    // Wrap the list in a child region so it scrolls when the scene is large, and
+    // so the panel rect we register is the list's own region.
+    ImGui::BeginChild("scene_explorer", ImVec2(0, 220), true);
+    {
+        // The child window's own rect (its scroll region) — the clickable panel
+        // an agent targets. GetWindowPos/Size inside the child report exactly that.
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        m_layout.record("panel_explorer", wp.x, wp.y, ws.x, ws.y);
+    }
+
+    // Camera row first (always present once a scene is loaded).
+    if (m_scene.camera.present)
+    {
+        ImGui::Selectable(("[Camera] " + m_scene.camera.name).c_str(), false);
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record("explorer_row_camera", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+    }
+
+    // One selectable row per object. The row label carries the kind so an agent
+    // (and a human) can tell walls from the knot from the light.
+    for (std::size_t i = 0; i < m_scene.objects.size(); ++i)
+    {
+        const SceneModel::ObjectNode& obj = m_scene.objects[i];
+        const bool selected = (m_selectedObject == static_cast<int>(i));
+        ImGui::PushID(static_cast<int>(i));
+        const std::string label =
+            std::string("[") + kindLabel(obj.kind) + "] " + obj.name;
+        if (ImGui::Selectable(label.c_str(), selected))
+        {
+            m_selectedObject = static_cast<int>(i);
+        }
+        // Register each row's pixel rect by name so the puppet port can click it.
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record("explorer_row_" + obj.name, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        m_layout.record("explorer_row_index_" + std::to_string(i), mn.x, mn.y, mx.x - mn.x,
+                        mx.y - mn.y);
+        ImGui::PopID();
+    }
+
+    if (m_scene.objects.empty() && !m_scene.camera.present)
+    {
+        ImGui::TextDisabled("(empty scene — File > Open a scene)");
+    }
+
+    ImGui::EndChild();
+
+    if (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()))
+    {
+        const SceneModel::ObjectNode& sel = m_scene.objects[m_selectedObject];
+        ImGui::Text("Selected: %s (%s)", sel.name.c_str(), kindLabel(sel.kind));
+    }
+    else
+    {
+        ImGui::TextDisabled("Selected: (none)");
     }
 }
 
@@ -490,11 +925,16 @@ void EditorApp::drawUi()
     ImGui::TextWrapped("GUI model/scene editor for the photon path tracer.");
     ImGui::Separator();
     ImGui::Text("Scene: %s%s", m_scene.name.c_str(), m_scene.dirty ? " *" : "");
-    ImGui::Text("Objects: %zu   Lights: %zu", m_scene.objects.size(), m_scene.lights.size());
-    ImGui::Text("Mesh: %s", m_meshLabel.c_str());
+    ImGui::Text("Objects: %zu   Materials: %zu", m_scene.objects.size(),
+                m_scene.materials.size());
     ImGui::TextWrapped("Viewport: orbit = left-drag, pan = middle-drag or "
                        "shift+left-drag, zoom = scroll");
-    ImGui::ColorEdit3("Preview color", m_meshColor);
+    ImGui::Separator();
+
+    // Scene explorer: the tree of named objects + the camera. Selecting a row
+    // sets m_selectedObject (highlights it in the viewport; drives the properties
+    // panel next wave). Each row registers its pixel rect in the LayoutRegistry.
+    drawSceneExplorer();
     ImGui::Separator();
 
     ImGui::Text("Scene file: %s",
@@ -622,16 +1062,69 @@ void EditorApp::startRender()
     const int resolution = m_renderResolution;
     const size_t photons = static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
 
+    // RENDER-FROM-CURRENT-VIEW: build a temp scene JSON from the loaded model's
+    // raw JSON, overwriting the Camera block's $position / $rotation /
+    // $verticalFieldOfView with the LIVE orbit camera so the path-trace frames the
+    // scene exactly as the viewport shows it (not the scene-file camera).
+    //
+    // Convention mapping (derived from src/Quaternion.cpp::fromPitchYawRoll and
+    // the orbit eye() parameterization):
+    //   render $position  = orbit eye()
+    //   render pitch(deg) = orbit pitch(deg)
+    //   render yaw(deg)   = orbit yaw(deg) + 180   (orbit eye is BEHIND the target
+    //                       along -forward; the renderer looks down +Z, so the yaw
+    //                       is flipped by 180 to point eye -> target)
+    //   render roll       = 0
+    //   render $verticalFieldOfView = orbit fovY(deg)
+    // These are read on the main thread (camera state) and baked into the temp
+    // scene file the worker thread renders.
+    const glm::vec3 eye = m_camera.eye();
+    const double renderPitchDeg = glm::degrees(m_camera.pitch);
+    const double renderYawDeg = glm::degrees(m_camera.yaw) + 180.0;
+    const double renderFovDeg = glm::degrees(m_camera.fovYRadians);
+
+    std::string renderScenePath = scenePath;  // fall back to the file as-is
+    if (m_scene.rawJson.is_object() && m_scene.rawJson.contains("$scene"))
+    {
+        json sceneJson = m_scene.rawJson;  // copy; rewrite the camera in place
+        json& sceneBlock = sceneJson["$scene"];
+        // Find the camera entry (the one whose $type == "Camera").
+        for (auto& [name, node] : sceneBlock.items())
+        {
+            if (node.is_object() && node.value("$type", std::string{}) == "Camera")
+            {
+                node["$position"] = {eye.x, eye.y, eye.z};
+                node["$rotation"] = {{"$type", "PitchYawRollDegrees"},
+                                     {"$value", {renderPitchDeg, renderYawDeg, 0.0}}};
+                node["$verticalFieldOfView"] = renderFovDeg;
+                break;
+            }
+        }
+
+        // Write the rewritten scene next to the original so relative $meshes /
+        // $renderPath still resolve against the same directory.
+        std::filesystem::path base(scenePath);
+        std::filesystem::path tempPath =
+            base.parent_path() / (".editor_view_" + base.filename().string());
+        std::ofstream out(tempPath);
+        if (out)
+        {
+            out << sceneJson.dump(2);
+            out.close();
+            renderScenePath = tempPath.string();
+        }
+    }
+
     // TODO (Phase 4 — progressive preview, not yet wired): renderFrame already
     // accepts a Renderer::ProgressCallback and the Buffer is pollable mid-render.
     // To show accumulation, capture result.buffer here, and on a UI timer call
     // Renderer::tonemapBufferToImage on a snapshot + re-upload m_renderTex while
     // RenderState::Running. Camera moves would reset/restart the render. Left as
     // a clean follow-up rather than half-wired.
-    m_renderThread = std::thread([this, scenePath, resolution, photons]() {
+    m_renderThread = std::thread([this, renderScenePath, resolution, photons]() {
         try
         {
-            LoadedScene scene = SceneLoader::loadFromFile(scenePath, /*logToStdout=*/false);
+            LoadedScene scene = SceneLoader::loadFromFile(renderScenePath, /*logToStdout=*/false);
             // Override resolution + photon budget for an interactive-speed render.
             scene.settings.imageWidth = static_cast<size_t>(resolution);
             scene.settings.imageHeight = static_cast<size_t>(resolution);
@@ -738,6 +1231,7 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "ping") return cmdPing(request);
     if (cmd == "get_state") return cmdGetState(request);
     if (cmd == "load_mesh") return cmdLoadMesh(request);
+    if (cmd == "load_scene") return cmdLoadScene(request);
     if (cmd == "set_camera") return cmdSetCamera(request);
     if (cmd == "set_render_settings") return cmdSetRenderSettings(request);
     if (cmd == "render") return cmdRender(request);
@@ -783,6 +1277,27 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
     j["render_height"] = m_renderHeight;
     j["viewport"] = {{"width", m_fboWidth}, {"height", m_fboHeight}};
     j["window"] = {{"width", m_lastWindowWidth}, {"height", m_lastWindowHeight}};
+
+    // Scene model summary + current selection (so automation can verify the
+    // explorer contents and which row is selected without screenshotting).
+    json objectNames = json::array();
+    for (const auto& obj : m_scene.objects)
+    {
+        objectNames.push_back(obj.name);
+    }
+    j["scene"] = {
+        {"name", m_scene.name},
+        {"path", m_scenePath},
+        {"object_count", m_scene.objects.size()},
+        {"material_count", m_scene.materials.size()},
+        {"camera_present", m_scene.camera.present},
+        {"objects", objectNames},
+    };
+    j["selected_index"] = m_selectedObject;
+    j["selected_object"] =
+        (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()))
+            ? json(m_scene.objects[static_cast<std::size_t>(m_selectedObject)].name)
+            : json(nullptr);
     return j;
 }
 
@@ -803,6 +1318,34 @@ nlohmann::json EditorApp::cmdLoadMesh(const nlohmann::json& req)
         return json{{"ok", false}, {"error", err}};
     }
     return json{{"ok", true}, {"mesh_path", m_meshPath}, {"mesh_label", m_meshLabel}};
+}
+
+nlohmann::json EditorApp::cmdLoadScene(const nlohmann::json& req)
+{
+    if (!req.contains("path") || !req["path"].is_string())
+    {
+        return json{{"ok", false}, {"error", "load_scene requires string 'path'"}};
+    }
+    const std::string path = req["path"].get<std::string>();
+    std::string err = loadSceneFromPath(path);
+    if (!err.empty())
+    {
+        return json{{"ok", false}, {"error", err}};
+    }
+
+    // Summarize the loaded model so an agent can confirm the explorer contents.
+    json objects = json::array();
+    for (const auto& obj : m_scene.objects)
+    {
+        objects.push_back(obj.name);
+    }
+    return json{{"ok", true},
+                {"scene_path", m_scenePath},
+                {"name", m_scene.name},
+                {"object_count", m_scene.objects.size()},
+                {"material_count", m_scene.materials.size()},
+                {"camera_present", m_scene.camera.present},
+                {"objects", objects}};
 }
 
 nlohmann::json EditorApp::cmdSetCamera(const nlohmann::json& req)
@@ -1277,6 +1820,14 @@ void EditorApp::shutdown()
 
     if (m_window)
     {
+        // Free scene-object gizmo GL buffers before tearing down the context.
+        for (auto& d : m_sceneDrawables)
+        {
+            if (d.gizmoVbo) glDeleteBuffers(1, &d.gizmoVbo);
+            if (d.gizmoVao) glDeleteVertexArrays(1, &d.gizmoVao);
+        }
+        m_sceneDrawables.clear();
+
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();

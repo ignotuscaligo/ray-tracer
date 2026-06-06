@@ -1,79 +1,152 @@
 #pragma once
 
+#include <glm/glm.hpp>
+#include <nlohmann/json.hpp>
+
 #include <string>
 #include <vector>
 
 // The editor's in-memory scene model.
 //
 // KEY DESIGN DECISION: the editor's project format IS the renderer's scene JSON
-// (the same format `ray-tracer <scene>.json` reads — see SceneLoader.cpp for the
-// schema: Camera, AreaLight/OmniLight, CornellBox objects, SphereVolume/
-// MeshVolume with $center/$radius/$material, materials with $type Lambertian/
-// Mirror/Glass, and a render config). So this model is structured to map cleanly
-// onto that JSON when save/load and object insertion land in later waves.
+// (the same format `ray-tracer <scene>.json` reads — see src/SceneLoader.cpp for
+// the schema). Rather than reuse the renderer's LoadedScene (whose meshes are
+// already wrapped in opaque BVH trees and whose object hierarchy is built for
+// ray casting, not editing), this model is parsed DIRECTLY from the scene JSON
+// into editable, GL-friendly structs:
 //
-// Wave 1 scope: an EMPTY scene only. The object/light/material/camera vectors
-// below are intentionally declared but empty — they are the seams the next waves
-// fill in (object insertion populates `objects`; save serializes the whole
-// struct to the renderer JSON; render-from-view reads `cameras`). No GL state
-// lives here; this is pure data so it can be unit-tested and serialized without
-// a GL context, mirroring the MeshData/RasterMesh split elsewhere in the editor.
-class Scene
+//   * camera   — verticalFOV + position + euler rotation (pitch/yaw/roll degrees)
+//   * materials — by name: type (Lambertian/Mirror/Glass) + color (+ ior)
+//   * objects  — a flat list of named entries, each with a transform
+//                (position/rotation/scale), a Kind, and kind-specific data:
+//                  SphereVolume  -> center + radius + materialName
+//                  MeshVolume    -> meshName (an OBJ sub-shape) + materialName
+//                  AreaLight     -> shape + width/height/radius
+//                  OmniLight     -> (gizmo only)
+//
+// The full parsed JSON is retained (`rawJson`) so render-from-view can re-emit
+// the exact scene with only the camera block rewritten to the live orbit camera
+// — the model round-trips the objects for display, and the JSON round-trips the
+// scene for rendering.
+//
+// This stays GL-free pure data so it can be parsed/serialized without a GL
+// context; the viewport's GL upload of these objects lives in EditorApp.
+struct SceneModel
 {
-public:
-    // ----- placeholders for later waves (kept empty in Wave 1) --------------
-    //
-    // These deliberately use plain strings/vectors rather than concrete renderer
-    // types so the editor target stays free of a hard dependency on the loader's
-    // object hierarchy until insertion/serialization actually needs it. When
-    // those waves land, replace these with structs that round-trip the JSON
-    // ($center/$radius/$material, $type, etc.).
-
-    // Object/volume entries (SphereVolume, MeshVolume, CornellBox, ...).
-    struct ObjectPlaceholder
+    // ----- materials -------------------------------------------------------
+    struct Material
     {
-        std::string typeName;  // e.g. "SphereVolume"
-    };
-    // Light entries (AreaLight, OmniLight).
-    struct LightPlaceholder
-    {
-        std::string typeName;
+        std::string name;
+        std::string type;          // "Lambertian" | "Mirror" | "Glass" (normalized)
+        glm::vec3 color{0.8f};     // base color / tint
+        double ior = 1.5;          // Glass only
     };
 
-    std::vector<ObjectPlaceholder> objects;
-    std::vector<LightPlaceholder> lights;
+    // ----- objects ---------------------------------------------------------
+    enum class Kind
+    {
+        SphereVolume,
+        MeshVolume,
+        AreaLight,
+        OmniLight,
+        Group,        // a plain Object container (e.g. "CornellBox")
+        Other
+    };
 
-    // A human-facing name for the project, shown in the title bar / save dialog.
+    enum class LightShape
+    {
+        Square,
+        Disc
+    };
+
+    struct ObjectNode
+    {
+        std::string name;
+        Kind kind = Kind::Other;
+
+        // Transform (renderer convention: euler stored as pitch/yaw/roll degrees,
+        // matching the $rotation "PitchYawRollDegrees" form).
+        glm::vec3 position{0.0f};
+        glm::vec3 eulerDegrees{0.0f};   // pitch, yaw, roll
+        glm::vec3 scale{1.0f};
+
+        std::string materialName;       // for volumes
+
+        // SphereVolume
+        glm::vec3 center{0.0f};
+        double radius = 1.0;
+
+        // MeshVolume — the OBJ sub-shape name ($mesh) this volume draws.
+        std::string meshName;
+
+        // AreaLight / OmniLight
+        LightShape lightShape = LightShape::Square;
+        double lightWidth = 0.0;
+        double lightHeight = 0.0;
+        double lightRadius = 0.0;
+    };
+
+    // ----- camera ----------------------------------------------------------
+    struct CameraDesc
+    {
+        std::string name = "Camera";
+        glm::vec3 position{0.0f, 0.0f, -10.0f};
+        glm::vec3 eulerDegrees{0.0f};   // pitch, yaw, roll
+        double verticalFovDegrees = 70.0;
+        bool present = false;
+    };
+
+    // The OBJ files referenced by "$meshes". Resolved to absolute paths against
+    // the scene directory at load time, so the viewport can load the named
+    // sub-shapes for drawing.
+    std::vector<std::string> meshFiles;
+
+    CameraDesc camera;
+    std::vector<Material> materials;
+    std::vector<ObjectNode> objects;
+
+    // The full, unmodified parsed scene JSON. Render-from-view re-serializes this
+    // with only the "Camera" block's $position/$rotation/$verticalFieldOfView
+    // overwritten by the live orbit camera (see EditorApp::startRender).
+    nlohmann::json rawJson;
+
     std::string name = "untitled";
-
-    // True once content has been added or the scene has been loaded from disk.
-    // A freshly-`reset()` scene is empty/clean. Later waves flip this on edits so
-    // "Save" can warn about unsaved changes.
+    std::string path;       // file the scene was loaded from / saved to
     bool dirty = false;
 
-    // Path the scene was loaded from / last saved to. Empty for a New File that
-    // has never been saved. Later waves use this for Save vs. Save As.
-    std::string path;
+    // Lookup helper. Returns nullptr if no material with that name exists.
+    const Material* findMaterial(const std::string& materialName) const
+    {
+        for (const auto& m : materials)
+        {
+            if (m.name == materialName)
+            {
+                return &m;
+            }
+        }
+        return nullptr;
+    }
 
-    // Initialize an empty scene (the File > New action). Clears all content and
-    // returns the model to its pristine, ready-to-edit state.
     void reset()
     {
+        meshFiles.clear();
+        materials.clear();
         objects.clear();
-        lights.clear();
+        camera = CameraDesc{};
+        rawJson = nlohmann::json::object();
         name = "untitled";
         path.clear();
         dirty = false;
         m_initialized = true;
     }
 
-    // True once New (or a load) has run. The editor shows the empty-scene
-    // viewport only after a scene exists, so a just-launched editor with no
-    // active scene can present a neutral/empty state.
     bool isInitialized() const { return m_initialized; }
-
-    bool isEmpty() const { return objects.empty() && lights.empty(); }
+    bool isEmpty() const { return objects.empty(); }
 
 private:
     bool m_initialized = false;
 };
+
+// Backwards-compatible alias: existing call sites refer to `Scene`. The model is
+// now the real SceneModel above.
+using Scene = SceneModel;

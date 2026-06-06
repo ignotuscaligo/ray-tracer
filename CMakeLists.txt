@@ -377,6 +377,8 @@ target_sources(editor
         editor/InputEvent.h
         editor/LayoutRegistry.h
         editor/Scene.h
+        editor/SceneModelLoader.h
+        editor/SceneModelLoader.cpp
         editor/RasterMesh.h
         editor/RasterMesh.cpp
         editor/ViewportGrid.h
