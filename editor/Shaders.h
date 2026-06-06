@@ -49,3 +49,37 @@ void main()
     fragColor = vec4(color, 1.0);
 }
 )GLSL";
+
+// Flat per-vertex-colored line shader for the ground grid and origin gnomon.
+// Each vertex carries its own RGB color (so a single draw call can mix the
+// neutral grid lines, the emphasized origin axes, and the red/green/blue gnomon
+// arms). No lighting — these are unlit overlay primitives.
+inline const char* kLineVertexShader = R"GLSL(
+#version 150 core
+
+in vec3 aPosition;
+in vec3 aColor;
+
+uniform mat4 uView;
+uniform mat4 uProjection;
+
+out vec3 vColor;
+
+void main()
+{
+    vColor = aColor;
+    gl_Position = uProjection * uView * vec4(aPosition, 1.0);
+}
+)GLSL";
+
+inline const char* kLineFragmentShader = R"GLSL(
+#version 150 core
+
+in vec3 vColor;
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = vec4(vColor, 1.0);
+}
+)GLSL";
