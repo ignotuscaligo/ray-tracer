@@ -2,6 +2,8 @@
 
 #include "OrbitCamera.h"
 #include "RasterMesh.h"
+#include "Scene.h"
+#include "ViewportGrid.h"
 
 #include <atomic>
 #include <cstddef>
@@ -81,8 +83,13 @@ public:
 
 private:
     void drawUi();
+    void drawMenuBar();
     void renderViewport();
     void resizeFbo(int width, int height);
+
+    // File > New: initialize an empty scene and show the viewport. The substrate
+    // for later waves (object insertion, render-from-view, save) — see Scene.h.
+    void newScene();
 
     // Phase 3: kick off a path-traced render of the current scene on a worker
     // thread and poll its completion in the UI loop.
@@ -104,10 +111,16 @@ private:
     std::string m_meshPath;
     std::string m_meshLabel = "(none)";
 
+    // The in-memory scene model (maps to the renderer's scene JSON). Empty until
+    // File > New (or, later, a load) runs. See Scene.h.
+    Scene m_scene;
+
     // Raster viewport state.
     RasterMesh m_mesh;
     OrbitCamera m_camera;
-    unsigned int m_shaderProgram = 0;
+    ViewportGrid m_grid;             // XZ ground grid + origin gnomon
+    unsigned int m_shaderProgram = 0;  // mesh shader
+    unsigned int m_lineProgram = 0;    // flat line shader (grid/gnomon)
     unsigned int m_fbo = 0;
     unsigned int m_fboColorTex = 0;
     unsigned int m_fboDepthRbo = 0;
@@ -115,8 +128,10 @@ private:
     int m_fboHeight = 0;
     float m_meshColor[3] = {0.75f, 0.75f, 0.78f};
 
-    // Orbit input tracking.
-    bool m_dragging = false;
+    // Viewport navigation input tracking. Orbit = left-drag, pan = middle-drag
+    // or shift+left-drag, zoom = scroll (DCC conventions).
+    bool m_orbiting = false;
+    bool m_panning = false;
     double m_lastCursorX = 0.0;
     double m_lastCursorY = 0.0;
     bool m_cursorOverViewport = false;

@@ -374,8 +374,11 @@ target_sources(editor
         editor/EditorApp.h
         editor/EditorApp.cpp
         editor/OrbitCamera.h
+        editor/Scene.h
         editor/RasterMesh.h
         editor/RasterMesh.cpp
+        editor/ViewportGrid.h
+        editor/ViewportGrid.cpp
         editor/ObjLoader.cpp
         editor/GlHeaders.h
         editor/Shaders.h

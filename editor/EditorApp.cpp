@@ -19,6 +19,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -64,9 +65,13 @@ GLuint linkProgram(const char* vsSource, const char* fsSource)
     GLuint program = glCreateProgram();
     glAttachShader(program, vs);
     glAttachShader(program, fs);
-    // Bind attribute locations to match RasterMesh's VAO layout.
+    // Bind attribute locations to match the VAO layouts. Both the mesh VAO
+    // (position/normal) and the line VAO (position/color) put position at 0 and
+    // their second attribute at 1, so binding all three names is safe — only the
+    // names actually present in a given program take effect.
     glBindAttribLocation(program, 0, "aPosition");
     glBindAttribLocation(program, 1, "aNormal");
+    glBindAttribLocation(program, 1, "aColor");
     glLinkProgram(program);
 
     glDeleteShader(vs);
@@ -164,35 +169,32 @@ bool EditorApp::initialize()
     // GLSL 1.50 matches the 3.2 core context.
     ImGui_ImplOpenGL3_Init("#version 150");
 
-    // Build the viewport shader.
+    // Build the viewport shaders: the lit mesh shader and the flat line shader
+    // used for the ground grid + origin gnomon.
     m_shaderProgram = linkProgram(kViewportVertexShader, kViewportFragmentShader);
     if (!m_shaderProgram)
     {
         std::fprintf(stderr, "Failed to build viewport shader\n");
         return false;
     }
+    m_lineProgram = linkProgram(kLineVertexShader, kLineFragmentShader);
+    if (!m_lineProgram)
+    {
+        std::fprintf(stderr, "Failed to build line shader\n");
+        return false;
+    }
 
     glEnable(GL_DEPTH_TEST);
 
-    // Resolve a mesh to load: explicit path, else MirrorTest's first mesh, else
-    // the bundled cube.
-    if (m_meshPath.empty())
-    {
-        std::filesystem::path cornell = findUpwards("meshes/CornellBox.obj");
-        if (!cornell.empty())
-        {
-            m_meshPath = cornell.string();
-        }
-        else
-        {
-            std::filesystem::path cube = findUpwards("editor/assets/cube.obj");
-            if (cube.empty())
-            {
-                cube = findUpwards("meshes/cube.obj");
-            }
-            m_meshPath = cube.empty() ? std::string{} : cube.string();
-        }
-    }
+    // Bake the static grid + gnomon geometry once (requires a GL context).
+    m_grid.build(/*halfExtent=*/20.0f, /*spacing=*/1.0f);
+
+    // Wave 1 foundation: start with an empty scene framed on the origin (the
+    // grid + gnomon). Object insertion / scenes come in later waves. An explicit
+    // mesh path on the command line still loads (preview + the render panel use
+    // it), but the default is the clean empty-scene viewport — not an auto-loaded
+    // Cornell box.
+    newScene();
 
     if (!m_meshPath.empty())
     {
@@ -245,6 +247,23 @@ std::string EditorApp::loadMeshFromPath(const std::string& path)
     m_meshLabel = std::filesystem::path(path).filename().string() + " (" +
                   std::to_string(data.triangleCount()) + " tris)";
     return {};
+}
+
+void EditorApp::newScene()
+{
+    // File > New: reset the scene model to a pristine empty scene and frame the
+    // camera on the world origin so the grid + gnomon present immediately. This
+    // is the seam later waves build on — once object insertion exists, New gives
+    // a blank canvas to insert into; once save exists, New clears the path.
+    m_scene.reset();
+
+    // Drop any previewed mesh so the empty scene really is empty in the viewport.
+    // (Render-panel mesh preview returns when a mesh is explicitly loaded.)
+    m_mesh.upload(MeshData{});
+    m_meshPath.clear();
+    m_meshLabel = "(empty scene)";
+
+    m_camera.frameOrigin();
 }
 
 void EditorApp::resizeFbo(int width, int height)
@@ -304,6 +323,31 @@ void EditorApp::renderViewport()
     glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    const float aspectGrid = static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight);
+    const glm::mat4 viewMat = m_camera.viewMatrix();
+    const glm::mat4 projMat = m_camera.projectionMatrix(aspectGrid);
+
+    // Spatial reference overlay: the XZ ground grid (depth-tested so the scene
+    // can occlude it once objects exist) and the origin gnomon (drawn over the
+    // top with depth-test off so it's always legible). This renders for the
+    // empty scene too — it's the substrate the next waves build on.
+    if (m_lineProgram && m_grid.isBuilt())
+    {
+        glUseProgram(m_lineProgram);
+        glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uView"), 1, GL_FALSE,
+                           glm::value_ptr(viewMat));
+        glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uProjection"), 1, GL_FALSE,
+                           glm::value_ptr(projMat));
+
+        m_grid.drawGrid();
+
+        glDisable(GL_DEPTH_TEST);
+        m_grid.drawGnomon();
+        glEnable(GL_DEPTH_TEST);
+
+        glUseProgram(0);
+    }
+
     if (m_mesh.hasMesh() && m_shaderProgram)
     {
         glUseProgram(m_shaderProgram);
@@ -329,8 +373,56 @@ void EditorApp::renderViewport()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void EditorApp::drawMenuBar()
+{
+    // Top menu bar. Wave 1 wires File > New (creates an empty scene + viewport).
+    // Save / Insert are stubbed as disabled — they land in later waves (save
+    // serializes m_scene to the renderer JSON; insert populates m_scene.objects).
+    if (ImGui::BeginMainMenuBar())
+    {
+        if (ImGui::BeginMenu("File"))
+        {
+            if (ImGui::MenuItem("New", "Cmd+N"))
+            {
+                newScene();
+            }
+            ImGui::Separator();
+            // Stubs for later waves — visible so the shape is clear, disabled so
+            // they can't be triggered before they're implemented.
+            ImGui::BeginDisabled();
+            ImGui::MenuItem("Open...", "Cmd+O");
+            ImGui::MenuItem("Save", "Cmd+S");
+            ImGui::MenuItem("Save As...", "Shift+Cmd+S");
+            ImGui::EndDisabled();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Quit"))
+            {
+                glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Insert"))
+        {
+            // Object-insertion lands in the next wave; surfaced disabled here so
+            // the menu seam is visible.
+            ImGui::BeginDisabled();
+            ImGui::MenuItem("Sphere");
+            ImGui::MenuItem("Mesh...");
+            ImGui::MenuItem("Area Light");
+            ImGui::MenuItem("Omni Light");
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
+        }
+
+        ImGui::EndMainMenuBar();
+    }
+}
+
 void EditorApp::drawUi()
 {
+    drawMenuBar();
+
     // Give each window an explicit, non-overlapping initial layout. Without this
     // all three windows default to (0,0) and stack on top of each other: the
     // Viewport window (which shows the live FBO) ends up hidden behind the
@@ -351,8 +443,11 @@ void EditorApp::drawUi()
     ImGui::Begin("Ray Tracer Editor");
     ImGui::TextWrapped("GUI model/scene editor for the photon path tracer.");
     ImGui::Separator();
+    ImGui::Text("Scene: %s%s", m_scene.name.c_str(), m_scene.dirty ? " *" : "");
+    ImGui::Text("Objects: %zu   Lights: %zu", m_scene.objects.size(), m_scene.lights.size());
     ImGui::Text("Mesh: %s", m_meshLabel.c_str());
-    ImGui::Text("Viewport: orbit = left-drag, zoom = scroll");
+    ImGui::TextWrapped("Viewport: orbit = left-drag, pan = middle-drag or "
+                       "shift+left-drag, zoom = scroll");
     ImGui::ColorEdit3("Preview color", m_meshColor);
     ImGui::Separator();
 
@@ -979,6 +1074,7 @@ void EditorApp::shutdown()
         if (m_fboDepthRbo) glDeleteRenderbuffers(1, &m_fboDepthRbo);
         if (m_renderTex) glDeleteTextures(1, &m_renderTex);
         if (m_shaderProgram) glDeleteProgram(m_shaderProgram);
+        if (m_lineProgram) glDeleteProgram(m_lineProgram);
 
         glfwDestroyWindow(m_window);
         m_window = nullptr;
@@ -988,35 +1084,78 @@ void EditorApp::shutdown()
 
 // ===== Input handling
 
-void EditorApp::onMouseButton(int button, int action, int /*mods*/)
+void EditorApp::onMouseButton(int button, int action, int mods)
 {
-    if (button == GLFW_MOUSE_BUTTON_LEFT)
+    // DCC navigation conventions:
+    //   left-drag                -> orbit
+    //   middle-drag              -> pan
+    //   shift + left-drag        -> pan (for mice/trackpads without a middle
+    //                               button)
+    // A drag only begins when the press lands over the viewport; releases always
+    // clear the active gesture so a release outside the viewport still ends it.
+    const bool shift = (mods & GLFW_MOD_SHIFT) != 0;
+
+    if (action == GLFW_PRESS && m_cursorOverViewport)
     {
-        if (action == GLFW_PRESS && m_cursorOverViewport)
+        if (button == GLFW_MOUSE_BUTTON_MIDDLE ||
+            (button == GLFW_MOUSE_BUTTON_LEFT && shift))
         {
-            m_dragging = true;
+            m_panning = true;
+            m_orbiting = false;
             glfwGetCursorPos(m_window, &m_lastCursorX, &m_lastCursorY);
         }
-        else if (action == GLFW_RELEASE)
+        else if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
-            m_dragging = false;
+            m_orbiting = true;
+            m_panning = false;
+            glfwGetCursorPos(m_window, &m_lastCursorX, &m_lastCursorY);
+        }
+    }
+    else if (action == GLFW_RELEASE)
+    {
+        if (button == GLFW_MOUSE_BUTTON_LEFT)
+        {
+            m_orbiting = false;
+            m_panning = false;
+        }
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
+        {
+            m_panning = false;
         }
     }
 }
 
 void EditorApp::onCursorPos(double x, double y)
 {
-    if (m_dragging)
+    if (!m_orbiting && !m_panning)
     {
-        const double dx = x - m_lastCursorX;
-        const double dy = y - m_lastCursorY;
-        m_lastCursorX = x;
-        m_lastCursorY = y;
+        return;
+    }
 
+    const double dx = x - m_lastCursorX;
+    const double dy = y - m_lastCursorY;
+    m_lastCursorX = x;
+    m_lastCursorY = y;
+
+    if (m_orbiting)
+    {
         // Drag-right -> orbit right; drag-up -> tilt up.
         const float orbitSpeed = 0.008f;
         m_camera.orbit(static_cast<float>(-dx) * orbitSpeed,
                        static_cast<float>(dy) * orbitSpeed);
+    }
+    else if (m_panning)
+    {
+        // Scale pan by distance so the cursor tracks the scene at any zoom:
+        // farther out, each pixel covers more world. The vertical FOV and the
+        // viewport height set the world-units-per-pixel at the target depth.
+        const float vpHeight = m_fboHeight > 0 ? static_cast<float>(m_fboHeight) : 600.0f;
+        const float worldPerPixel =
+            2.0f * m_camera.distance * std::tan(m_camera.fovYRadians * 0.5f) / vpHeight;
+        // Drag-right moves the view content right (target moves left), drag-up
+        // moves content down (target moves up) — standard grab-the-scene pan.
+        m_camera.pan(static_cast<float>(-dx) * worldPerPixel,
+                     static_cast<float>(dy) * worldPerPixel);
     }
 }
 
