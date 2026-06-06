@@ -1,5 +1,7 @@
 #pragma once
 
+#include "InputEvent.h"
+#include "LayoutRegistry.h"
 #include "OrbitCamera.h"
 #include "RasterMesh.h"
 #include "Scene.h"
@@ -44,6 +46,11 @@ public:
     // default; call before initialize(). port 0 leaves it disabled.
     void setAutomationPort(uint16_t port);
 
+    // Create the GLFW window hidden (GLFW_VISIBLE=false) so automation runs
+    // without popping a visible window. A real GL context + FBO are still
+    // created, so rendering and screenshots work. Call before initialize().
+    void setHeadless(bool headless);
+
     bool initialize();
     void run();
     void shutdown();
@@ -64,6 +71,8 @@ public:
     nlohmann::json cmdSetRenderSettings(const nlohmann::json& req);
     nlohmann::json cmdRender(const nlohmann::json& req);
     nlohmann::json cmdScreenshot(const nlohmann::json& req);
+    nlohmann::json cmdInjectInput(const nlohmann::json& req);
+    nlohmann::json cmdQueryLayout(const nlohmann::json& req);
 
     // Load an OBJ into the viewport (GL upload + reframe camera). Returns an
     // error string on failure, empty on success.
@@ -97,14 +106,30 @@ private:
     void pollRender();
     void uploadRenderTexture();
 
-    // GLFW input callbacks dispatch into these.
-    void onMouseButton(int button, int action, int mods);
+    // ===== The single input path ==========================================
+    // Both the OS layer (GLFW callbacks) and the automation port feed events
+    // here. This is the ONLY place input enters the app. dispatchInputEvent()
+    // (a) feeds ImGui's IO and (b) routes to the app-state handlers below, so
+    // injected and real events are indistinguishable downstream.
+    void dispatchInputEvent(const InputEvent& event);
+
+    // App-state input handlers, fed exclusively from dispatchInputEvent(). They
+    // never read raw GLFW state — m_cursorX/m_cursorY track the abstraction's
+    // notion of the cursor so a button-press knows where the pointer is even
+    // when injected events arrive out of band.
+    void onMouseButton(int button, bool down, int mods);
     void onCursorPos(double x, double y);
     void onScroll(double xoffset, double yoffset);
 
+    // GLFW raw callbacks: these only TRANSLATE the OS event into an InputEvent
+    // and hand it to dispatchInputEvent(). No app logic lives here. ImGui's own
+    // glfw callbacks are NOT installed (InitForOpenGL(window, false)) so this is
+    // the sole consumer of GLFW input — see EditorApp.cpp.
     static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
     static void cursorPosCallback(GLFWwindow* window, double x, double y);
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+    static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+    static void charCallback(GLFWwindow* window, unsigned int codepoint);
 
     GLFWwindow* m_window = nullptr;
 
@@ -136,6 +161,27 @@ private:
     double m_lastCursorY = 0.0;
     bool m_cursorOverViewport = false;
 
+    // The abstraction's notion of the cursor position (window pixels), updated by
+    // every MouseMove InputEvent regardless of source. App input handlers read
+    // this instead of glfwGetCursorPos so injected drags work identically to
+    // real ones. m_shiftDown mirrors the modifier so pan-on-shift works for
+    // injected input too (injected button events carry mods, but we also track
+    // it from key events as a fallback).
+    double m_cursorX = 0.0;
+    double m_cursorY = 0.0;
+
+    // Per-frame registry of named UI element rects, rebuilt each frame in
+    // drawUi()/recordLayout() and read by the query_layout command. See
+    // LayoutRegistry.h.
+    LayoutRegistry m_layout;
+
+    // Pixel rect of the menu-bar item rects we record by name, plus the viewport
+    // image rect — captured during drawUi(). The viewport rect is also used to
+    // decide whether a cursor position is "over the viewport" for nav gating
+    // when an event is injected (ImGui::IsWindowHovered only reflects ImGui's
+    // own hover state, which an injected move does update once it reaches IO).
+    LayoutRect m_viewportScreenRect;
+
     // Phase 3: render-to-image state.
     std::thread m_renderThread;
     std::atomic<RenderState> m_renderState{RenderState::Idle};
@@ -153,6 +199,10 @@ private:
     // Automation command port (127.0.0.1 only). Null/0 when disabled.
     std::unique_ptr<AutomationServer> m_automation;
     uint16_t m_automationPort = 0;
+
+    // Headless mode: create the GLFW window hidden so automation doesn't pop a
+    // visible window. GL context + FBO + screenshots still work.
+    bool m_headless = false;
 
     // Last framebuffer size, tracked each frame so the "window" screenshot
     // target and get_state can report it without a GL query mid-handler.

@@ -28,6 +28,20 @@ process (`lsof -nP -iTCP:8780`).
 
 You can also pass an initial mesh: `./build/Release/editor --automation-port 8780 path/to/mesh.obj`.
 
+### Headless mode
+
+Add `--headless` to create the GLFW window **hidden** (`GLFW_VISIBLE=false`) so
+automation runs without popping a visible window:
+
+```bash
+./build/Release/editor --headless --automation-port 8780 &
+```
+
+A real GL context, the viewport FBO, and the full ImGui UI are still created and
+rendered every frame, so `render`, `screenshot` (all targets), `inject_input`,
+and `query_layout` all work exactly as with a visible window — the window just
+never appears. This is the recommended mode for agent-driven validation.
+
 ## Protocol
 
 Line-delimited JSON over TCP: the client writes one JSON request object per line
@@ -47,12 +61,83 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `set_render_settings` | any of `resolution`, `photons` (millions), `scene_path` | Configure the path-traced render. |
 | `render` | `wait` (default true), `timeout` (s, default 600) | Path-trace `scene_path` on a worker thread. With `wait`, blocks until done. |
 | `screenshot` | `path`, `target` (`window`\|`viewport`\|`render`) | Capture pixels to an 8-bit RGBA PNG. |
+| `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path (drives camera nav + ImGui). |
+| `query_layout` | `name` (optional) | Pixel rect(s) of named UI elements recorded last frame. With `name`: one rect; without: all. |
 | `quit` | — | Acknowledge, then shut the editor down. |
 
 Screenshot targets:
 - `window` — the full editor window incl. ImGui panels (`glReadPixels` of the default framebuffer).
 - `viewport` — just the raster viewport FBO (the orbiting mesh).
 - `render` — the last path-traced image (requires a prior `render`).
+
+## The input abstraction (how injected input drives the app)
+
+The editor has exactly **one input path**. Two sources feed it, and everything
+downstream is identical regardless of source:
+
+```
+  GLFW callbacks (real OS events) ─┐
+                                   ├─► EditorApp::dispatchInputEvent(InputEvent)
+  inject_input (port) ────────────┘        │
+                                           ├─► feeds ImGui IO (AddMousePosEvent,
+                                           │   AddMouseButtonEvent, AddMouseWheelEvent,
+                                           │   AddKeyEvent, AddInputCharacter)
+                                           └─► app handlers (camera orbit/pan/zoom,
+                                               future UI handlers)
+```
+
+`InputEvent` (see `editor/InputEvent.h`) is a tagged struct: `MouseMove {x,y}`,
+`MouseButton {button,down,mods}`, `Scroll {dx,dy}`, `Key {key,down,mods}`,
+`Char {codepoint}`. The GLFW callbacks only *translate* raw events into
+`InputEvent`s; they hold no app logic. The port *injects* `InputEvent`s on the
+main/GL thread, exactly as a real OS event would arrive. App code never reads raw
+GLFW input.
+
+Key subtlety: `imgui_impl_glfw`'s automatic callback installation is **disabled**
+(`ImGui_ImplGlfw_InitForOpenGL(window, false)`). The app owns the GLFW callbacks
+and feeds ImGui's IO itself, so injected and real events both reach ImGui. Mouse
+pos/button/scroll are fed via the public `io.AddXxx` functions; key/char events
+are forwarded through the backend's own `ImGui_ImplGlfw_KeyCallback` because that
+function owns the GLFW→`ImGuiKey` translation table (which is not otherwise
+exported). `ImGui_ImplGlfw_NewFrame()` still runs each frame for display-size /
+delta-time / cursor-shape bookkeeping — it just no longer receives input.
+
+### `inject_input`
+
+Coordinates are **window/framebuffer pixels, top-left origin** — the same space
+`query_layout` returns. Send one event object, or a batch via `events`:
+
+```json
+{"cmd": "inject_input", "events": [
+  {"type": "mouse_move", "x": 800, "y": 280},
+  {"type": "mouse_button", "button": 0, "down": true},
+  {"type": "mouse_move", "x": 1000, "y": 340},
+  {"type": "mouse_button", "button": 0, "down": false}
+]}
+```
+
+Event types: `mouse_move {x,y}`, `mouse_button {button (0=left,1=right,2=middle),
+down, mods?}`, `scroll {dx?, dy}`, `key {key (GLFW code), down, mods?}`,
+`char {codepoint}`. The response echoes `applied`, the resulting `cursor`, and
+the `camera` yaw/pitch + `eye` so an orbit can be confirmed in one round-trip.
+
+A batched `inject_input` lands entirely within one frame's `drain()`, matching
+how a real drag's events arrive between frames — so a full press→moves→release
+gesture orbits the camera just like a hand-driven drag.
+
+### `query_layout`
+
+Each frame the UI build records a registry of `{element_name -> pixel rect}`
+(see `editor/LayoutRegistry.h`). `query_layout` reads it. With `name`, returns
+that element; without, returns all. Rects carry `x,y,width,height` and a
+`center: [cx,cy]` an agent can click directly.
+
+Currently registered names: `menu_bar`, `menu_File`, `menu_Insert`,
+`panel_controls`, `panel_render`, `button_render`, `viewport`. The viewport rect
+doubles as the gate the nav handlers use to decide whether a press/scroll is a
+viewport gesture, so injected and real input are gated against the same rect.
+Future panels/widgets register the same way (one `m_layout.record(...)` call as
+the widget is submitted).
 
 ## Python client
 
@@ -68,6 +153,9 @@ python3 editor/tools/editor_client.py --port 8780 set-camera --orbit-yaw 0.5 --d
 python3 editor/tools/editor_client.py --port 8780 set-render-settings --resolution 256 --photons 4
 python3 editor/tools/editor_client.py --port 8780 render --wait
 python3 editor/tools/editor_client.py --port 8780 screenshot /tmp/shot.png --target viewport
+python3 editor/tools/editor_client.py --port 8780 query-layout viewport
+python3 editor/tools/editor_client.py --port 8780 click 800 280
+python3 editor/tools/editor_client.py --port 8780 drag 800 280 1000 340 --steps 10
 python3 editor/tools/editor_client.py --port 8780 quit
 ```
 
@@ -80,6 +168,11 @@ with EditorClient(port=8780) as c:
     c.load_mesh("/abs/path/to/mesh.obj")
     print(c.get_state())
     c.screenshot("/tmp/shot.png", target="viewport")
+    # Puppet: find a UI element, then drive it with injected input.
+    vp = c.query_layout("viewport")["rect"]
+    cx, cy = vp["center"]
+    c.inject_drag(cx, cy, cx + 200, cy + 60)  # orbits the camera
+    c.inject_click(cx, cy)
     c.render(wait=True)
     c.screenshot("/tmp/render.png", target="render")
     c.quit()

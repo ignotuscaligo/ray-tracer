@@ -128,6 +128,11 @@ void EditorApp::setAutomationPort(uint16_t port)
     m_automationPort = port;
 }
 
+void EditorApp::setHeadless(bool headless)
+{
+    m_headless = headless;
+}
+
 bool EditorApp::initialize()
 {
     if (!glfwInit())
@@ -142,6 +147,11 @@ bool EditorApp::initialize()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
+    // Headless: create the window hidden. It still has a real GL context and we
+    // still create the FBO + read pixels, so rendering and screenshots work; the
+    // window just never appears. This is the default for automation runs.
+    glfwWindowHint(GLFW_VISIBLE, m_headless ? GLFW_FALSE : GLFW_TRUE);
+
     m_window = glfwCreateWindow(1280, 800, "Ray Tracer Editor", nullptr, nullptr);
     if (!m_window)
     {
@@ -151,9 +161,16 @@ bool EditorApp::initialize()
     }
 
     glfwSetWindowUserPointer(m_window, this);
+    // Register OUR GLFW callbacks. These only translate raw events into
+    // InputEvents and feed the single input path (dispatchInputEvent). ImGui's
+    // own glfw callbacks are deliberately NOT installed (see InitForOpenGL
+    // below) so this app is the sole consumer of GLFW input — real OS events and
+    // port-injected events then flow through the exact same code.
     glfwSetMouseButtonCallback(m_window, &EditorApp::mouseButtonCallback);
     glfwSetCursorPosCallback(m_window, &EditorApp::cursorPosCallback);
     glfwSetScrollCallback(m_window, &EditorApp::scrollCallback);
+    glfwSetKeyCallback(m_window, &EditorApp::keyCallback);
+    glfwSetCharCallback(m_window, &EditorApp::charCallback);
 
     glfwMakeContextCurrent(m_window);
     glfwSwapInterval(1);  // vsync
@@ -165,7 +182,12 @@ bool EditorApp::initialize()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
-    ImGui_ImplGlfw_InitForOpenGL(m_window, true);
+    // install_callbacks = false: we do NOT let the backend hook GLFW. Instead we
+    // own the GLFW callbacks (above) and feed ImGui's IO ourselves from
+    // dispatchInputEvent(). ImGui_ImplGlfw_NewFrame() still runs each frame for
+    // display-size / delta-time / cursor-shape / gamepad bookkeeping — it just no
+    // longer receives input events; those come exclusively through our path.
+    ImGui_ImplGlfw_InitForOpenGL(m_window, false);
     // GLSL 1.50 matches the 3.2 core context.
     ImGui_ImplOpenGL3_Init("#version 150");
 
@@ -380,7 +402,22 @@ void EditorApp::drawMenuBar()
     // serializes m_scene to the renderer JSON; insert populates m_scene.objects).
     if (ImGui::BeginMainMenuBar())
     {
-        if (ImGui::BeginMenu("File"))
+        // Record the whole menu bar rect so an agent can find it.
+        m_layout.record("menu_bar", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
+                        ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
+
+        // Records the clickable rect of the menu-bar header item that was just
+        // submitted (by BeginMenu). The header is laid out whether or not its
+        // popup is open, so this captures a stable, queryable rect every frame.
+        auto recordMenuHeader = [this](const char* name) {
+            const ImVec2 mn = ImGui::GetItemRectMin();
+            const ImVec2 mx = ImGui::GetItemRectMax();
+            m_layout.record(std::string("menu_") + name, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        };
+
+        const bool fileOpen = ImGui::BeginMenu("File");
+        recordMenuHeader("File");
+        if (fileOpen)
         {
             if (ImGui::MenuItem("New", "Cmd+N"))
             {
@@ -402,7 +439,9 @@ void EditorApp::drawMenuBar()
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Insert"))
+        const bool insertOpen = ImGui::BeginMenu("Insert");
+        recordMenuHeader("Insert");
+        if (insertOpen)
         {
             // Object-insertion lands in the next wave; surfaced disabled here so
             // the menu seam is visible.
@@ -421,6 +460,11 @@ void EditorApp::drawMenuBar()
 
 void EditorApp::drawUi()
 {
+    // Reset the per-frame element-rect registry before any UI is built. Each
+    // panel/menu records its rect as it's submitted; query_layout reads the
+    // result. (See LayoutRegistry.h / recordLayout().)
+    m_layout.beginFrame();
+
     drawMenuBar();
 
     // Give each window an explicit, non-overlapping initial layout. Without this
@@ -441,6 +485,8 @@ void EditorApp::drawUi()
 
     // Controls + scene panel.
     ImGui::Begin("Ray Tracer Editor");
+    m_layout.record("panel_controls", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
+                    ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
     ImGui::TextWrapped("GUI model/scene editor for the photon path tracer.");
     ImGui::Separator();
     ImGui::Text("Scene: %s%s", m_scene.name.c_str(), m_scene.dirty ? " *" : "");
@@ -466,6 +512,13 @@ void EditorApp::drawUi()
     if (ImGui::Button("Render"))
     {
         startRender();
+    }
+    // Record the Render button's rect (useful for click-driven validation of the
+    // controls panel; the next wave's buttons register the same way).
+    {
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record("button_render", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
     }
     if (running)
     {
@@ -502,6 +555,16 @@ void EditorApp::drawUi()
                 static_cast<ImTextureID>(static_cast<intptr_t>(m_fboColorTex)),
                 ImVec2(static_cast<float>(m_fboWidth), static_cast<float>(m_fboHeight)),
                 ImVec2(0, 1), ImVec2(1, 0));
+
+            // Record the viewport IMAGE rect (the clickable/draggable region) in
+            // window pixels. This is both the query_layout "viewport" rect an
+            // agent clicks into AND the gate the nav handlers use to decide
+            // whether a press/scroll counts as a viewport gesture — so injected
+            // and real input are gated against the same rect.
+            const ImVec2 mn = ImGui::GetItemRectMin();
+            const ImVec2 mx = ImGui::GetItemRectMax();
+            m_viewportScreenRect = LayoutRect{mn.x, mn.y, mx.x - mn.x, mx.y - mn.y};
+            m_layout.record("viewport", m_viewportScreenRect);
         }
     }
     ImGui::End();
@@ -514,6 +577,8 @@ void EditorApp::drawUi()
 
     // Path-traced render output panel.
     ImGui::Begin("Render");
+    m_layout.record("panel_render", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
+                    ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
     if (m_renderTex != 0 && m_renderWidth > 0)
     {
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -677,6 +742,8 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "set_render_settings") return cmdSetRenderSettings(request);
     if (cmd == "render") return cmdRender(request);
     if (cmd == "screenshot") return cmdScreenshot(request);
+    if (cmd == "inject_input") return cmdInjectInput(request);
+    if (cmd == "query_layout") return cmdQueryLayout(request);
     if (cmd == "quit")
     {
         if (m_automation) m_automation->requestQuit();
@@ -899,6 +966,151 @@ nlohmann::json EditorApp::cmdScreenshot(const nlohmann::json& req)
     return json{{"ok", true}, {"path", path}, {"target", target}};
 }
 
+// ===== Puppet commands: inject input + query layout ========================
+
+nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
+{
+    // Accepts either a single event object or {"events": [ ... ]}. Each event is
+    // {"type": "...", ...} matching InputEvent. All events are pushed through
+    // dispatchInputEvent() on this (the main/GL) thread — the exact same path a
+    // real OS event takes — so injected input is indistinguishable downstream.
+    //
+    // Supported types (coordinates in window/framebuffer pixels, top-left origin):
+    //   mouse_move   {x, y}
+    //   mouse_button {button (0=left,1=right,2=middle), down (bool), mods?}
+    //   scroll       {dx?, dy}
+    //   key          {key (GLFW key code), down (bool), mods?}
+    //   char         {codepoint (int)}
+    auto applyOne = [this](const json& e, std::string& errOut) -> bool {
+        const std::string type = e.value("type", std::string{});
+        if (type == "mouse_move")
+        {
+            if (!e.contains("x") || !e.contains("y"))
+            {
+                errOut = "mouse_move requires x and y";
+                return false;
+            }
+            dispatchInputEvent(InputEvent::mouseMove(e["x"].get<double>(), e["y"].get<double>()));
+            return true;
+        }
+        if (type == "mouse_button")
+        {
+            if (!e.contains("button") || !e.contains("down"))
+            {
+                errOut = "mouse_button requires button and down";
+                return false;
+            }
+            // Accept ImGui-style indices (0/1/2) and map to GLFW button codes so
+            // the nav handlers (which compare against GLFW_MOUSE_BUTTON_*) match.
+            int btn = e["button"].get<int>();
+            int glfwBtn = (btn == 0)   ? GLFW_MOUSE_BUTTON_LEFT
+                          : (btn == 1) ? GLFW_MOUSE_BUTTON_RIGHT
+                          : (btn == 2) ? GLFW_MOUSE_BUTTON_MIDDLE
+                                       : btn;
+            dispatchInputEvent(
+                InputEvent::mouseButton(glfwBtn, e["down"].get<bool>(), e.value("mods", 0)));
+            return true;
+        }
+        if (type == "scroll")
+        {
+            dispatchInputEvent(InputEvent::scroll(e.value("dx", 0.0), e.value("dy", 0.0)));
+            return true;
+        }
+        if (type == "key")
+        {
+            if (!e.contains("key") || !e.contains("down"))
+            {
+                errOut = "key requires key and down";
+                return false;
+            }
+            const int key = e["key"].get<int>();
+            const bool down = e["down"].get<bool>();
+            const int mods = e.value("mods", 0);
+            // Feed ImGui IO through the backend's translator (it owns the
+            // GLFW->ImGuiKey table), then run the event through our abstraction.
+            ImGui_ImplGlfw_KeyCallback(m_window, key, 0, down ? GLFW_PRESS : GLFW_RELEASE, mods);
+            dispatchInputEvent(InputEvent::key(key, down, mods));
+            return true;
+        }
+        if (type == "char")
+        {
+            if (!e.contains("codepoint"))
+            {
+                errOut = "char requires codepoint";
+                return false;
+            }
+            dispatchInputEvent(
+                InputEvent::character(static_cast<unsigned int>(e["codepoint"].get<int>())));
+            return true;
+        }
+        errOut = "unknown event type '" + type + "'";
+        return false;
+    };
+
+    int applied = 0;
+    std::string err;
+    if (req.contains("events") && req["events"].is_array())
+    {
+        for (const auto& e : req["events"])
+        {
+            if (!applyOne(e, err))
+            {
+                return json{{"ok", false}, {"error", err}, {"applied", applied}};
+            }
+            ++applied;
+        }
+    }
+    else
+    {
+        if (!applyOne(req, err))
+        {
+            return json{{"ok", false}, {"error", err}};
+        }
+        applied = 1;
+    }
+
+    const glm::vec3 eye = m_camera.eye();
+    return json{{"ok", true},
+                {"applied", applied},
+                {"cursor", {m_cursorX, m_cursorY}},
+                {"camera", {{"yaw", m_camera.yaw}, {"pitch", m_camera.pitch}}},
+                {"eye", {eye.x, eye.y, eye.z}}};
+}
+
+nlohmann::json EditorApp::cmdQueryLayout(const nlohmann::json& req)
+{
+    // Returns the pixel rect(s) of named UI elements recorded during the last
+    // frame's UI build (see LayoutRegistry / drawUi). With "name", returns that
+    // one element's rect (+ center). Without, returns the whole registry. Rects
+    // are window pixels, top-left origin — the same space inject_input uses, so
+    // an agent can click a returned center directly.
+    auto rectJson = [](const LayoutRect& r) {
+        return json{{"x", r.x},
+                    {"y", r.y},
+                    {"width", r.width},
+                    {"height", r.height},
+                    {"center", {r.centerX(), r.centerY()}}};
+    };
+
+    if (req.contains("name") && req["name"].is_string())
+    {
+        const std::string name = req["name"].get<std::string>();
+        LayoutRect rect;
+        if (!m_layout.find(name, rect))
+        {
+            return json{{"ok", false}, {"error", "no element named '" + name + "'"}};
+        }
+        return json{{"ok", true}, {"name", name}, {"rect", rectJson(rect)}};
+    }
+
+    json elements = json::object();
+    for (const auto& [name, rect] : m_layout.all())
+    {
+        elements[name] = rectJson(rect);
+    }
+    return json{{"ok", true}, {"elements", elements}};
+}
+
 std::string EditorApp::captureScreenshot(const std::string& path, const std::string& target)
 {
     int width = 0;
@@ -1082,9 +1294,79 @@ void EditorApp::shutdown()
     }
 }
 
-// ===== Input handling
+// ===== The single input path ==============================================
+//
+// dispatchInputEvent() is the ONE place input enters the app. Both the GLFW
+// callbacks (real OS events) and the automation port (injected events) call it.
+// It does two things, in order:
+//   1. Feeds ImGui's IO (AddMousePosEvent/AddMouseButtonEvent/AddMouseWheelEvent
+//      /AddKeyEvent/AddInputCharacter) so ImGui sees the event identically
+//      regardless of source. (The imgui_impl_glfw backend's own callbacks are
+//      NOT installed; this is the only feeder.)
+//   2. Routes to the app-state handlers (camera nav, future UI handlers).
+//
+// Subtlety solved: ImGui's IO needs key events as ImGuiKey enum values, not raw
+// GLFW key codes. The imgui_impl_glfw backend has an internal translation table,
+// but it's not exported. We reuse the backend's own KeyCallback for key/char so
+// the translation stays correct and centralized, while still treating the event
+// as having come through our abstraction (we build the InputEvent first, then
+// hand the equivalent to the backend). Mouse pos/button/scroll we feed directly
+// via the public AddXxx IO functions.
 
-void EditorApp::onMouseButton(int button, int action, int mods)
+namespace
+{
+// Map a GLFW mouse button to ImGui's mouse button index. ImGui only tracks the
+// first few buttons by index; left=0, right=1, middle=2 matches GLFW's values.
+int imguiMouseButton(int glfwButton)
+{
+    switch (glfwButton)
+    {
+        case GLFW_MOUSE_BUTTON_LEFT: return 0;
+        case GLFW_MOUSE_BUTTON_RIGHT: return 1;
+        case GLFW_MOUSE_BUTTON_MIDDLE: return 2;
+        default: return glfwButton;  // ImGui clamps internally
+    }
+}
+}  // namespace
+
+void EditorApp::dispatchInputEvent(const InputEvent& event)
+{
+    ImGuiIO& io = ImGui::GetIO();
+
+    switch (event.type)
+    {
+        case InputEvent::Type::MouseMove:
+            m_cursorX = event.x;
+            m_cursorY = event.y;
+            io.AddMousePosEvent(static_cast<float>(event.x), static_cast<float>(event.y));
+            onCursorPos(event.x, event.y);
+            break;
+
+        case InputEvent::Type::MouseButton:
+            io.AddMouseButtonEvent(imguiMouseButton(event.button), event.down);
+            onMouseButton(event.button, event.down, event.mods);
+            break;
+
+        case InputEvent::Type::Scroll:
+            io.AddMouseWheelEvent(static_cast<float>(event.dx), static_cast<float>(event.dy));
+            onScroll(event.dx, event.dy);
+            break;
+
+        case InputEvent::Type::Key:
+            // Defer ImGui IO key feeding to the backend's KeyCallback (it owns
+            // the GLFW->ImGuiKey translation table). We've already captured the
+            // event shape; app-level key handling (none yet) would go here.
+            break;
+
+        case InputEvent::Type::Char:
+            io.AddInputCharacter(event.codepoint);
+            break;
+    }
+}
+
+// ===== App-state input handlers (fed only from dispatchInputEvent) =========
+
+void EditorApp::onMouseButton(int button, bool down, int mods)
 {
     // DCC navigation conventions:
     //   left-drag                -> orbit
@@ -1093,25 +1375,35 @@ void EditorApp::onMouseButton(int button, int action, int mods)
     //                               button)
     // A drag only begins when the press lands over the viewport; releases always
     // clear the active gesture so a release outside the viewport still ends it.
+    // "Over the viewport" is computed from the recorded viewport screen rect and
+    // the abstraction's cursor position, so injected presses are gated the same
+    // way real ones are (independent of ImGui's frame-lagged hover state).
     const bool shift = (mods & GLFW_MOD_SHIFT) != 0;
+    const bool overViewport = m_viewportScreenRect.valid() &&
+                              m_cursorX >= m_viewportScreenRect.x &&
+                              m_cursorX <= m_viewportScreenRect.x + m_viewportScreenRect.width &&
+                              m_cursorY >= m_viewportScreenRect.y &&
+                              m_cursorY <= m_viewportScreenRect.y + m_viewportScreenRect.height;
 
-    if (action == GLFW_PRESS && m_cursorOverViewport)
+    if (down && overViewport)
     {
         if (button == GLFW_MOUSE_BUTTON_MIDDLE ||
             (button == GLFW_MOUSE_BUTTON_LEFT && shift))
         {
             m_panning = true;
             m_orbiting = false;
-            glfwGetCursorPos(m_window, &m_lastCursorX, &m_lastCursorY);
+            m_lastCursorX = m_cursorX;
+            m_lastCursorY = m_cursorY;
         }
         else if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
             m_orbiting = true;
             m_panning = false;
-            glfwGetCursorPos(m_window, &m_lastCursorX, &m_lastCursorY);
+            m_lastCursorX = m_cursorX;
+            m_lastCursorY = m_cursorY;
         }
     }
-    else if (action == GLFW_RELEASE)
+    else if (!down)
     {
         if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
@@ -1161,7 +1453,12 @@ void EditorApp::onCursorPos(double x, double y)
 
 void EditorApp::onScroll(double /*xoffset*/, double yoffset)
 {
-    if (!m_cursorOverViewport)
+    const bool overViewport = m_viewportScreenRect.valid() &&
+                              m_cursorX >= m_viewportScreenRect.x &&
+                              m_cursorX <= m_viewportScreenRect.x + m_viewportScreenRect.width &&
+                              m_cursorY >= m_viewportScreenRect.y &&
+                              m_cursorY <= m_viewportScreenRect.y + m_viewportScreenRect.height;
+    if (!overViewport)
     {
         return;
     }
@@ -1170,22 +1467,47 @@ void EditorApp::onScroll(double /*xoffset*/, double yoffset)
     m_camera.dolly(factor);
 }
 
+// ===== GLFW raw callbacks: TRANSLATE OS events into InputEvents only ========
+// These contain no app logic. They build an InputEvent and feed the single
+// input path. The only exception is key/char, where we additionally forward to
+// the imgui_impl_glfw backend's own callback so ImGui gets a correctly
+// translated ImGuiKey (the backend owns the GLFW->ImGuiKey table); the event
+// still conceptually travels through our abstraction (we build the InputEvent
+// and call dispatchInputEvent for symmetry / future app-level key handling).
+
 void EditorApp::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 {
     auto* app = static_cast<EditorApp*>(glfwGetWindowUserPointer(window));
-    if (app) app->onMouseButton(button, action, mods);
+    if (app) app->dispatchInputEvent(InputEvent::mouseButton(button, action == GLFW_PRESS, mods));
 }
 
 void EditorApp::cursorPosCallback(GLFWwindow* window, double x, double y)
 {
     auto* app = static_cast<EditorApp*>(glfwGetWindowUserPointer(window));
-    if (app) app->onCursorPos(x, y);
+    if (app) app->dispatchInputEvent(InputEvent::mouseMove(x, y));
 }
 
 void EditorApp::scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     auto* app = static_cast<EditorApp*>(glfwGetWindowUserPointer(window));
-    // ImGui's glfw backend chained to this callback at init time (we registered
-    // ours before ImGui_ImplGlfw_InitForOpenGL), so ImGui already saw the event.
-    if (app) app->onScroll(xoffset, yoffset);
+    if (app) app->dispatchInputEvent(InputEvent::scroll(xoffset, yoffset));
+}
+
+void EditorApp::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    auto* app = static_cast<EditorApp*>(glfwGetWindowUserPointer(window));
+    if (!app) return;
+    // Let the backend translate + feed ImGui IO (it owns the key table).
+    ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
+    // Also run it through our abstraction (app-level key handling lives here).
+    if (action != GLFW_REPEAT)
+    {
+        app->dispatchInputEvent(InputEvent::key(key, action == GLFW_PRESS, mods));
+    }
+}
+
+void EditorApp::charCallback(GLFWwindow* window, unsigned int codepoint)
+{
+    auto* app = static_cast<EditorApp*>(glfwGetWindowUserPointer(window));
+    if (app) app->dispatchInputEvent(InputEvent::character(codepoint));
 }

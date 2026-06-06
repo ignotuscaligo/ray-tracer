@@ -222,10 +222,13 @@ int main(int argc, char** argv)
     // Parse optional flags:
     //   --automation-port <N>   enable the localhost (127.0.0.1) command port
     //   --script <file.json>    run a list of commands non-interactively, exit
+    //   --headless              create the GLFW window hidden (real GL context +
+    //                           FBO + screenshots still work, no visible window)
     //   <path.obj>              initial mesh to load (first non-flag arg)
     uint16_t automationPort = 0;
     std::string scriptPath;
     std::string meshPath;
+    bool headless = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -237,6 +240,10 @@ int main(int argc, char** argv)
         else if (arg == "--script" && i + 1 < argc)
         {
             scriptPath = argv[++i];
+        }
+        else if (arg == "--headless")
+        {
+            headless = true;
         }
         else if (!arg.empty() && arg[0] != '-' && meshPath.empty())
         {
@@ -254,6 +261,7 @@ int main(int argc, char** argv)
     {
         app.setAutomationPort(automationPort);
     }
+    app.setHeadless(headless);
 
     try
     {

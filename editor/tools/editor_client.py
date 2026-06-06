@@ -140,6 +140,76 @@ class EditorClient:
     def screenshot(self, path: str, target: str = "window") -> Dict[str, Any]:
         return self._command("screenshot", path=path, target=target)
 
+    # ----- puppet: injected input + layout queries -------------------------
+
+    def inject_input(self, events: list) -> Dict[str, Any]:
+        """Push a list of InputEvent dicts through the editor's single input path.
+
+        Each event is a dict with a ``type`` and type-specific fields:
+          {"type": "mouse_move", "x": .., "y": ..}
+          {"type": "mouse_button", "button": 0|1|2, "down": bool, "mods": int?}
+          {"type": "scroll", "dx": float?, "dy": float}
+          {"type": "key", "key": <glfw key code>, "down": bool, "mods": int?}
+          {"type": "char", "codepoint": int}
+
+        Coordinates are window pixels (top-left origin) — the same space
+        ``query_layout`` returns rects in.
+        """
+        return self._command("inject_input", events=events)
+
+    def inject_mouse_move(self, x: float, y: float) -> Dict[str, Any]:
+        return self.inject_input([{"type": "mouse_move", "x": x, "y": y}])
+
+    def inject_mouse_button(self, button: int, down: bool, mods: int = 0) -> Dict[str, Any]:
+        return self.inject_input(
+            [{"type": "mouse_button", "button": button, "down": down, "mods": mods}]
+        )
+
+    def inject_scroll(self, dy: float, dx: float = 0.0) -> Dict[str, Any]:
+        return self.inject_input([{"type": "scroll", "dx": dx, "dy": dy}])
+
+    def inject_key(self, key: int, down: bool, mods: int = 0) -> Dict[str, Any]:
+        return self.inject_input([{"type": "key", "key": key, "down": down, "mods": mods}])
+
+    def inject_char(self, codepoint: int) -> Dict[str, Any]:
+        return self.inject_input([{"type": "char", "codepoint": codepoint}])
+
+    def inject_click(self, x: float, y: float, button: int = 0) -> Dict[str, Any]:
+        """Move to (x, y) then press + release `button` there — a full click."""
+        return self.inject_input(
+            [
+                {"type": "mouse_move", "x": x, "y": y},
+                {"type": "mouse_button", "button": button, "down": True},
+                {"type": "mouse_button", "button": button, "down": False},
+            ]
+        )
+
+    def inject_drag(
+        self, x0: float, y0: float, x1: float, y1: float, steps: int = 8, button: int = 0
+    ) -> Dict[str, Any]:
+        """Press at (x0,y0), move in `steps` increments to (x1,y1), release.
+
+        Sends one batched inject_input so the whole gesture lands in a single
+        frame's drain — matching how a real drag's events arrive between frames.
+        """
+        events = [
+            {"type": "mouse_move", "x": x0, "y": y0},
+            {"type": "mouse_button", "button": button, "down": True},
+        ]
+        for i in range(1, steps + 1):
+            t = i / steps
+            events.append({"type": "mouse_move", "x": x0 + (x1 - x0) * t, "y": y0 + (y1 - y0) * t})
+        events.append({"type": "mouse_button", "button": button, "down": False})
+        return self.inject_input(events)
+
+    def query_layout(self, name: Optional[str] = None) -> Dict[str, Any]:
+        """Return the pixel rect(s) of named UI elements from the last frame.
+
+        With `name`, returns {"rect": {x, y, width, height, center:[cx,cy]}}.
+        Without, returns {"elements": {name: rect, ...}}.
+        """
+        return self._command("query_layout", name=name)
+
     def quit(self) -> Dict[str, Any]:
         return self._command("quit")
 
@@ -183,6 +253,22 @@ def _build_parser() -> argparse.ArgumentParser:
     ss.add_argument("path")
     ss.add_argument("--target", default="window", choices=["window", "viewport", "render"])
 
+    ql = sub.add_parser("query-layout")
+    ql.add_argument("name", nargs="?", help="element name; omit to list all")
+
+    cl = sub.add_parser("click")
+    cl.add_argument("x", type=float)
+    cl.add_argument("y", type=float)
+    cl.add_argument("--button", type=int, default=0, choices=[0, 1, 2])
+
+    dr = sub.add_parser("drag")
+    dr.add_argument("x0", type=float)
+    dr.add_argument("y0", type=float)
+    dr.add_argument("x1", type=float)
+    dr.add_argument("y1", type=float)
+    dr.add_argument("--steps", type=int, default=8)
+    dr.add_argument("--button", type=int, default=0, choices=[0, 1, 2])
+
     return p
 
 
@@ -216,6 +302,14 @@ def main(argv: Optional[list] = None) -> int:
             result = client.render(wait=args.wait, timeout=args.timeout)
         elif args.command == "screenshot":
             result = client.screenshot(args.path, target=args.target)
+        elif args.command == "query-layout":
+            result = client.query_layout(name=args.name)
+        elif args.command == "click":
+            result = client.inject_click(args.x, args.y, button=args.button)
+        elif args.command == "drag":
+            result = client.inject_drag(
+                args.x0, args.y0, args.x1, args.y1, steps=args.steps, button=args.button
+            )
         elif args.command == "quit":
             result = client.quit()
         else:  # pragma: no cover - argparse enforces choices
