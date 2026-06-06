@@ -75,6 +75,8 @@ public:
     nlohmann::json cmdScreenshot(const nlohmann::json& req);
     nlohmann::json cmdInjectInput(const nlohmann::json& req);
     nlohmann::json cmdQueryLayout(const nlohmann::json& req);
+    nlohmann::json cmdInsertObject(const nlohmann::json& req);
+    nlohmann::json cmdSetProperty(const nlohmann::json& req);
 
     // Load an OBJ into the viewport (GL upload + reframe camera). Returns an
     // error string on failure, empty on success.
@@ -122,6 +124,38 @@ private:
     // The scene-explorer panel: a tree/list of the scene's objects + camera.
     // Selecting a row sets m_selectedObject and records each row's pixel rect.
     void drawSceneExplorer();
+
+    // The properties panel: when an object is selected, an editable form of its
+    // transform + kind-specific fields + material. Each editable widget registers
+    // its pixel rect in the LayoutRegistry (prop_*). Live edits mutate the model
+    // and rebuild the affected viewport geometry.
+    void drawPropertiesPanel();
+
+    // ===== Model mutation (the single path both GUI + puppet go through) =====
+    // Insert a new object of `kind` into the model with a sensible default
+    // transform + material, rebuild its viewport geometry, and select it. Returns
+    // the index of the new object (always valid). Requires a GL context
+    // (buildSceneGl uploads geometry).
+    int insertObject(Scene::Kind kind);
+
+    // Ensure a material exists for a freshly-inserted object, returning its name.
+    // Reuses a default material per type if one already exists, else creates one.
+    std::string ensureDefaultMaterial(const std::string& typeName,
+                                      const glm::vec3& color);
+
+    // Set a named scalar/vector field on the object at `index`. `field` is one of:
+    //   pos_x|pos_y|pos_z, rot_x|rot_y|rot_z, scale_x|scale_y|scale_z,
+    //   radius, light_width, light_height, light_radius,
+    //   mat_color_r|mat_color_g|mat_color_b, mat_ior.
+    // Returns true if applied. Rebuilds the object's viewport geometry. This is
+    // the code both the properties-panel widgets and the set_property command
+    // call, so GUI and puppet edits are identical.
+    bool setObjectFloatField(int index, const std::string& field, float value);
+
+    // Set the object's material TYPE (Lambertian|Mirror|Glass|Microfacet) and
+    // its material's name selection. Returns true if applied.
+    bool setObjectMaterialType(int index, const std::string& type);
+    bool setObjectMaterialName(int index, const std::string& materialName);
 
     // Phase 3: kick off a path-traced render of the current scene on a worker
     // thread and poll its completion in the UI loop.
@@ -243,6 +277,7 @@ private:
     int m_renderHeight = 0;
     unsigned int m_renderTex = 0;
     std::string m_scenePath;  // scene JSON to render (defaults to MirrorTest.json if found)
+    std::string m_lastRenderScenePath;  // temp scene file emitted by the last render
     int m_renderResolution = 256;
     int m_renderPhotonsMillions = 4;
 

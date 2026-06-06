@@ -4,6 +4,7 @@
 #include "GlHeaders.h"
 #include "PngExport.h"
 #include "SceneModelLoader.h"
+#include "SceneModelSerializer.h"
 #include "Shaders.h"
 
 #include "Image.h"
@@ -368,6 +369,181 @@ void EditorApp::newScene()
     m_selectedObject = -1;
 
     m_camera.frameOrigin();
+}
+
+// ===== Model mutation (shared by GUI + puppet) =============================
+
+std::string EditorApp::ensureDefaultMaterial(const std::string& typeName,
+                                             const glm::vec3& color)
+{
+    // Always mint a FRESH material per inserted object (unique name). Sharing a
+    // material across objects makes the properties panel surprising — editing one
+    // object's color/type would silently change every object that shares it. Each
+    // object owning its material keeps edits local; the serializer emits them all.
+    SceneModel::Material mat;
+    mat.name = m_scene.uniqueMaterialName(typeName + "Mat");
+    mat.type = typeName;
+    mat.color = color;
+    m_scene.materials.push_back(mat);
+    return mat.name;
+}
+
+int EditorApp::insertObject(Scene::Kind kind)
+{
+    if (!m_scene.isInitialized())
+    {
+        m_scene.reset();
+    }
+
+    SceneModel::ObjectNode obj;
+    obj.kind = kind;
+    obj.scale = glm::vec3(1.0f);
+
+    switch (kind)
+    {
+        case SceneModel::Kind::SphereVolume:
+            obj.name = m_scene.uniqueObjectName("Sphere");
+            obj.position = glm::vec3(0.0f, 1.0f, 0.0f);  // sit above the floor
+            obj.center = glm::vec3(0.0f);
+            obj.radius = 1.0;
+            obj.materialName = ensureDefaultMaterial("Lambertian", glm::vec3(0.8f));
+            break;
+        case SceneModel::Kind::MeshVolume:
+        {
+            obj.name = m_scene.uniqueObjectName("Mesh");
+            obj.position = glm::vec3(0.0f, 1.0f, 0.0f);
+            obj.materialName = ensureDefaultMaterial("Lambertian", glm::vec3(0.8f));
+            // Default to a bundled mesh. Resolve the OBJ + its first shape and
+            // register the OBJ in the model's mesh-file list so render + viewport
+            // both find it.
+            std::filesystem::path meshPath = findUpwards("meshes/eschers_knot.obj");
+            std::string shapeName = "Knot";
+            if (meshPath.empty())
+            {
+                meshPath = findUpwards("meshes/cube.obj");
+                shapeName = "Cube";
+            }
+            if (!meshPath.empty())
+            {
+                const std::string abs = std::filesystem::absolute(meshPath).string();
+                bool have = false;
+                for (const auto& f : m_scene.meshFiles)
+                {
+                    if (f == abs) { have = true; break; }
+                }
+                if (!have) m_scene.meshFiles.push_back(abs);
+                obj.meshName = shapeName;
+            }
+            break;
+        }
+        case SceneModel::Kind::AreaLight:
+            obj.name = m_scene.uniqueObjectName("AreaLight");
+            obj.position = glm::vec3(0.0f, 5.0f, 0.0f);
+            obj.eulerDegrees = glm::vec3(90.0f, 0.0f, 0.0f);  // face down at the floor
+            obj.lightShape = SceneModel::LightShape::Square;
+            obj.lightWidth = 2.0;
+            obj.lightHeight = 2.0;
+            break;
+        case SceneModel::Kind::OmniLight:
+            obj.name = m_scene.uniqueObjectName("OmniLight");
+            obj.position = glm::vec3(0.0f, 5.0f, 0.0f);
+            break;
+        case SceneModel::Kind::Group:
+        case SceneModel::Kind::Other:
+            obj.name = m_scene.uniqueObjectName("Object");
+            break;
+    }
+
+    m_scene.objects.push_back(std::move(obj));
+    m_scene.dirty = true;
+    const int index = static_cast<int>(m_scene.objects.size()) - 1;
+
+    // Rebuild viewport geometry so the new object appears immediately, and select
+    // it (so the properties panel targets it right away).
+    buildSceneGl();
+    m_selectedObject = index;
+    return index;
+}
+
+bool EditorApp::setObjectFloatField(int index, const std::string& field, float value)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    SceneModel::ObjectNode& o = m_scene.objects[static_cast<std::size_t>(index)];
+
+    if (field == "pos_x") o.position.x = value;
+    else if (field == "pos_y") o.position.y = value;
+    else if (field == "pos_z") o.position.z = value;
+    else if (field == "rot_x") o.eulerDegrees.x = value;
+    else if (field == "rot_y") o.eulerDegrees.y = value;
+    else if (field == "rot_z") o.eulerDegrees.z = value;
+    else if (field == "scale_x") o.scale.x = value;
+    else if (field == "scale_y") o.scale.y = value;
+    else if (field == "scale_z") o.scale.z = value;
+    else if (field == "radius") o.radius = value;
+    else if (field == "light_width") o.lightWidth = value;
+    else if (field == "light_height") o.lightHeight = value;
+    else if (field == "light_radius") o.lightRadius = value;
+    else if (field == "mat_color_r" || field == "mat_color_g" || field == "mat_color_b" ||
+             field == "mat_ior")
+    {
+        SceneModel::Material* mat = m_scene.findMaterialMutable(o.materialName);
+        if (!mat) return false;
+        if (field == "mat_color_r") mat->color.r = value;
+        else if (field == "mat_color_g") mat->color.g = value;
+        else if (field == "mat_color_b") mat->color.b = value;
+        else if (field == "mat_ior") mat->ior = value;
+    }
+    else
+    {
+        return false;
+    }
+
+    m_scene.dirty = true;
+    buildSceneGl();  // re-tessellate proxies / re-place model matrices
+    return true;
+}
+
+bool EditorApp::setObjectMaterialType(int index, const std::string& type)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    const std::string normalized =
+        (type == "Mirror" || type == "Glass" || type == "Microfacet") ? type : "Lambertian";
+    SceneModel::ObjectNode& o = m_scene.objects[static_cast<std::size_t>(index)];
+    SceneModel::Material* mat = m_scene.findMaterialMutable(o.materialName);
+    if (!mat)
+    {
+        // No material yet (e.g. a light): create one and assign it.
+        o.materialName = ensureDefaultMaterial(normalized, glm::vec3(0.8f));
+    }
+    else
+    {
+        mat->type = normalized;
+    }
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::setObjectMaterialName(int index, const std::string& materialName)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    if (m_scene.findMaterial(materialName) == nullptr)
+    {
+        return false;
+    }
+    m_scene.objects[static_cast<std::size_t>(index)].materialName = materialName;
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
 }
 
 std::string EditorApp::loadSceneFromPath(const std::string& path)
@@ -797,14 +973,38 @@ void EditorApp::drawMenuBar()
         recordMenuHeader("Insert");
         if (insertOpen)
         {
-            // Object-insertion lands in the next wave; surfaced disabled here so
-            // the menu seam is visible.
-            ImGui::BeginDisabled();
-            ImGui::MenuItem("Sphere");
-            ImGui::MenuItem("Mesh...");
-            ImGui::MenuItem("Area Light");
-            ImGui::MenuItem("Omni Light");
-            ImGui::EndDisabled();
+            // Each item inserts a new object into the model via the shared
+            // insertObject() path, which builds its viewport geometry and selects
+            // it. The same path backs the explorer right-click menu and the
+            // insert_object puppet command.
+            // Record each item's rect (only valid while the popup is open) so a
+            // puppet can open the menu, then click an item's center across frames.
+            auto recordMenuItem = [this](const char* name) {
+                const ImVec2 mn = ImGui::GetItemRectMin();
+                const ImVec2 mx = ImGui::GetItemRectMax();
+                m_layout.record(std::string("menu_insert_") + name, mn.x, mn.y, mx.x - mn.x,
+                                mx.y - mn.y);
+            };
+            if (ImGui::MenuItem("Sphere"))
+            {
+                insertObject(SceneModel::Kind::SphereVolume);
+            }
+            recordMenuItem("sphere");
+            if (ImGui::MenuItem("Mesh"))
+            {
+                insertObject(SceneModel::Kind::MeshVolume);
+            }
+            recordMenuItem("mesh");
+            if (ImGui::MenuItem("Area Light"))
+            {
+                insertObject(SceneModel::Kind::AreaLight);
+            }
+            recordMenuItem("area_light");
+            if (ImGui::MenuItem("Omni Light"))
+            {
+                insertObject(SceneModel::Kind::OmniLight);
+            }
+            recordMenuItem("omni_light");
             ImGui::EndMenu();
         }
 
@@ -877,7 +1077,23 @@ void EditorApp::drawSceneExplorer()
 
     if (m_scene.objects.empty() && !m_scene.camera.present)
     {
-        ImGui::TextDisabled("(empty scene — File > Open a scene)");
+        ImGui::TextDisabled("(empty scene — Insert > ... or right-click)");
+    }
+
+    // Right-click anywhere in the explorer region opens an Insert context menu,
+    // routing through the same insertObject() path as the Insert menu. ImGui's
+    // BeginPopupContextWindow targets the current child window's empty space.
+    if (ImGui::BeginPopupContextWindow("explorer_context",
+                                       ImGuiPopupFlags_MouseButtonRight |
+                                           ImGuiPopupFlags_NoOpenOverItems))
+    {
+        ImGui::TextDisabled("Insert");
+        ImGui::Separator();
+        if (ImGui::MenuItem("Sphere")) insertObject(SceneModel::Kind::SphereVolume);
+        if (ImGui::MenuItem("Mesh")) insertObject(SceneModel::Kind::MeshVolume);
+        if (ImGui::MenuItem("Area Light")) insertObject(SceneModel::Kind::AreaLight);
+        if (ImGui::MenuItem("Omni Light")) insertObject(SceneModel::Kind::OmniLight);
+        ImGui::EndPopup();
     }
 
     ImGui::EndChild();
@@ -891,6 +1107,174 @@ void EditorApp::drawSceneExplorer()
     {
         ImGui::TextDisabled("Selected: (none)");
     }
+}
+
+namespace
+{
+// Record the rect of the widget just submitted under `name` so the puppet port
+// can locate it. ImGui's GetItemRectMin/Max report screen-space (window-pixel)
+// coordinates, matching the LayoutRegistry / injected-input space.
+void recordItemRect(LayoutRegistry& layout, const char* name)
+{
+    const ImVec2 mn = ImGui::GetItemRectMin();
+    const ImVec2 mx = ImGui::GetItemRectMax();
+    layout.record(name, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+}
+
+const char* materialTypeItems[] = {"Lambertian", "Mirror", "Glass", "Microfacet"};
+int materialTypeIndex(const std::string& t)
+{
+    if (t == "Mirror") return 1;
+    if (t == "Glass") return 2;
+    if (t == "Microfacet") return 3;
+    return 0;
+}
+}  // namespace
+
+void EditorApp::drawPropertiesPanel()
+{
+    ImGui::Separator();
+    ImGui::Text("Properties");
+
+    ImGui::BeginChild("properties_panel", ImVec2(0, 300), true);
+    {
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        m_layout.record("panel_properties", wp.x, wp.y, ws.x, ws.y);
+    }
+
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+    {
+        ImGui::TextDisabled("(select an object to edit)");
+        ImGui::EndChild();
+        return;
+    }
+
+    SceneModel::ObjectNode& obj = m_scene.objects[static_cast<std::size_t>(m_selectedObject)];
+    ImGui::Text("%s  [%s]", obj.name.c_str(), kindLabel(obj.kind));
+    ImGui::Separator();
+
+    // ----- Transform: position / rotation / scale --------------------------
+    // Each component is its own DragFloat so the puppet can register/find a rect
+    // per axis. Edits flow through setObjectFloatField (the same path the
+    // set_property command uses), so GUI + puppet mutate the model identically.
+    auto dragField = [&](const char* label, const char* layoutName, const char* field,
+                         float current, float speed) {
+        float v = current;
+        ImGui::SetNextItemWidth(90.0f);
+        const bool changed = ImGui::DragFloat(label, &v, speed);
+        recordItemRect(m_layout, layoutName);
+        if (changed)
+        {
+            setObjectFloatField(m_selectedObject, field, v);
+        }
+    };
+
+    ImGui::TextDisabled("Position");
+    dragField("X##pos", "prop_pos_x", "pos_x", obj.position.x, 0.05f); ImGui::SameLine();
+    dragField("Y##pos", "prop_pos_y", "pos_y", obj.position.y, 0.05f); ImGui::SameLine();
+    dragField("Z##pos", "prop_pos_z", "pos_z", obj.position.z, 0.05f);
+
+    ImGui::TextDisabled("Orientation (pitch/yaw/roll deg)");
+    dragField("P##rot", "prop_rot_x", "rot_x", obj.eulerDegrees.x, 0.5f); ImGui::SameLine();
+    dragField("Yw##rot", "prop_rot_y", "rot_y", obj.eulerDegrees.y, 0.5f); ImGui::SameLine();
+    dragField("R##rot", "prop_rot_z", "rot_z", obj.eulerDegrees.z, 0.5f);
+
+    ImGui::TextDisabled("Scale");
+    dragField("X##scale", "prop_scale_x", "scale_x", obj.scale.x, 0.01f); ImGui::SameLine();
+    dragField("Y##scale", "prop_scale_y", "scale_y", obj.scale.y, 0.01f); ImGui::SameLine();
+    dragField("Z##scale", "prop_scale_z", "scale_z", obj.scale.z, 0.01f);
+
+    // ----- Kind-specific fields -------------------------------------------
+    if (obj.kind == SceneModel::Kind::SphereVolume)
+    {
+        ImGui::Separator();
+        float r = static_cast<float>(obj.radius);
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::DragFloat("Radius", &r, 0.02f, 0.0f, 1e6f))
+        {
+            setObjectFloatField(m_selectedObject, "radius", r);
+        }
+        recordItemRect(m_layout, "prop_radius");
+    }
+    else if (obj.kind == SceneModel::Kind::AreaLight)
+    {
+        ImGui::Separator();
+        if (obj.lightShape == SceneModel::LightShape::Disc)
+        {
+            float lr = static_cast<float>(obj.lightRadius);
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::DragFloat("Light radius", &lr, 0.05f, 0.0f, 1e6f))
+            {
+                setObjectFloatField(m_selectedObject, "light_radius", lr);
+            }
+            recordItemRect(m_layout, "prop_light_radius");
+        }
+        else
+        {
+            float w = static_cast<float>(obj.lightWidth);
+            float h = static_cast<float>(obj.lightHeight);
+            ImGui::SetNextItemWidth(90.0f);
+            if (ImGui::DragFloat("W##lw", &w, 0.05f, 0.0f, 1e6f))
+            {
+                setObjectFloatField(m_selectedObject, "light_width", w);
+            }
+            recordItemRect(m_layout, "prop_light_width");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(90.0f);
+            if (ImGui::DragFloat("H##lh", &h, 0.05f, 0.0f, 1e6f))
+            {
+                setObjectFloatField(m_selectedObject, "light_height", h);
+            }
+            recordItemRect(m_layout, "prop_light_height");
+        }
+    }
+
+    // ----- Material -------------------------------------------------------
+    const bool hasMaterialSlot = (obj.kind == SceneModel::Kind::SphereVolume ||
+                                  obj.kind == SceneModel::Kind::MeshVolume);
+    if (hasMaterialSlot)
+    {
+        ImGui::Separator();
+        ImGui::TextDisabled("Material: %s",
+                            obj.materialName.empty() ? "(none)" : obj.materialName.c_str());
+
+        SceneModel::Material* mat = m_scene.findMaterialMutable(obj.materialName);
+        if (mat)
+        {
+            int typeIdx = materialTypeIndex(mat->type);
+            ImGui::SetNextItemWidth(150.0f);
+            if (ImGui::Combo("Type", &typeIdx, materialTypeItems,
+                             IM_ARRAYSIZE(materialTypeItems)))
+            {
+                setObjectMaterialType(m_selectedObject, materialTypeItems[typeIdx]);
+            }
+            recordItemRect(m_layout, "prop_material_type");
+
+            float color[3] = {mat->color.r, mat->color.g, mat->color.b};
+            ImGui::SetNextItemWidth(220.0f);
+            if (ImGui::ColorEdit3("Color", color))
+            {
+                setObjectFloatField(m_selectedObject, "mat_color_r", color[0]);
+                setObjectFloatField(m_selectedObject, "mat_color_g", color[1]);
+                setObjectFloatField(m_selectedObject, "mat_color_b", color[2]);
+            }
+            recordItemRect(m_layout, "prop_material_color");
+
+            if (mat->type == "Glass")
+            {
+                float ior = static_cast<float>(mat->ior);
+                ImGui::SetNextItemWidth(120.0f);
+                if (ImGui::DragFloat("IOR", &ior, 0.01f, 1.0f, 3.0f))
+                {
+                    setObjectFloatField(m_selectedObject, "mat_ior", ior);
+                }
+                recordItemRect(m_layout, "prop_material_ior");
+            }
+        }
+    }
+
+    ImGui::EndChild();
 }
 
 void EditorApp::drawUi()
@@ -935,6 +1319,10 @@ void EditorApp::drawUi()
     // sets m_selectedObject (highlights it in the viewport; drives the properties
     // panel next wave). Each row registers its pixel rect in the LayoutRegistry.
     drawSceneExplorer();
+
+    // Properties panel: editable transform / kind fields / material for the
+    // selected object. Lives in the controls window beneath the explorer.
+    drawPropertiesPanel();
     ImGui::Separator();
 
     ImGui::Text("Scene file: %s",
@@ -1041,10 +1429,10 @@ void EditorApp::startRender()
     {
         return;
     }
-    if (m_scenePath.empty())
+    if (m_scene.objects.empty())
     {
         m_renderState.store(RenderState::Failed);
-        m_renderError = "No scene file (MirrorTest.json) found.";
+        m_renderError = "Scene is empty — insert an object before rendering.";
         m_renderStatus = "Render failed.";
         return;
     }
@@ -1058,14 +1446,14 @@ void EditorApp::startRender()
     m_renderStatus = "Rendering scene (this can take a while)...";
     m_renderError.clear();
 
-    const std::string scenePath = m_scenePath;
     const int resolution = m_renderResolution;
     const size_t photons = static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
 
-    // RENDER-FROM-CURRENT-VIEW: build a temp scene JSON from the loaded model's
-    // raw JSON, overwriting the Camera block's $position / $rotation /
-    // $verticalFieldOfView with the LIVE orbit camera so the path-trace frames the
-    // scene exactly as the viewport shows it (not the scene-file camera).
+    // RENDER-FROM-CURRENT-VIEW: serialize the CURRENT in-memory model (so inserts
+    // and edits made in the editor are in the rendered scene — not just the
+    // originally-loaded rawJson), then overwrite the Camera block's $position /
+    // $rotation / $verticalFieldOfView with the LIVE orbit camera so the
+    // path-trace frames the scene exactly as the viewport shows it.
     //
     // Convention mapping (derived from src/Quaternion.cpp::fromPitchYawRoll and
     // the orbit eye() parameterization):
@@ -1083,36 +1471,64 @@ void EditorApp::startRender()
     const double renderYawDeg = glm::degrees(m_camera.yaw) + 180.0;
     const double renderFovDeg = glm::degrees(m_camera.fovYRadians);
 
-    std::string renderScenePath = scenePath;  // fall back to the file as-is
-    if (m_scene.rawJson.is_object() && m_scene.rawJson.contains("$scene"))
-    {
-        json sceneJson = m_scene.rawJson;  // copy; rewrite the camera in place
-        json& sceneBlock = sceneJson["$scene"];
-        // Find the camera entry (the one whose $type == "Camera").
-        for (auto& [name, node] : sceneBlock.items())
-        {
-            if (node.is_object() && node.value("$type", std::string{}) == "Camera")
-            {
-                node["$position"] = {eye.x, eye.y, eye.z};
-                node["$rotation"] = {{"$type", "PitchYawRollDegrees"},
-                                     {"$value", {renderPitchDeg, renderYawDeg, 0.0}}};
-                node["$verticalFieldOfView"] = renderFovDeg;
-                break;
-            }
-        }
+    json sceneJson = SceneModelSerializer::toJson(m_scene);
+    json& sceneBlock = sceneJson["$scene"];
 
-        // Write the rewritten scene next to the original so relative $meshes /
-        // $renderPath still resolve against the same directory.
-        std::filesystem::path base(scenePath);
-        std::filesystem::path tempPath =
-            base.parent_path() / (".editor_view_" + base.filename().string());
-        std::ofstream out(tempPath);
-        if (out)
+    // Inject / overwrite the camera with the live orbit view. The serializer
+    // emits the model's camera (if any); from a File>New scene there is none, so
+    // synthesize one here. Either way the live orbit camera wins.
+    bool wroteCamera = false;
+    for (auto& [name, node] : sceneBlock.items())
+    {
+        if (node.is_object() && node.value("$type", std::string{}) == "Camera")
         {
-            out << sceneJson.dump(2);
-            out.close();
-            renderScenePath = tempPath.string();
+            node["$position"] = {eye.x, eye.y, eye.z};
+            node["$rotation"] = {{"$type", "PitchYawRollDegrees"},
+                                 {"$value", {renderPitchDeg, renderYawDeg, 0.0}}};
+            node["$verticalFieldOfView"] = renderFovDeg;
+            wroteCamera = true;
+            break;
         }
+    }
+    if (!wroteCamera)
+    {
+        sceneBlock["Camera"] = {
+            {"$type", "Camera"},
+            {"$verticalFieldOfView", renderFovDeg},
+            {"$position", {eye.x, eye.y, eye.z}},
+            {"$rotation",
+             {{"$type", "PitchYawRollDegrees"},
+              {"$value", {renderPitchDeg, renderYawDeg, 0.0}}}}};
+    }
+
+    // Write the rewritten scene to a temp file. $meshes are absolute paths (the
+    // model resolves them at load/insert time), so the temp file's directory does
+    // not matter for mesh resolution; place it next to the source scene when one
+    // exists, else in the system temp dir.
+    std::filesystem::path tempPath;
+    if (!m_scenePath.empty())
+    {
+        std::filesystem::path base(m_scenePath);
+        tempPath = base.parent_path() / (".editor_view_" + base.filename().string());
+    }
+    else
+    {
+        tempPath = std::filesystem::temp_directory_path() / ".editor_view_scene.json";
+    }
+    std::string renderScenePath;
+    {
+        std::ofstream out(tempPath);
+        if (!out)
+        {
+            m_renderState.store(RenderState::Failed);
+            m_renderError = "could not write temp scene: " + tempPath.string();
+            m_renderStatus = "Render failed.";
+            return;
+        }
+        out << sceneJson.dump(2);
+        out.close();
+        renderScenePath = tempPath.string();
+        m_lastRenderScenePath = renderScenePath;
     }
 
     // TODO (Phase 4 — progressive preview, not yet wired): renderFrame already
@@ -1238,6 +1654,13 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "screenshot") return cmdScreenshot(request);
     if (cmd == "inject_input") return cmdInjectInput(request);
     if (cmd == "query_layout") return cmdQueryLayout(request);
+    if (cmd == "insert_object") return cmdInsertObject(request);
+    if (cmd == "set_property") return cmdSetProperty(request);
+    if (cmd == "new_scene")
+    {
+        newScene();
+        return json{{"ok", true}, {"object_count", m_scene.objects.size()}};
+    }
     if (cmd == "quit")
     {
         if (m_automation) m_automation->requestQuit();
@@ -1298,6 +1721,37 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
         (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()))
             ? json(m_scene.objects[static_cast<std::size_t>(m_selectedObject)].name)
             : json(nullptr);
+
+    // Full detail of the selected object (transform + material) so a puppet can
+    // verify an edit landed without screenshotting. objectDetailJson lives in the
+    // command section below; forward-declared there, defined before use at link.
+    if (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()))
+    {
+        const SceneModel::ObjectNode& o =
+            m_scene.objects[static_cast<std::size_t>(m_selectedObject)];
+        json sd;
+        sd["index"] = m_selectedObject;
+        sd["name"] = o.name;
+        sd["kind"] = kindLabel(o.kind);
+        sd["position"] = {o.position.x, o.position.y, o.position.z};
+        sd["rotation"] = {o.eulerDegrees.x, o.eulerDegrees.y, o.eulerDegrees.z};
+        sd["scale"] = {o.scale.x, o.scale.y, o.scale.z};
+        sd["radius"] = o.radius;
+        sd["light_width"] = o.lightWidth;
+        sd["light_height"] = o.lightHeight;
+        sd["material_name"] = o.materialName;
+        if (const SceneModel::Material* m = m_scene.findMaterial(o.materialName))
+        {
+            sd["material"] = {{"type", m->type},
+                              {"color", {m->color.r, m->color.g, m->color.b}},
+                              {"ior", m->ior}};
+        }
+        j["selected_detail"] = sd;
+    }
+    else
+    {
+        j["selected_detail"] = json(nullptr);
+    }
     return j;
 }
 
@@ -1465,6 +1919,7 @@ nlohmann::json EditorApp::cmdRender(const nlohmann::json& req)
     return json{{"ok", true},
                 {"status", "done"},
                 {"waited", true},
+                {"render_scene_path", m_lastRenderScenePath},
                 {"render_width", m_renderWidth},
                 {"render_height", m_renderHeight}};
 }
@@ -1652,6 +2107,138 @@ nlohmann::json EditorApp::cmdQueryLayout(const nlohmann::json& req)
         elements[name] = rectJson(rect);
     }
     return json{{"ok", true}, {"elements", elements}};
+}
+
+namespace
+{
+// Map a puppet "kind" string to the model Kind. Returns true on a known kind.
+bool parseKind(const std::string& s, SceneModel::Kind& out)
+{
+    if (s == "SphereVolume" || s == "sphere") { out = SceneModel::Kind::SphereVolume; return true; }
+    if (s == "MeshVolume" || s == "mesh") { out = SceneModel::Kind::MeshVolume; return true; }
+    if (s == "AreaLight" || s == "area_light") { out = SceneModel::Kind::AreaLight; return true; }
+    if (s == "OmniLight" || s == "omni_light") { out = SceneModel::Kind::OmniLight; return true; }
+    return false;
+}
+
+// A detailed JSON view of one object — its transform, kind fields, and resolved
+// material — so the puppet can verify edits without screenshotting.
+json objectDetailJson(const SceneModel& scene, int index)
+{
+    if (index < 0 || index >= static_cast<int>(scene.objects.size()))
+    {
+        return json(nullptr);
+    }
+    const SceneModel::ObjectNode& o = scene.objects[static_cast<std::size_t>(index)];
+    json j;
+    j["index"] = index;
+    j["name"] = o.name;
+    j["position"] = {o.position.x, o.position.y, o.position.z};
+    j["rotation"] = {o.eulerDegrees.x, o.eulerDegrees.y, o.eulerDegrees.z};
+    j["scale"] = {o.scale.x, o.scale.y, o.scale.z};
+    j["radius"] = o.radius;
+    j["light_width"] = o.lightWidth;
+    j["light_height"] = o.lightHeight;
+    j["light_radius"] = o.lightRadius;
+    j["mesh"] = o.meshName;
+    j["material_name"] = o.materialName;
+    if (const SceneModel::Material* m = scene.findMaterial(o.materialName))
+    {
+        j["material"] = {{"type", m->type},
+                         {"color", {m->color.r, m->color.g, m->color.b}},
+                         {"ior", m->ior}};
+    }
+    return j;
+}
+}  // namespace
+
+nlohmann::json EditorApp::cmdInsertObject(const nlohmann::json& req)
+{
+    // Insert an object via the SAME path the Insert menu / right-click use, so a
+    // puppet builds a scene exactly as a human would. Optional "select" (default
+    // true) leaves it selected for a following set_property.
+    if (!req.contains("kind") || !req["kind"].is_string())
+    {
+        return json{{"ok", false},
+                    {"error", "insert_object requires string 'kind' "
+                              "(SphereVolume|MeshVolume|AreaLight|OmniLight)"}};
+    }
+    SceneModel::Kind kind;
+    if (!parseKind(req["kind"].get<std::string>(), kind))
+    {
+        return json{{"ok", false}, {"error", "unknown kind: " + req["kind"].get<std::string>()}};
+    }
+
+    const int index = insertObject(kind);
+    return json{{"ok", true},
+                {"index", index},
+                {"name", m_scene.objects[static_cast<std::size_t>(index)].name},
+                {"object", objectDetailJson(m_scene, index)},
+                {"object_count", m_scene.objects.size()}};
+}
+
+nlohmann::json EditorApp::cmdSetProperty(const nlohmann::json& req)
+{
+    // Set a field on an object — the programmatic twin of the properties-panel
+    // widgets (both call setObjectFloatField / setObjectMaterialType, so GUI and
+    // puppet edits are identical). Targets the selected object by default, or an
+    // explicit "index". Recognized fields:
+    //   pos_x/y/z, rot_x/y/z, scale_x/y/z, radius,
+    //   light_width, light_height, light_radius,
+    //   mat_color_r/g/b, mat_ior  -> numeric "value"
+    //   material_type            -> string "value" (Lambertian|Mirror|Glass|Microfacet)
+    //   material_name            -> string "value" (assign an existing material)
+    int index = m_selectedObject;
+    if (req.contains("index") && req["index"].is_number_integer())
+    {
+        index = req["index"].get<int>();
+    }
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return json{{"ok", false}, {"error", "no object selected / index out of range"}};
+    }
+    if (!req.contains("field") || !req["field"].is_string())
+    {
+        return json{{"ok", false}, {"error", "set_property requires string 'field'"}};
+    }
+    const std::string field = req["field"].get<std::string>();
+
+    bool ok = false;
+    if (field == "material_type")
+    {
+        if (!req.contains("value") || !req["value"].is_string())
+        {
+            return json{{"ok", false}, {"error", "material_type needs a string 'value'"}};
+        }
+        ok = setObjectMaterialType(index, req["value"].get<std::string>());
+    }
+    else if (field == "material_name")
+    {
+        if (!req.contains("value") || !req["value"].is_string())
+        {
+            return json{{"ok", false}, {"error", "material_name needs a string 'value'"}};
+        }
+        ok = setObjectMaterialName(index, req["value"].get<std::string>());
+        if (!ok)
+        {
+            return json{{"ok", false}, {"error", "no material named '" +
+                                                     req["value"].get<std::string>() + "'"}};
+        }
+    }
+    else
+    {
+        if (!req.contains("value") || !req["value"].is_number())
+        {
+            return json{{"ok", false}, {"error", "field '" + field + "' needs a numeric 'value'"}};
+        }
+        ok = setObjectFloatField(index, field, req["value"].get<float>());
+    }
+
+    if (!ok)
+    {
+        return json{{"ok", false}, {"error", "could not set field '" + field + "'"}};
+    }
+    return json{{"ok", true}, {"object", objectDetailJson(m_scene, index)}};
 }
 
 std::string EditorApp::captureScreenshot(const std::string& path, const std::string& target)

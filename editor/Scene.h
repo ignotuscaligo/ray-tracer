@@ -127,6 +127,55 @@ struct SceneModel
         return nullptr;
     }
 
+    // Mutable variant — used by the properties panel to edit a material in place.
+    Material* findMaterialMutable(const std::string& materialName)
+    {
+        for (auto& m : materials)
+        {
+            if (m.name == materialName)
+            {
+                return &m;
+            }
+        }
+        return nullptr;
+    }
+
+    // Generate a name not already used by any object, of the form "<base>" or
+    // "<base>.NNN". Used when inserting objects so explorer rows / layout names
+    // stay unique.
+    std::string uniqueObjectName(const std::string& base) const
+    {
+        bool taken = false;
+        for (const auto& o : objects)
+        {
+            if (o.name == base) { taken = true; break; }
+        }
+        if (!taken) return base;
+        for (int n = 1; n < 100000; ++n)
+        {
+            std::string candidate = base + "." + std::to_string(n);
+            bool clash = false;
+            for (const auto& o : objects)
+            {
+                if (o.name == candidate) { clash = true; break; }
+            }
+            if (!clash) return candidate;
+        }
+        return base;  // pathological; effectively unreachable
+    }
+
+    // As above, for material names.
+    std::string uniqueMaterialName(const std::string& base) const
+    {
+        if (findMaterial(base) == nullptr) return base;
+        for (int n = 1; n < 100000; ++n)
+        {
+            std::string candidate = base + "." + std::to_string(n);
+            if (findMaterial(candidate) == nullptr) return candidate;
+        }
+        return base;
+    }
+
     void reset()
     {
         meshFiles.clear();

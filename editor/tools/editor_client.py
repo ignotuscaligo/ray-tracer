@@ -212,6 +212,38 @@ class EditorClient:
         events.append({"type": "mouse_button", "button": button, "down": False})
         return self.inject_input(events)
 
+    # ----- model mutation (insert / edit objects) --------------------------
+
+    def new_scene(self) -> Dict[str, Any]:
+        """File > New: reset to a pristine empty scene (the from-scratch start)."""
+        return self._command("new_scene")
+
+    def insert_object(self, kind: str) -> Dict[str, Any]:
+        """Insert a new object into the scene model and select it.
+
+        `kind` is one of "SphereVolume", "MeshVolume", "AreaLight", "OmniLight"
+        (short forms "sphere"/"mesh"/"area_light"/"omni_light" also accepted).
+        Goes through the same model-mutation path as the Insert menu, so the new
+        object appears in the explorer + viewport immediately. Returns the new
+        object's index, name, and full detail.
+        """
+        return self._command("insert_object", kind=kind)
+
+    def set_property(
+        self, field: str, value: Any, index: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Set a field on an object (the programmatic twin of the props panel).
+
+        Targets the selected object unless `index` is given. Recognized fields:
+          numeric: pos_x/y/z, rot_x/y/z, scale_x/y/z, radius,
+                   light_width, light_height, light_radius,
+                   mat_color_r/g/b, mat_ior
+          string:  material_type (Lambertian|Mirror|Glass|Microfacet),
+                   material_name (assign an existing material)
+        Returns the object's updated detail.
+        """
+        return self._command("set_property", field=field, value=value, index=index)
+
     def query_layout(self, name: Optional[str] = None) -> Dict[str, Any]:
         """Return the pixel rect(s) of named UI elements from the last frame.
 
@@ -269,6 +301,16 @@ def _build_parser() -> argparse.ArgumentParser:
     ql = sub.add_parser("query-layout")
     ql.add_argument("name", nargs="?", help="element name; omit to list all")
 
+    sub.add_parser("new-scene")
+
+    io = sub.add_parser("insert-object")
+    io.add_argument("kind", help="SphereVolume|MeshVolume|AreaLight|OmniLight")
+
+    sp = sub.add_parser("set-property")
+    sp.add_argument("field")
+    sp.add_argument("value", help="numeric for transform/material fields; string for material_type/name")
+    sp.add_argument("--index", type=int, help="target object index (default: selected)")
+
     cl = sub.add_parser("click")
     cl.add_argument("x", type=float)
     cl.add_argument("y", type=float)
@@ -319,6 +361,18 @@ def main(argv: Optional[list] = None) -> int:
             result = client.screenshot(args.path, target=args.target)
         elif args.command == "query-layout":
             result = client.query_layout(name=args.name)
+        elif args.command == "new-scene":
+            result = client.new_scene()
+        elif args.command == "insert-object":
+            result = client.insert_object(args.kind)
+        elif args.command == "set-property":
+            # Numeric value when it parses as a float, else pass as a string
+            # (material_type / material_name take strings).
+            try:
+                val: Any = float(args.value)
+            except ValueError:
+                val = args.value
+            result = client.set_property(args.field, val, index=args.index)
         elif args.command == "click":
             result = client.inject_click(args.x, args.y, button=args.button)
         elif args.command == "drag":

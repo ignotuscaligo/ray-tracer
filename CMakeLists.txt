@@ -379,6 +379,8 @@ target_sources(editor
         editor/Scene.h
         editor/SceneModelLoader.h
         editor/SceneModelLoader.cpp
+        editor/SceneModelSerializer.h
+        editor/SceneModelSerializer.cpp
         editor/RasterMesh.h
         editor/RasterMesh.cpp
         editor/ViewportGrid.h

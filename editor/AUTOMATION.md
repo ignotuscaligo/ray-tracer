@@ -64,7 +64,35 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `screenshot` | `path`, `target` (`window`\|`viewport`\|`render`) | Capture pixels to an 8-bit RGBA PNG. |
 | `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path (drives camera nav + ImGui). |
 | `query_layout` | `name` (optional) | Pixel rect(s) of named UI elements recorded last frame. With `name`: one rect; without: all. |
+| `new_scene` | — | File > New: reset to a pristine empty scene (the from-scratch start). |
+| `insert_object` | `kind` (`SphereVolume`\|`MeshVolume`\|`AreaLight`\|`OmniLight`) | Insert an object via the SAME model-mutation path as the Insert menu / explorer right-click, build its viewport geometry, and select it. Returns the new `index`, `name`, and full `object` detail. |
+| `set_property` | `field`, `value`, `index` (optional, default selected) | Edit one field of an object — the programmatic twin of the properties-panel widgets (both call the same model mutators). Numeric fields: `pos_x/y/z`, `rot_x/y/z`, `scale_x/y/z`, `radius`, `light_width`, `light_height`, `light_radius`, `mat_color_r/g/b`, `mat_ior`. String fields: `material_type` (`Lambertian`\|`Mirror`\|`Glass`\|`Microfacet`), `material_name` (assign an existing material). Returns the updated `object` detail. |
 | `quit` | — | Acknowledge, then shut the editor down. |
+
+`get_state` additionally reports `selected_detail` — the full transform + material
+of the selected object — so an edit can be verified without a screenshot. `render`
+reports `render_scene_path`, the temp scene file it emitted from the CURRENT model
+(so inserts/edits are in the render, not just the originally-loaded JSON).
+
+### Object insertion + the properties panel (2b-2)
+
+The Insert menu (`menu_Insert`), the scene-explorer right-click context menu, and
+the `insert_object` command all funnel through one model-mutation path, so a puppet
+builds a scene exactly as a human would. New objects get a default transform, a
+fresh per-object material, and a unique name; they appear in the explorer + the
+viewport and become selected immediately.
+
+The properties panel (`panel_properties`) edits the selected object. Each editable
+widget registers its rect: `prop_pos_x/y/z`, `prop_rot_x/y/z`, `prop_scale_x/y/z`,
+`prop_radius` (sphere), `prop_light_width`/`prop_light_height`/`prop_light_radius`
+(area light), `prop_material_type`, `prop_material_color`, `prop_material_ior`
+(glass). The Insert-menu item rects (`menu_insert_sphere`/`_mesh`/`_area_light`/
+`_omni_light`) are recorded while the menu popup is open.
+
+GUI widgets are the real feature; drive edits reliably with `insert_object` /
+`set_property` rather than injecting drag-float gestures (an ImGui DragFloat is a
+multi-frame drag, which a single batched `inject_input` cannot reproduce — the
+commands and the widgets call the identical model mutators).
 
 Screenshot targets:
 - `window` — the full editor window incl. ImGui panels (`glReadPixels` of the default framebuffer).
@@ -158,6 +186,10 @@ python3 editor/tools/editor_client.py --port 8780 set-render-settings --resoluti
 python3 editor/tools/editor_client.py --port 8780 render --wait
 python3 editor/tools/editor_client.py --port 8780 screenshot /tmp/shot.png --target viewport
 python3 editor/tools/editor_client.py --port 8780 query-layout viewport
+python3 editor/tools/editor_client.py --port 8780 new-scene
+python3 editor/tools/editor_client.py --port 8780 insert-object AreaLight
+python3 editor/tools/editor_client.py --port 8780 set-property pos_y 200 --index 0
+python3 editor/tools/editor_client.py --port 8780 set-property material_type Mirror
 python3 editor/tools/editor_client.py --port 8780 click 800 280
 python3 editor/tools/editor_client.py --port 8780 drag 800 280 1000 340 --steps 10
 python3 editor/tools/editor_client.py --port 8780 quit
