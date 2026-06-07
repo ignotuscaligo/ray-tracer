@@ -304,6 +304,20 @@ bool EditorApp::initialize()
         std::fprintf(stderr, "Failed to build overlay shader\n");
         return false;
     }
+    // Flat-color shader for the selection-outline mask pass.
+    m_outlineProgram = linkProgram(kOutlineVertexShader, kOutlineFragmentShader);
+    if (!m_outlineProgram)
+    {
+        std::fprintf(stderr, "Failed to build outline shader\n");
+        return false;
+    }
+    // Screen-space edge pass (reuses the overlay's fullscreen-quad vertex shader).
+    m_outlineEdgeProgram = linkProgram(kOverlayVertexShader, kOutlineEdgeFragmentShader);
+    if (!m_outlineEdgeProgram)
+    {
+        std::fprintf(stderr, "Failed to build outline edge shader\n");
+        return false;
+    }
     buildOverlayQuad();
 
     glEnable(GL_DEPTH_TEST);
@@ -1124,13 +1138,10 @@ void EditorApp::drawSceneObjects(const glm::mat4& view, const glm::mat4& proj)
             {
                 continue;
             }
-            glm::vec3 color = d.color;
-            // Highlight the selected object.
-            if (m_selectedObject >= 0 &&
-                d.objectIndex == static_cast<std::size_t>(m_selectedObject))
-            {
-                color = glm::mix(color, glm::vec3(1.0f, 0.55f, 0.1f), 0.6f);
-            }
+            // The selected object's highlight is a silhouette OUTLINE drawn in a
+            // separate stencil pass (drawSelectionOutline), not a color tint — so
+            // the object keeps its true material color here.
+            const glm::vec3 color = d.color;
             glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uModel"), 1, GL_FALSE,
                                glm::value_ptr(d.model));
             glUniform3fv(glGetUniformLocation(m_shaderProgram, "uBaseColor"), 1,
@@ -1164,6 +1175,75 @@ void EditorApp::drawSceneObjects(const glm::mat4& view, const glm::mat4& proj)
         glEnable(GL_DEPTH_TEST);
         glUseProgram(0);
     }
+}
+
+void EditorApp::drawSelectionOutline(const glm::mat4& view, const glm::mat4& proj)
+{
+    if (m_outlineProgram == 0 || m_outlineEdgeProgram == 0 || m_outlineMaskFbo == 0)
+    {
+        return;
+    }
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+    {
+        return;
+    }
+
+    // Find the drawable for the selected object (meshes + sphere proxies; lights
+    // have their own gizmo and are skipped — there's no solid silhouette to ring).
+    const SceneDrawable* sel = nullptr;
+    for (const auto& d : m_sceneDrawables)
+    {
+        if (d.objectIndex == static_cast<std::size_t>(m_selectedObject) && d.mesh &&
+            d.mesh->hasMesh() && !d.isLight)
+        {
+            sel = &d;
+            break;
+        }
+    }
+    if (!sel) return;
+
+    const glm::vec3 outlineColor(1.0f, 0.6f, 0.1f);  // warm selection orange
+
+    // --- Pass 1: render the selected object's silhouette as white into the mask
+    // target. Depth test off so the full union silhouette is captured (we only
+    // want the shape, not internal occlusion ordering). ---
+    glBindFramebuffer(GL_FRAMEBUFFER, m_outlineMaskFbo);
+    glViewport(0, 0, m_fboWidth, m_fboHeight);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glUseProgram(m_outlineProgram);
+    glUniformMatrix4fv(glGetUniformLocation(m_outlineProgram, "uView"), 1, GL_FALSE,
+                       glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(m_outlineProgram, "uProjection"), 1, GL_FALSE,
+                       glm::value_ptr(proj));
+    glUniformMatrix4fv(glGetUniformLocation(m_outlineProgram, "uModel"), 1, GL_FALSE,
+                       glm::value_ptr(sel->model));
+    glUniform3f(glGetUniformLocation(m_outlineProgram, "uOutlineColor"), 1.0f, 1.0f, 1.0f);
+    sel->mesh->draw();
+
+    // --- Pass 2: back to the viewport FBO; a fullscreen edge pass reads the mask
+    // and paints the outline ring (fragments just OUTSIDE the silhouette). ---
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glViewport(0, 0, m_fboWidth, m_fboHeight);
+    glUseProgram(m_outlineEdgeProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_outlineMaskTex);
+    glUniform1i(glGetUniformLocation(m_outlineEdgeProgram, "uMask"), 0);
+    glUniform2f(glGetUniformLocation(m_outlineEdgeProgram, "uTexel"),
+                1.0f / static_cast<float>(m_fboWidth),
+                1.0f / static_cast<float>(m_fboHeight));
+    glUniform1f(glGetUniformLocation(m_outlineEdgeProgram, "uThickness"), 3.0f);
+    glUniform3fv(glGetUniformLocation(m_outlineEdgeProgram, "uOutlineColor"), 1,
+                 glm::value_ptr(outlineColor));
+    glBindVertexArray(m_overlayVao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Restore GL state for subsequent draws (gizmo, overlay, etc.).
+    glEnable(GL_DEPTH_TEST);
+    glUseProgram(0);
 }
 
 // ============================================================================
@@ -1860,6 +1940,31 @@ void EditorApp::resizeFbo(int width, int height)
         std::fprintf(stderr, "Viewport FBO incomplete\n");
     }
 
+    // Selection-outline mask target: a single-channel color texture (no depth)
+    // the same size as the viewport FBO. The selected object's silhouette is
+    // rendered here, then the edge pass reads it.
+    if (m_outlineMaskFbo)
+    {
+        glDeleteFramebuffers(1, &m_outlineMaskFbo);
+        glDeleteTextures(1, &m_outlineMaskTex);
+        m_outlineMaskFbo = m_outlineMaskTex = 0;
+    }
+    glGenFramebuffers(1, &m_outlineMaskFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_outlineMaskFbo);
+    glGenTextures(1, &m_outlineMaskTex);
+    glBindTexture(GL_TEXTURE_2D, m_outlineMaskTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           m_outlineMaskTex, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        std::fprintf(stderr, "Outline mask FBO incomplete\n");
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -1902,6 +2007,10 @@ void EditorApp::renderViewport()
 
     // Draw the in-memory scene's objects (meshes, sphere proxies, light gizmos).
     drawSceneObjects(viewMat, projMat);
+
+    // Outline the selected object (its selection indicator — a silhouette ring,
+    // not a color tint). Drawn after the objects so it rings the final shaded mesh.
+    drawSelectionOutline(viewMat, projMat);
 
     // Draw the transform gizmo for the selected object (Move/Rotate/Scale tools).
     drawGizmo(viewMat, projMat);
@@ -4434,6 +4543,10 @@ void EditorApp::shutdown()
         if (m_overlayVbo) glDeleteBuffers(1, &m_overlayVbo);
         if (m_overlayVao) glDeleteVertexArrays(1, &m_overlayVao);
         if (m_overlayProgram) glDeleteProgram(m_overlayProgram);
+        if (m_outlineProgram) glDeleteProgram(m_outlineProgram);
+        if (m_outlineEdgeProgram) glDeleteProgram(m_outlineEdgeProgram);
+        if (m_outlineMaskFbo) glDeleteFramebuffers(1, &m_outlineMaskFbo);
+        if (m_outlineMaskTex) glDeleteTextures(1, &m_outlineMaskTex);
         if (m_shaderProgram) glDeleteProgram(m_shaderProgram);
         if (m_lineProgram) glDeleteProgram(m_lineProgram);
 

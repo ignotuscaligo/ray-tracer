@@ -166,6 +166,14 @@ private:
     // into the bound viewport FBO using the given view/projection.
     void drawSceneObjects(const glm::mat4& view, const glm::mat4& proj);
 
+    // Draw a silhouette OUTLINE around the selected object (its selection
+    // indicator), using a two-pass stencil technique into the bound viewport
+    // FBO: pass 1 marks the object's pixels in the stencil buffer; pass 2 redraws
+    // the object enlarged (scaled about its center) in a flat outline color, only
+    // where the stencil is unmarked, leaving a clean edge ring. No-op when nothing
+    // is selected. Reads clearly on both meshes and sphere proxies.
+    void drawSelectionOutline(const glm::mat4& view, const glm::mat4& proj);
+
     // ===== Viewport ray-picking + transform gizmos ========================
     // Build a world-space ray from a click at (winX, winY) in window pixels,
     // using the orbit camera and the current viewport FBO rect. Fills `origin`
@@ -485,6 +493,18 @@ private:
     ViewportGrid m_grid;             // XZ ground grid + origin gnomon
     unsigned int m_shaderProgram = 0;  // mesh shader
     unsigned int m_lineProgram = 0;    // flat line shader (grid/gnomon)
+    unsigned int m_outlineProgram = 0; // flat-color shader (selection mask pass)
+    unsigned int m_outlineEdgeProgram = 0;  // screen-space outline edge pass
+
+    // ----- selection-outline mask FBO -------------------------------------
+    // The selected object is rendered as a white silhouette into this single-
+    // channel (R8) offscreen target, then a fullscreen edge pass reads it to
+    // paint a uniform-width outline ring into the viewport FBO. Sized to match
+    // the viewport FBO (rebuilt in resizeFbo). This screen-space approach gives a
+    // crisp, constant-thickness outline on any shape — including thin meshes
+    // (e.g. the knot) where a scaled-geometry silhouette would over-fill.
+    unsigned int m_outlineMaskFbo = 0;
+    unsigned int m_outlineMaskTex = 0;
     unsigned int m_fbo = 0;
     unsigned int m_fboColorTex = 0;
     unsigned int m_fboDepthRbo = 0;
