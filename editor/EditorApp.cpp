@@ -80,6 +80,7 @@ GLuint linkProgram(const char* vsSource, const char* fsSource)
     glBindAttribLocation(program, 0, "aPosition");
     glBindAttribLocation(program, 1, "aNormal");
     glBindAttribLocation(program, 1, "aColor");
+    glBindAttribLocation(program, 1, "aTexCoord");
     glLinkProgram(program);
 
     glDeleteShader(vs);
@@ -292,6 +293,14 @@ bool EditorApp::initialize()
         std::fprintf(stderr, "Failed to build line shader\n");
         return false;
     }
+    // Fullscreen-quad shader for the render-as-viewport overlay.
+    m_overlayProgram = linkProgram(kOverlayVertexShader, kOverlayFragmentShader);
+    if (!m_overlayProgram)
+    {
+        std::fprintf(stderr, "Failed to build overlay shader\n");
+        return false;
+    }
+    buildOverlayQuad();
 
     glEnable(GL_DEPTH_TEST);
 
@@ -1779,6 +1788,12 @@ void EditorApp::renderViewport()
         glUseProgram(0);
     }
 
+    // Render-as-viewport overlay: if a render result (or progressive snapshot) is
+    // active, draw it over the live scene INTO this FBO so both the on-screen
+    // viewport and screenshot(target=viewport) show the path-traced image. It is
+    // dismissed (m_overlayShown=false) the instant the user touches the view.
+    drawOverlay();
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -2027,6 +2042,8 @@ void EditorApp::drawSceneExplorer()
             m_selectedObject = static_cast<int>(i);
             // Selecting an object switches the Properties panel to object mode.
             m_propertiesMode = PropertiesMode::Object;
+            // Selection is an interaction: drop the render overlay.
+            dismissRenderOverlay();
         }
         // Register each row's pixel rect by name so the puppet port can click it.
         const ImVec2 mn = ImGui::GetItemRectMin();
@@ -2717,6 +2734,14 @@ void EditorApp::startRender()
     m_renderStatus = "Rendering scene (this can take a while)...";
     m_renderError.clear();
 
+    // Phase 4: show the overlay for the duration of this render so the live
+    // progressive snapshots appear in the viewport as they accumulate. Reset the
+    // cancel flag and bump the generation so a superseded thread's late snapshot
+    // is ignored.
+    m_overlayShown = true;
+    m_renderCancel.store(false);
+    const uint64_t generation = m_renderGeneration.fetch_add(1) + 1;
+
     const int resolution = m_renderResolution;
     const size_t photons = static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
 
@@ -2769,13 +2794,17 @@ void EditorApp::startRender()
         m_lastRenderScenePath = renderScenePath;
     }
 
-    // TODO (Phase 4 — progressive preview, not yet wired): renderFrame already
-    // accepts a Renderer::ProgressCallback and the Buffer is pollable mid-render.
-    // To show accumulation, capture result.buffer here, and on a UI timer call
-    // Renderer::tonemapBufferToImage on a snapshot + re-upload m_renderTex while
-    // RenderState::Running. Camera moves would reset/restart the render. Left as
-    // a clean follow-up rather than half-wired.
-    m_renderThread = std::thread([this, renderScenePath, resolution, photons]() {
+    // Phase 4: PROGRESSIVE PREVIEW + CANCELLATION.
+    //   - The progress callback observes m_renderCancel (set by dismissRenderOverlay
+    //     when the user interacts) and returns false to abort the render early —
+    //     renderFrame still tonemaps the partial result, but we discard it because
+    //     the generation will have advanced / the overlay is dismissed.
+    //   - The preview callback snapshots the live splat buffer a few times/sec,
+    //     tonemaps it with PROGRESSIVE EXPOSURE (scaling L_max by the emitted
+    //     fraction so brightness is stable as photons accumulate, not dark-then-
+    //     bright), converts to RGBA, and stages it for the main thread to upload.
+    //     Throttled to ~6 Hz so the snapshot cost doesn't steal worker time.
+    m_renderThread = std::thread([this, renderScenePath, resolution, photons, generation]() {
         try
         {
             LoadedScene scene = SceneLoader::loadFromFile(renderScenePath, /*logToStdout=*/false);
@@ -2788,7 +2817,83 @@ void EditorApp::startRender()
                 scene.camera->setFromRenderConfiguration(scene.settings.imageWidth, scene.settings.imageHeight);
             }
 
-            RenderResult result = Renderer::renderFrame(scene);
+            // Abort the render early when the user interacts (camera/selection).
+            auto progress = [this](size_t) -> bool {
+                return !m_renderCancel.load();
+            };
+
+            // Snapshot the in-progress splat buffer into a staged RGBA preview.
+            auto lastPreview = std::chrono::steady_clock::now();
+            bool firstPreview = true;
+            auto preview = [&](const Buffer& buffer, double emittedFraction,
+                               double saturationLuminance) {
+                // Throttle to ~6 Hz (always emit the very first snapshot so the
+                // image appears promptly).
+                const auto now = std::chrono::steady_clock::now();
+                if (!firstPreview &&
+                    std::chrono::duration<double>(now - lastPreview).count() < 0.16)
+                {
+                    return;
+                }
+                firstPreview = false;
+                lastPreview = now;
+                if (m_renderGeneration.load() != generation)
+                {
+                    return;  // superseded — don't stage a stale snapshot
+                }
+
+                const int w = static_cast<int>(scene.settings.imageWidth);
+                const int h = static_cast<int>(scene.settings.imageHeight);
+                if (w <= 0 || h <= 0)
+                {
+                    return;
+                }
+
+                // Tonemap the live snapshot. PROGRESSIVE EXPOSURE: the single-
+                // photon buffer is normalized by the TOTAL photon count, so it is
+                // dark until all photons land. Scaling brightness up by
+                // 1/emittedFraction == passing a SMALLER L_max (L_max * fraction)
+                // to the tonemapper, which keeps preview brightness stable as it
+                // converges. fetchColor does atomic loads (no UB on the live read).
+                Image snap(static_cast<size_t>(w), static_cast<size_t>(h));
+                snap.clear();
+                const double previewLmax =
+                    (emittedFraction > 0.0) ? saturationLuminance * emittedFraction
+                                            : saturationLuminance;
+                Renderer::tonemapBufferToImage(buffer, snap, 0.0, previewLmax);
+
+                std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4);
+                for (int y = 0; y < h; ++y)
+                {
+                    for (int x = 0; x < w; ++x)
+                    {
+                        const Pixel& p = snap.getPixel(x, y);
+                        const size_t i = (static_cast<size_t>(y) * w + x) * 4;
+                        rgba[i + 0] = static_cast<uint8_t>(p.red >> 8);
+                        rgba[i + 1] = static_cast<uint8_t>(p.green >> 8);
+                        rgba[i + 2] = static_cast<uint8_t>(p.blue >> 8);
+                        rgba[i + 3] = 255;
+                    }
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(m_previewMutex);
+                    m_previewRgba = std::move(rgba);
+                    m_previewWidth = w;
+                    m_previewHeight = h;
+                }
+                m_previewDirty.store(true);
+            };
+
+            RenderResult result = Renderer::renderFrame(scene, progress, preview);
+
+            // If superseded while running, discard this result (the next render —
+            // or the dismissed live viewport — owns the screen now).
+            if (m_renderGeneration.load() != generation)
+            {
+                m_renderState.store(RenderState::Idle);
+                return;
+            }
 
             // Convert the 16-bit Image to 8-bit RGBA for GL upload. The Image is
             // already tonemapped + flipped to display orientation.
@@ -2827,6 +2932,19 @@ void EditorApp::startRender()
 void EditorApp::pollRender()
 {
     const RenderState state = m_renderState.load();
+
+    // Phase 4: while a render runs, upload the latest staged progressive snapshot
+    // so the overlay sharpens in place. Only when the overlay is still shown (a
+    // user interaction dismisses it and cancels the render).
+    if (state == RenderState::Running && m_overlayShown)
+    {
+        if (m_previewDirty.exchange(false))
+        {
+            uploadPreviewTexture();
+            m_renderStatus = "Rendering... (progressive preview)";
+        }
+    }
+
     if (state == RenderState::Done)
     {
         if (m_renderTextureDirty.exchange(false))
@@ -2860,6 +2978,105 @@ void EditorApp::uploadRenderTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void EditorApp::buildOverlayQuad()
+{
+    if (m_overlayVao != 0)
+    {
+        return;
+    }
+    // A unit quad covering clip space, two triangles. Interleaved: clip-space
+    // position (x,y) then texcoord (u,v). The texcoord V is flipped (top row maps
+    // to v=0) so the render texture — which uploadRenderTexture writes in image
+    // (top-left) orientation — appears upright when drawn into the bottom-left-
+    // origin FBO.
+    const float verts[] = {
+        // pos        // uv
+        -1.0f, -1.0f, 0.0f, 1.0f,
+         1.0f, -1.0f, 1.0f, 1.0f,
+         1.0f,  1.0f, 1.0f, 0.0f,
+        -1.0f, -1.0f, 0.0f, 1.0f,
+         1.0f,  1.0f, 1.0f, 0.0f,
+        -1.0f,  1.0f, 0.0f, 0.0f,
+    };
+    glGenVertexArrays(1, &m_overlayVao);
+    glGenBuffers(1, &m_overlayVbo);
+    glBindVertexArray(m_overlayVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_overlayVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    // aPosition -> location 0 (vec2), aTexCoord -> location 1 (vec2).
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          reinterpret_cast<void*>(2 * sizeof(float)));
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void EditorApp::drawOverlay()
+{
+    // Draw the render texture as a screen-filling quad over the live GL scene,
+    // INTO the currently-bound FBO. Called at the end of renderViewport() (the FBO
+    // is bound there). Depth test off so it always covers; no blending (opaque).
+    if (!m_overlayShown || m_renderTex == 0 || m_overlayProgram == 0 || m_overlayVao == 0)
+    {
+        return;
+    }
+    glDisable(GL_DEPTH_TEST);
+    glUseProgram(m_overlayProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_renderTex);
+    glUniform1i(glGetUniformLocation(m_overlayProgram, "uTexture"), 0);
+    glBindVertexArray(m_overlayVao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    glEnable(GL_DEPTH_TEST);
+}
+
+void EditorApp::dismissRenderOverlay()
+{
+    // Hide the overlay so the live editable viewport shows again, and supersede
+    // any in-progress render (the worker's preview callback observes m_renderCancel
+    // and returns false to abort early — the partial result is discarded, not
+    // shown). Idempotent: safe to call from every interaction handler.
+    if (m_overlayShown)
+    {
+        m_overlayShown = false;
+    }
+    if (m_renderState.load() == RenderState::Running)
+    {
+        m_renderCancel.store(true);
+    }
+}
+
+void EditorApp::uploadPreviewTexture()
+{
+    // Upload a staged progressive snapshot (produced off-thread) into m_renderTex
+    // on the main/GL thread. Guarded by m_previewMutex because m_previewRgba is a
+    // plain vector shared across threads.
+    std::lock_guard<std::mutex> lock(m_previewMutex);
+    if (m_previewRgba.empty() || m_previewWidth <= 0 || m_previewHeight <= 0)
+    {
+        return;
+    }
+    if (m_renderTex == 0)
+    {
+        glGenTextures(1, &m_renderTex);
+    }
+    glBindTexture(GL_TEXTURE_2D, m_renderTex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_previewWidth, m_previewHeight, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, m_previewRgba.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_renderWidth = m_previewWidth;
+    m_renderHeight = m_previewHeight;
 }
 
 // ===== Automation command handlers (main/GL thread) =======================
@@ -2941,6 +3158,9 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
     j["render_message"] = m_renderStatus;
     j["render_width"] = m_renderWidth;
     j["render_height"] = m_renderHeight;
+    // Phase 4: whether the render result/preview is currently drawn over the
+    // viewport (true between Render and the next view/selection interaction).
+    j["render_overlay_shown"] = m_overlayShown;
     j["viewport"] = {{"width", m_fboWidth}, {"height", m_fboHeight}};
     j["window"] = {{"width", m_lastWindowWidth}, {"height", m_lastWindowHeight}};
 
@@ -3094,6 +3314,10 @@ nlohmann::json EditorApp::cmdSaveScene(const nlohmann::json& req)
 
 nlohmann::json EditorApp::cmdSetCamera(const nlohmann::json& req)
 {
+    // A camera change (orbit/dolly/explicit pose) is a view interaction: dismiss
+    // the render overlay so the live viewport shows again.
+    dismissRenderOverlay();
+
     auto readVec3 = [](const json& arr, glm::vec3& out) -> bool {
         if (!arr.is_array() || arr.size() != 3) return false;
         out = glm::vec3(arr[0].get<float>(), arr[1].get<float>(), arr[2].get<float>());
@@ -4016,6 +4240,8 @@ void EditorApp::shutdown()
         m_automation.reset();
     }
 
+    // Cancel any in-progress render so shutdown doesn't block on a long trace.
+    m_renderCancel.store(true);
     if (m_renderThread.joinable())
     {
         m_renderThread.join();
@@ -4039,6 +4265,9 @@ void EditorApp::shutdown()
         if (m_fboColorTex) glDeleteTextures(1, &m_fboColorTex);
         if (m_fboDepthRbo) glDeleteRenderbuffers(1, &m_fboDepthRbo);
         if (m_renderTex) glDeleteTextures(1, &m_renderTex);
+        if (m_overlayVbo) glDeleteBuffers(1, &m_overlayVbo);
+        if (m_overlayVao) glDeleteVertexArrays(1, &m_overlayVao);
+        if (m_overlayProgram) glDeleteProgram(m_overlayProgram);
         if (m_shaderProgram) glDeleteProgram(m_shaderProgram);
         if (m_lineProgram) glDeleteProgram(m_lineProgram);
 
@@ -4141,6 +4370,11 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
 
     if (down && overViewport)
     {
+        // Any viewport press that starts a gesture (pan/orbit/gizmo/select)
+        // dismisses the render overlay and supersedes an in-progress render so the
+        // live editable viewport shows again.
+        dismissRenderOverlay();
+
         if (button == GLFW_MOUSE_BUTTON_MIDDLE ||
             (button == GLFW_MOUSE_BUTTON_LEFT && shift))
         {
@@ -4282,6 +4516,8 @@ void EditorApp::onScroll(double /*xoffset*/, double yoffset)
     {
         return;
     }
+    // Zooming the view dismisses the render overlay (back to the live viewport).
+    dismissRenderOverlay();
     // Scroll up -> zoom in (smaller distance).
     const float factor = (yoffset > 0) ? 0.9f : 1.0f / 0.9f;
     m_camera.dolly(factor);

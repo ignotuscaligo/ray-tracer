@@ -69,7 +69,8 @@ void tonemapBufferToImage(const Buffer& buffer, Image& image, double photonsEmit
     }
 }
 
-RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
+RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
+                         PreviewCallback preview)
 {
     const RenderSettings& settings = scene.settings;
 
@@ -246,6 +247,15 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
     size_t photonsToEmit = lightQueue->remainingPhotons();
     size_t photonsAllocated = photonQueue->allocated();
 
+    // Progressive preview wiring: the PRIMARY camera's splat buffer (the live
+    // direct-lighting accumulator) and its exposure, plus the total photon budget
+    // so the preview callback can report the emitted fraction for stable-brightness
+    // tonemapping. Captured once; the loop below taps them while photons land.
+    const size_t totalPhotonsToEmit = photonsToEmit;
+    std::shared_ptr<Buffer> previewBuffer = splatBuffers.empty() ? nullptr : splatBuffers.front();
+    std::shared_ptr<Camera> previewCamera =
+        cameras.empty() ? scene.camera : cameras.front();
+
     std::exception_ptr workerException;
     bool aborted = false;
     bool drainStalled = false;
@@ -311,6 +321,23 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress)
                 aborted = true;
                 break;
             }
+        }
+
+        // Progressive preview tap: hand the live splat buffer + emitted fraction to
+        // the UI so it can snapshot the converging image. emittedFraction is the
+        // share of the photon budget that has been emitted so far (in (0,1]); the
+        // single-photon buffer is normalized by the TOTAL count, so the consumer
+        // scales by 1/emittedFraction for stable brightness. Reads of the buffer
+        // are atomic per pixel (see PreviewCallback contract).
+        if (preview && previewBuffer && previewCamera)
+        {
+            const size_t emitted =
+                (totalPhotonsToEmit > photonsToEmit) ? (totalPhotonsToEmit - photonsToEmit) : 0;
+            const double emittedFraction =
+                (totalPhotonsToEmit > 0)
+                    ? std::max(1e-6, static_cast<double>(emitted) / static_cast<double>(totalPhotonsToEmit))
+                    : 1.0;
+            preview(*previewBuffer, emittedFraction, previewCamera->saturationLuminance());
         }
     }
 

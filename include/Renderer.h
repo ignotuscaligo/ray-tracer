@@ -85,6 +85,27 @@ namespace Renderer
 // final hits). Return false to request an early abort. May be null.
 using ProgressCallback = std::function<bool(size_t remainingWork)>;
 
+// Optional PROGRESSIVE PREVIEW callback. Invoked periodically from the same
+// orchestration loop (a few times/sec) with the PRIMARY camera's in-progress
+// splat buffer — the direct-lighting accumulator the workers are filling right
+// now. This lets a UI snapshot the image AS IT CONVERGES (the editor's live
+// viewport overlay). Contract:
+//   - `buffer` is the live splat buffer; read it with Buffer::fetchColor, which
+//     does atomic loads. Reads race with concurrent worker fetch_adds; per-pixel
+//     loads are atomic (no UB), and a snapshot tolerating minor cross-pixel
+//     tearing is acceptable for a preview.
+//   - `emittedFraction` is photonsEmittedSoFar / photonsTotal in (0,1]. The
+//     single-photon buffer holds energy scaled by 1/N_total, so it is DARK early
+//     and reaches full brightness only when all photons have landed. Divide the
+//     tonemap input by `emittedFraction` (i.e. scale up by N_total/N_emitted) for
+//     STABLE brightness as it converges, instead of dark-then-bright flicker.
+//   - `saturationLuminance` is the primary camera's L_max for tonemapBufferToImage.
+// The preview shows DIRECT lighting only — mirror/emissive gather run after the
+// photon pass, so reflections appear in the final frame, not the live preview.
+// May be null.
+using PreviewCallback =
+    std::function<void(const Buffer& buffer, double emittedFraction, double saturationLuminance)>;
+
 // Run the photon path tracer to completion for the scene's start frame and
 // return the populated buffer + tonemapped image. This is the orchestration
 // that previously lived inline in src/main.cpp: spin up Workers, seed the light
@@ -94,7 +115,8 @@ using ProgressCallback = std::function<bool(size_t remainingWork)>;
 // remains the executable's responsibility (it loops and calls per frame).
 //
 // Throws if a worker raises an exception.
-RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress = nullptr);
+RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress = nullptr,
+                         PreviewCallback preview = nullptr);
 
 // Tonemap a raw energy Buffer into a 16-bit Image. Wave 2: applies the two-step
 // physical conversion — (a) raw accumulated photon energy -> physical luminance

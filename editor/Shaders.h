@@ -83,3 +83,39 @@ void main()
     fragColor = vec4(vColor, 1.0);
 }
 )GLSL";
+
+// Fullscreen textured-quad shader for the RENDER OVERLAY. When a path-traced
+// render (or in-progress progressive snapshot) is shown, the editor draws the
+// render texture as a screen-filling quad INTO the viewport FBO, on top of the
+// live GL scene. Drawing into the FBO (rather than as an ImGui image over it)
+// means screenshot(target=viewport), which reads the FBO, captures the overlay
+// too. The vertex shader emits clip-space coordinates directly from a unit quad
+// (no view/projection), and passes UVs; the render texture is sampled flipped to
+// match the renderer's image orientation.
+inline const char* kOverlayVertexShader = R"GLSL(
+#version 150 core
+
+in vec2 aPosition;   // clip-space [-1,1]
+in vec2 aTexCoord;   // [0,1]
+
+out vec2 vTexCoord;
+
+void main()
+{
+    vTexCoord = aTexCoord;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+)GLSL";
+
+inline const char* kOverlayFragmentShader = R"GLSL(
+#version 150 core
+
+in vec2 vTexCoord;
+uniform sampler2D uTexture;
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = vec4(texture(uTexture, vTexCoord).rgb, 1.0);
+}
+)GLSL";

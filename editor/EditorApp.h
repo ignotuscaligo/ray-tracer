@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -312,6 +313,29 @@ private:
     void pollRender();
     void uploadRenderTexture();
 
+    // Phase 4: render-as-viewport-overlay + live progressive preview.
+    //
+    // Overlay: when a render completes (or a progressive snapshot lands), the
+    // result is drawn as a screen-filling textured quad INTO the viewport FBO,
+    // on top of the live GL scene (drawOverlay below, called at the end of
+    // renderViewport). The overlay is DISMISSED the moment the user touches the
+    // view or selection (orbit/pan/zoom/gizmo/select) — see dismissRenderOverlay,
+    // called from the input handlers and the set_camera automation command — at
+    // which point the live grid/gnomon/objects/gizmos show again. m_overlayShown
+    // gates both the FBO draw and the get_state "render_overlay_shown" flag.
+    //
+    // Live progressive tap: while the render thread runs, a preview callback
+    // (passed to Renderer::renderFrame) snapshots the in-progress splat buffer a
+    // few times/sec, tonemaps it with PROGRESSIVE EXPOSURE (scaling by
+    // total/emitted-so-far so brightness is stable as photons accumulate, not
+    // dark-then-bright), and stages the RGBA for the main thread to upload. The
+    // snapshot reads the buffer's atomics atomically (no UB; minor torn reads
+    // across pixels are visually acceptable for a preview).
+    void drawOverlay();              // draw m_renderTex over the FBO (if shown)
+    void dismissRenderOverlay();     // hide the overlay; also supersede a live render
+    void uploadPreviewTexture();     // upload a staged progressive snapshot (main thread)
+    void buildOverlayQuad();         // lazily create the fullscreen-quad VAO/VBO
+
     // ===== The single input path ==========================================
     // Both the OS layer (GLFW callbacks) and the automation port feed events
     // here. This is the ONLY place input enters the app. dispatchInputEvent()
@@ -479,6 +503,33 @@ private:
     std::string m_lastRenderScenePath;  // temp scene file emitted by the last render
     int m_renderResolution = 256;
     int m_renderPhotonsMillions = 4;
+
+    // Phase 4: render-as-viewport-overlay state.
+    // True while the render texture should be drawn over the viewport FBO.
+    // Set when a render starts/completes; cleared by dismissRenderOverlay() on
+    // any view/selection interaction.
+    bool m_overlayShown = false;
+    // Fullscreen-quad geometry for drawing the render texture into the FBO.
+    unsigned int m_overlayProgram = 0;
+    unsigned int m_overlayVao = 0;
+    unsigned int m_overlayVbo = 0;
+
+    // Phase 4: live progressive preview state.
+    // m_renderCancel is observed by the render thread's preview callback (via the
+    // ProgressCallback return) to supersede an in-progress render when the user
+    // interacts. m_renderGeneration bumps on every startRender so a stale thread's
+    // late snapshot can be ignored.
+    std::atomic<bool> m_renderCancel{false};
+    std::atomic<uint64_t> m_renderGeneration{0};
+    // Staged progressive snapshot: the render thread fills m_previewRgba (+ dims)
+    // and sets m_previewDirty; the main thread uploads it to m_renderTex. Guarded
+    // by m_previewMutex because the RGBA vector is not atomic (it is produced off
+    // the main thread and consumed on it).
+    std::mutex m_previewMutex;
+    std::vector<uint8_t> m_previewRgba;
+    int m_previewWidth = 0;
+    int m_previewHeight = 0;
+    std::atomic<bool> m_previewDirty{false};
 
     // Automation command port (127.0.0.1 only). Null/0 when disabled.
     std::unique_ptr<AutomationServer> m_automation;
