@@ -546,6 +546,72 @@ bool EditorApp::setObjectMaterialName(int index, const std::string& materialName
     return true;
 }
 
+bool EditorApp::setObjectMeshFile(int index, const std::string& meshFile)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    if (m_scene.objects[static_cast<std::size_t>(index)].kind != SceneModel::Kind::MeshVolume)
+    {
+        return false;  // mesh binding only applies to MeshVolume objects
+    }
+    if (meshFile.empty())
+    {
+        return false;
+    }
+
+    // Resolve relative paths upwards from the working dir (matching how a
+    // bundled "meshes/CornellBox.obj" is found), then store absolute so both the
+    // viewport's loadObjShapeData and the serialized $meshes entry resolve.
+    std::filesystem::path resolved(meshFile);
+    if (!resolved.is_absolute())
+    {
+        std::filesystem::path found = findUpwards(meshFile);
+        if (!found.empty())
+        {
+            resolved = found;
+        }
+    }
+    if (!std::filesystem::exists(resolved))
+    {
+        return false;
+    }
+    const std::string abs = std::filesystem::absolute(resolved).string();
+
+    bool have = false;
+    for (const auto& f : m_scene.meshFiles)
+    {
+        if (f == abs) { have = true; break; }
+    }
+    if (!have) m_scene.meshFiles.push_back(abs);
+
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::setObjectMeshShape(int index, const std::string& shapeName)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    SceneModel::ObjectNode& o = m_scene.objects[static_cast<std::size_t>(index)];
+    if (o.kind != SceneModel::Kind::MeshVolume)
+    {
+        return false;  // sub-shape selection only applies to MeshVolume objects
+    }
+    if (shapeName.empty())
+    {
+        return false;
+    }
+    o.meshName = shapeName;
+    m_scene.dirty = true;
+    buildSceneGl();  // re-tessellate from the newly-selected sub-shape
+    return true;
+}
+
 std::string EditorApp::loadSceneFromPath(const std::string& path)
 {
     if (!std::filesystem::exists(path))
@@ -601,6 +667,87 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
         m_camera.frameOrigin();
     }
 
+    return {};
+}
+
+nlohmann::json EditorApp::serializeWithLiveCamera()
+{
+    // Convention mapping (derived from src/Quaternion.cpp::fromPitchYawRoll and
+    // the orbit eye() parameterization) — see startRender for the full rationale:
+    //   render $position  = orbit eye()
+    //   render yaw(deg)   = orbit yaw(deg) + 180
+    //   render roll       = 0
+    const glm::vec3 eye = m_camera.eye();
+    const double renderPitchDeg = glm::degrees(m_camera.pitch);
+    const double renderYawDeg = glm::degrees(m_camera.yaw) + 180.0;
+    const double renderFovDeg = glm::degrees(m_camera.fovYRadians);
+
+    json sceneJson = SceneModelSerializer::toJson(m_scene);
+    json& sceneBlock = sceneJson["$scene"];
+
+    // The serializer emits the model's camera (if any); from a File>New scene
+    // there is none, so synthesize one. Either way the live orbit camera wins.
+    bool wroteCamera = false;
+    for (auto& [name, node] : sceneBlock.items())
+    {
+        if (node.is_object() && node.value("$type", std::string{}) == "Camera")
+        {
+            node["$position"] = {eye.x, eye.y, eye.z};
+            node["$rotation"] = {{"$type", "PitchYawRollDegrees"},
+                                 {"$value", {renderPitchDeg, renderYawDeg, 0.0}}};
+            node["$verticalFieldOfView"] = renderFovDeg;
+            wroteCamera = true;
+            break;
+        }
+    }
+    if (!wroteCamera)
+    {
+        sceneBlock["Camera"] = {
+            {"$type", "Camera"},
+            {"$verticalFieldOfView", renderFovDeg},
+            {"$position", {eye.x, eye.y, eye.z}},
+            {"$rotation",
+             {{"$type", "PitchYawRollDegrees"},
+              {"$value", {renderPitchDeg, renderYawDeg, 0.0}}}}};
+    }
+    return sceneJson;
+}
+
+std::string EditorApp::saveScene(const std::string& path)
+{
+    if (path.empty())
+    {
+        return "save path is empty";
+    }
+    if (!m_scene.isInitialized() || m_scene.isEmpty())
+    {
+        return "scene is empty — nothing to save";
+    }
+
+    json sceneJson = serializeWithLiveCamera();
+
+    std::filesystem::path out(path);
+    if (out.has_parent_path())
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(out.parent_path(), ec);
+        // ec ignored: the ofstream open below reports the real failure.
+    }
+    std::ofstream f(out);
+    if (!f)
+    {
+        return "could not open file for writing: " + path;
+    }
+    f << sceneJson.dump(2) << "\n";
+    f.close();
+    if (!f)
+    {
+        return "write failed: " + path;
+    }
+
+    m_scenePath = path;          // future render-from-view re-serializes here
+    m_scene.path = path;
+    m_scene.dirty = false;
     return {};
 }
 
@@ -955,11 +1102,28 @@ void EditorApp::drawMenuBar()
                 }
             }
             ImGui::Separator();
-            // Save stubs for later waves — visible so the shape is clear, disabled
-            // so they can't be triggered before they're implemented.
-            ImGui::BeginDisabled();
-            ImGui::MenuItem("Save", "Cmd+S");
-            ImGui::MenuItem("Save As...", "Shift+Cmd+S");
+            // Save serializes the in-memory model to renderer scene JSON via the
+            // same saveScene() path the save_scene automation command uses. With
+            // no native file picker in this environment, Save writes to the
+            // scene's existing path (Open/load_scene), or to "untitled_scene.json"
+            // in the working dir for a from-scratch (File > New) scene. Disabled
+            // only when the scene is empty (nothing to serialize).
+            const bool canSave = m_scene.isInitialized() && !m_scene.isEmpty();
+            ImGui::BeginDisabled(!canSave);
+            if (ImGui::MenuItem("Save", "Cmd+S"))
+            {
+                const std::string target =
+                    !m_scenePath.empty() ? m_scenePath : std::string("untitled_scene.json");
+                std::string err = saveScene(target);
+                if (!err.empty())
+                {
+                    std::fprintf(stderr, "Save failed: %s\n", err.c_str());
+                }
+                else
+                {
+                    std::fprintf(stderr, "Saved scene to %s\n", target.c_str());
+                }
+            }
             ImGui::EndDisabled();
             ImGui::Separator();
             if (ImGui::MenuItem("Quit"))
@@ -1466,40 +1630,7 @@ void EditorApp::startRender()
     //   render $verticalFieldOfView = orbit fovY(deg)
     // These are read on the main thread (camera state) and baked into the temp
     // scene file the worker thread renders.
-    const glm::vec3 eye = m_camera.eye();
-    const double renderPitchDeg = glm::degrees(m_camera.pitch);
-    const double renderYawDeg = glm::degrees(m_camera.yaw) + 180.0;
-    const double renderFovDeg = glm::degrees(m_camera.fovYRadians);
-
-    json sceneJson = SceneModelSerializer::toJson(m_scene);
-    json& sceneBlock = sceneJson["$scene"];
-
-    // Inject / overwrite the camera with the live orbit view. The serializer
-    // emits the model's camera (if any); from a File>New scene there is none, so
-    // synthesize one here. Either way the live orbit camera wins.
-    bool wroteCamera = false;
-    for (auto& [name, node] : sceneBlock.items())
-    {
-        if (node.is_object() && node.value("$type", std::string{}) == "Camera")
-        {
-            node["$position"] = {eye.x, eye.y, eye.z};
-            node["$rotation"] = {{"$type", "PitchYawRollDegrees"},
-                                 {"$value", {renderPitchDeg, renderYawDeg, 0.0}}};
-            node["$verticalFieldOfView"] = renderFovDeg;
-            wroteCamera = true;
-            break;
-        }
-    }
-    if (!wroteCamera)
-    {
-        sceneBlock["Camera"] = {
-            {"$type", "Camera"},
-            {"$verticalFieldOfView", renderFovDeg},
-            {"$position", {eye.x, eye.y, eye.z}},
-            {"$rotation",
-             {{"$type", "PitchYawRollDegrees"},
-              {"$value", {renderPitchDeg, renderYawDeg, 0.0}}}}};
-    }
+    json sceneJson = serializeWithLiveCamera();
 
     // Write the rewritten scene to a temp file. $meshes are absolute paths (the
     // model resolves them at load/insert time), so the temp file's directory does
@@ -1648,6 +1779,7 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "get_state") return cmdGetState(request);
     if (cmd == "load_mesh") return cmdLoadMesh(request);
     if (cmd == "load_scene") return cmdLoadScene(request);
+    if (cmd == "save_scene") return cmdSaveScene(request);
     if (cmd == "set_camera") return cmdSetCamera(request);
     if (cmd == "set_render_settings") return cmdSetRenderSettings(request);
     if (cmd == "render") return cmdRender(request);
@@ -1800,6 +1932,24 @@ nlohmann::json EditorApp::cmdLoadScene(const nlohmann::json& req)
                 {"material_count", m_scene.materials.size()},
                 {"camera_present", m_scene.camera.present},
                 {"objects", objects}};
+}
+
+nlohmann::json EditorApp::cmdSaveScene(const nlohmann::json& req)
+{
+    if (!req.contains("path") || !req["path"].is_string())
+    {
+        return json{{"ok", false}, {"error", "save_scene requires string 'path'"}};
+    }
+    const std::string path = req["path"].get<std::string>();
+    std::string err = saveScene(path);
+    if (!err.empty())
+    {
+        return json{{"ok", false}, {"error", err}};
+    }
+    return json{{"ok", true},
+                {"scene_path", m_scenePath},
+                {"object_count", m_scene.objects.size()},
+                {"material_count", m_scene.materials.size()}};
 }
 
 nlohmann::json EditorApp::cmdSetCamera(const nlohmann::json& req)
@@ -2188,6 +2338,8 @@ nlohmann::json EditorApp::cmdSetProperty(const nlohmann::json& req)
     //   mat_color_r/g/b, mat_ior  -> numeric "value"
     //   material_type            -> string "value" (Lambertian|Mirror|Glass|Microfacet)
     //   material_name            -> string "value" (assign an existing material)
+    //   mesh_file                -> string "value" (register an OBJ in $meshes; MeshVolume)
+    //   mesh_shape               -> string "value" (bind to an OBJ sub-shape; MeshVolume)
     int index = m_selectedObject;
     if (req.contains("index") && req["index"].is_number_integer())
     {
@@ -2223,6 +2375,36 @@ nlohmann::json EditorApp::cmdSetProperty(const nlohmann::json& req)
         {
             return json{{"ok", false}, {"error", "no material named '" +
                                                      req["value"].get<std::string>() + "'"}};
+        }
+    }
+    else if (field == "mesh_file")
+    {
+        if (!req.contains("value") || !req["value"].is_string())
+        {
+            return json{{"ok", false}, {"error", "mesh_file needs a string 'value'"}};
+        }
+        ok = setObjectMeshFile(index, req["value"].get<std::string>());
+        if (!ok)
+        {
+            return json{{"ok", false},
+                        {"error", "could not bind mesh_file '" +
+                                      req["value"].get<std::string>() +
+                                      "' (not a MeshVolume, or file not found)"}};
+        }
+    }
+    else if (field == "mesh_shape")
+    {
+        if (!req.contains("value") || !req["value"].is_string())
+        {
+            return json{{"ok", false}, {"error", "mesh_shape needs a string 'value'"}};
+        }
+        ok = setObjectMeshShape(index, req["value"].get<std::string>());
+        if (!ok)
+        {
+            return json{{"ok", false},
+                        {"error", "could not set mesh_shape '" +
+                                      req["value"].get<std::string>() +
+                                      "' (not a MeshVolume?)"}};
         }
     }
     else

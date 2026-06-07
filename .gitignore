@@ -11,3 +11,7 @@ imgui.ini
 # Editor render-from-current-view temp scenes (written next to the source scene
 # so relative $meshes / $renderPath still resolve). Regenerated every render.
 .editor_view_*
+
+# Python bytecode cache
+__pycache__/
+*.pyc

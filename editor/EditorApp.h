@@ -88,7 +88,23 @@ public:
     // an error string on failure, empty on success. Requires a GL context.
     std::string loadSceneFromPath(const std::string& path);
 
+    // Serialize the current in-memory model to renderer scene JSON (via
+    // SceneModelSerializer) and write it to `path`. The live orbit camera is
+    // baked into the saved Camera block (same mapping render-from-view uses) so
+    // the saved file renders framed exactly as the viewport shows it. Updates
+    // m_scenePath + clears the dirty flag. Returns empty on success, else an
+    // error string. This backs both the File > Save menu item and the
+    // save_scene automation command.
+    std::string saveScene(const std::string& path);
+
+    // Serialize the current model to renderer scene JSON with the LIVE orbit
+    // camera baked into the Camera block (synthesizing one if the model has
+    // none). Shared by render-from-view and saveScene so a saved scene and a
+    // rendered scene frame identically.
+    nlohmann::json serializeWithLiveCamera();
+
     nlohmann::json cmdLoadScene(const nlohmann::json& req);
+    nlohmann::json cmdSaveScene(const nlohmann::json& req);
 
     // Capture pixels to a PNG. target is "window" | "viewport" | "render".
     // Returns empty on success, else an error string. Requires a GL context.
@@ -156,6 +172,16 @@ private:
     // its material's name selection. Returns true if applied.
     bool setObjectMaterialType(int index, const std::string& type);
     bool setObjectMaterialName(int index, const std::string& materialName);
+
+    // Bind a MeshVolume object at `index` to a specific OBJ sub-shape (and,
+    // optionally, register a specific OBJ file). `mesh_shape` sets the $mesh
+    // sub-shape name the volume draws (e.g. "Left"/"Right"/"Ceiling" in
+    // CornellBox.obj); `mesh_file` ensures the given OBJ (resolved upwards if
+    // relative) is in the model's $meshes list so the sub-shape resolves in both
+    // the viewport and the serialized render. Returns true if applied. Same
+    // mutator the (future) properties-panel mesh picker would call.
+    bool setObjectMeshFile(int index, const std::string& meshFile);
+    bool setObjectMeshShape(int index, const std::string& shapeName);
 
     // Phase 3: kick off a path-traced render of the current scene on a worker
     // thread and poll its completion in the UI loop.

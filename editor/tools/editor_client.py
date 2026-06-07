@@ -112,6 +112,15 @@ class EditorClient:
         """
         return self._command("load_scene", path=path)
 
+    def save_scene(self, path: str) -> Dict[str, Any]:
+        """Serialize the in-memory model to renderer scene JSON at `path`.
+
+        Backs File > Save: the live orbit camera is baked into the saved Camera
+        block so the file renders framed as the viewport shows it. The saved JSON
+        is directly renderable with `ray-tracer <path>`.
+        """
+        return self._command("save_scene", path=path)
+
     def set_camera(
         self,
         eye: Optional[list] = None,
@@ -239,7 +248,9 @@ class EditorClient:
                    light_width, light_height, light_radius,
                    mat_color_r/g/b, mat_ior
           string:  material_type (Lambertian|Mirror|Glass|Microfacet),
-                   material_name (assign an existing material)
+                   material_name (assign an existing material),
+                   mesh_file (register an OBJ in $meshes; MeshVolume only),
+                   mesh_shape (bind to an OBJ sub-shape; MeshVolume only)
         Returns the object's updated detail.
         """
         return self._command("set_property", field=field, value=value, index=index)
@@ -276,6 +287,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ls = sub.add_parser("load-scene")
     ls.add_argument("path")
+
+    sv = sub.add_parser("save-scene")
+    sv.add_argument("path")
 
     sc = sub.add_parser("set-camera")
     sc.add_argument("--eye", type=float, nargs=3)
@@ -340,6 +354,8 @@ def main(argv: Optional[list] = None) -> int:
             result = client.load_mesh(args.path)
         elif args.command == "load-scene":
             result = client.load_scene(args.path)
+        elif args.command == "save-scene":
+            result = client.save_scene(args.path)
         elif args.command == "set-camera":
             result = client.set_camera(
                 eye=args.eye,
