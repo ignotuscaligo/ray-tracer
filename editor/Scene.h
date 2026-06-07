@@ -104,6 +104,16 @@ struct SceneModel
         double verticalFovDegrees = 70.0;
         bool present = false;            // legacy flag; see hasCamera()
 
+        // Projection model (renderer $projection). "perspective" (default,
+        // rectilinear pinhole), "orthographic", or "reallens" (thin-lens DOF).
+        // Stored as the renderer's string key so the serializer round-trips it
+        // verbatim and unknown future values survive an edit.
+        std::string projection = "perspective";
+        double orthoHeight = 100.0;      // $orthoHeight  (orthographic frame height)
+        double apertureRadius = 0.0;     // $apertureRadius (<=0 => derive from N/focal)
+        double focusDistance = 100.0;    // $focusDistance (reallens plane of focus)
+        double focalLength = 50.0;       // $focalLength   (reallens, with fNumber)
+
         // Per-camera render resolution (renderer $width/$height override).
         int width = 256;
         int height = 256;

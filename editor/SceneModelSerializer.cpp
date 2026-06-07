@@ -101,6 +101,15 @@ json toJson(const SceneModel& model)
         cam["$position"] = vec3Json(camDesc.position);
         cam["$rotation"] = rotationJson(camDesc.eulerDegrees);
 
+        // Projection model + params. Always emit $projection so editor-authored
+        // cameras carry the type; emit the per-projection params unconditionally
+        // (they are cheap and keep DOF/ortho edits round-tripping).
+        cam["$projection"] = camDesc.projection;
+        cam["$orthoHeight"] = camDesc.orthoHeight;
+        cam["$apertureRadius"] = camDesc.apertureRadius;
+        cam["$focusDistance"] = camDesc.focusDistance;
+        cam["$focalLength"] = camDesc.focalLength;
+
         // Per-camera resolution override.
         cam["$width"] = camDesc.width;
         cam["$height"] = camDesc.height;

@@ -169,67 +169,110 @@ void gatherRows(size_t rowBegin,
         for (size_t x = 0; x < width; ++x)
         {
             const PixelCoords coord{x, y};
-            // Deterministic pixel-center primary ray (origin + direction from the
-            // camera projection; orthographic varies the origin across the plane).
-            const Ray ray = camera.generatePrimaryRay(coord);
-            const Vector dir = ray.direction;
 
-            std::optional<Hit> hit = firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation);
-            if (!hit)
+            // Thin-lens depth of field: when the camera is RealLens, the PRIMARY
+            // ray itself must be multi-sampled — each aperture sample is a distinct
+            // primary ray that can see a different delta surface (this is where DOF
+            // sampling hooks into the per-pixel sample loop). We pass `generator`
+            // into generatePrimaryRay so each sample jitters the aperture disk +
+            // sub-pixel; the in-focus surface stays sharp, out-of-focus delta
+            // surfaces blur. For non-DOF projections the primary ray is the single
+            // deterministic pixel-center ray (no aperture jitter).
+            //
+            // NOTE: this only blurs delta (mirror/glass) and emissive pixels — the
+            // ones imaged by a cast camera ray. DIFFUSE surfaces are imaged by the
+            // forward photon SPLAT (Worker::splatToCamera via coordForPoint), which
+            // has no aperture model, so they remain sharp. Full diffuse DOF would
+            // require circle-of-confusion splatting keyed on each photon hit's depth
+            // relative to the focus plane — out of scope here.
+            const bool dofActive = (camera.projection() == Camera::Projection::RealLens);
+            const int primarySamples = dofActive ? kCameraSamplesPerPixel : 1;
+
+            Color pixelAccum{0.0f, 0.0f, 0.0f};
+            int primaryDeltaSamples = 0;
+            bool anyDeltaPixel = false;
+
+            for (int primary = 0; primary < primarySamples; ++primary)
             {
-                continue;  // background; splat owns / leaves black
-            }
+                const Ray ray = dofActive
+                    ? camera.generatePrimaryRay(coord, &generator)
+                    : camera.generatePrimaryRay(coord);
+                const Vector dir = ray.direction;
 
-            std::shared_ptr<Material> material = ctx.materials.fetchByIndex(hit->material);
-            if (!material || !material->isDelta())
-            {
-                continue;  // direct non-delta pixel — owned by the splat, skip
-            }
+                std::optional<Hit> hit = firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation);
+                if (!hit)
+                {
+                    continue;  // background; splat owns / leaves black
+                }
 
-            // First visible surface is a delta material (mirror or glass): extend
-            // the camera ray through it and look up the grid at whatever non-delta
-            // surface(s) it reaches.
-            ++stats.pixelsDelta;
+                std::shared_ptr<Material> material = ctx.materials.fetchByIndex(hit->material);
+                if (!material || !material->isDelta())
+                {
+                    continue;  // direct non-delta pixel — owned by the splat, skip
+                }
 
-            // A mirror is deterministic (one valid reflected direction), so a single
-            // extension is exact. Glass is now STOCHASTIC at the camera — each ray
-            // makes one random Fresnel reflect/refract pick — so a single sample is
-            // noisy. Average kCameraSamplesPerPixel independent extensions to drive
-            // that noise down. For a deterministic material every sample is identical,
-            // so the extra samples cost time but don't change the result; we therefore
-            // only multi-sample when the first visible surface is a dielectric.
-            const bool stochasticDelta =
-                (dynamic_cast<DielectricMaterial*>(material.get()) != nullptr);
-            const int sampleCount = stochasticDelta ? kCameraSamplesPerPixel : 1;
+                // First visible surface is a delta material (mirror or glass): extend
+                // the camera ray through it and look up the grid at whatever non-delta
+                // surface(s) it reaches.
+                anyDeltaPixel = true;
 
-            bool nonDeltaSeen = false;
-            Color accumulated{0.0f, 0.0f, 0.0f};
-            bool anyValid = false;
+                // A mirror is deterministic (one valid reflected direction), so a single
+                // extension is exact. Glass is STOCHASTIC at the camera — each ray
+                // makes one random Fresnel reflect/refract pick — so a single sample is
+                // noisy. Average kCameraSamplesPerPixel independent extensions to drive
+                // that noise down. For a deterministic material every sample is identical,
+                // so the extra samples cost time but don't change the result; we therefore
+                // only multi-sample the EXTENSION when the surface is a dielectric. (When
+                // DOF is active the primary loop already supplies multiple samples, so the
+                // extension is taken once per primary sample.)
+                const bool stochasticDelta =
+                    (dynamic_cast<DielectricMaterial*>(material.get()) != nullptr);
+                const int extensionSamples = (stochasticDelta && !dofActive) ? kCameraSamplesPerPixel : 1;
 
-            const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
-            for (int sample = 0; sample < sampleCount; ++sample)
-            {
-                // Single delta extension: sample() makes the (stochastic, for glass;
-                // deterministic, for mirror) outgoing pick and returns its weight.
-                const BSDFSample s = material->sample(dir, hitNormal, generator);
-                if (!s.valid)
+                bool nonDeltaSeen = false;
+                Color accumulated{0.0f, 0.0f, 0.0f};
+                bool anyValid = false;
+
+                const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
+                for (int sample = 0; sample < extensionSamples; ++sample)
+                {
+                    // Single delta extension: sample() makes the (stochastic, for glass;
+                    // deterministic, for mirror) outgoing pick and returns its weight.
+                    const BSDFSample s = material->sample(dir, hitNormal, generator);
+                    if (!s.valid)
+                    {
+                        continue;
+                    }
+                    anyValid = true;
+                    const Vector nextDir = Vector::normalized(s.direction);
+                    const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
+                    accumulated += s.weight * reflectedRadiance(
+                        ctx, nextOrigin, nextDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+                }
+
+                if (!anyValid)
                 {
                     continue;
                 }
-                anyValid = true;
-                const Vector nextDir = Vector::normalized(s.direction);
-                const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
-                accumulated += s.weight * reflectedRadiance(
-                    ctx, nextOrigin, nextDir, /*depth=*/1, castBuffer, generator, nonDeltaSeen);
+
+                pixelAccum += accumulated * (1.0f / static_cast<float>(extensionSamples));
+                ++primaryDeltaSamples;
             }
 
-            if (!anyValid)
+            if (!anyDeltaPixel)
+            {
+                continue;  // no primary sample saw a delta surface; splat owns it
+            }
+
+            ++stats.pixelsDelta;
+
+            if (primaryDeltaSamples == 0)
             {
                 ++stats.pixelsBlack;
                 continue;
             }
 
-            const Color reflected = accumulated * (1.0f / static_cast<float>(sampleCount));
+            const Color reflected = pixelAccum * (1.0f / static_cast<float>(primaryDeltaSamples));
 
             if (reflected.red == 0.0f && reflected.green == 0.0f && reflected.blue == 0.0f)
             {

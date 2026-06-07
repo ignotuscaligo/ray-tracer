@@ -99,6 +99,13 @@ void walk(const std::string& name, const json& node, const glm::vec3& parentPos,
         }
         cam.verticalFovDegrees = node.value("$verticalFieldOfView", 70.0);
 
+        // Projection model + per-projection params (renderer defaults when omitted).
+        cam.projection = node.value("$projection", cam.projection);
+        cam.orthoHeight = node.value("$orthoHeight", cam.orthoHeight);
+        cam.apertureRadius = node.value("$apertureRadius", cam.apertureRadius);
+        cam.focusDistance = node.value("$focusDistance", cam.focusDistance);
+        cam.focalLength = node.value("$focalLength", cam.focalLength);
+
         // Per-camera resolution override ($width/$height). Both must be present.
         if (node.contains("$width") && node.contains("$height"))
         {

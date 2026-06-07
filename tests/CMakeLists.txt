@@ -40,6 +40,7 @@ target_sources(tests
         test_Bounds.cpp
         test_Sphere.cpp
         test_CameraExposure.cpp
+        test_CameraProjection.cpp
         test_BSDF.cpp
         test_Contracts.cpp
         test_Dielectric.cpp
