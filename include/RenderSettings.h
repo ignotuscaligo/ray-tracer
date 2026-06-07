@@ -21,6 +21,28 @@ struct RenderSettings
     size_t endFrame = 0;
     size_t bounceThreshold = 1;
 
+    // ===== Animation / motion-blur timing =====
+    // Frames map to TIME so a keyframed scene can be sampled at each frame's
+    // instant. Frame f's shutter OPENS at  t_open = frameOffset + f / frameRate
+    // and stays open for `shutterTime` seconds; photons for that frame are
+    // stamped with a uniform random time in [t_open, t_open + shutterTime), and
+    // the scene's animated transforms are evaluated per-photon at that time. Over
+    // many photons the time-varying geometry smears -> motion blur, with blur
+    // length proportional to the object's speed during the shutter.
+    //
+    // Defaults: frameRate 24 fps, shutterTime 0. A ZERO shutter collapses the
+    // window to an instant (all photons at t_open) -> NO motion blur and a static
+    // scene renders bit-for-bit as before. Motion blur is opt-in via $shutterTime.
+    double frameRate = 24.0;
+    double shutterTime = 0.0;   // seconds the shutter is open per frame.
+    double frameOffset = 0.0;   // seconds added to every frame's open time.
+
+    // The current frame's shutter-open time in seconds. main.cpp sets this per
+    // frame (= frameOffset + frame / frameRate) before each renderFrame call; the
+    // Renderer uses [frameTime, frameTime + shutterTime) as the exposure window.
+    // Default 0 keeps single-frame renders at t=0.
+    double frameTime = 0.0;
+
     // ===== Single-photon decay termination =====
     // A photon is killed once its current magnitude (max colour channel) falls
     // below this ABSOLUTE threshold, expressed in photon-magnitude units (the same

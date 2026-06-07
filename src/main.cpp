@@ -59,9 +59,19 @@ int main(int argc, char** argv)
 
             const std::chrono::time_point renderStart = std::chrono::system_clock::now();
 
-            // Render this frame. (The pipeline renders settings.startFrame; for
-            // multi-frame output we render once per loop iteration with the same
-            // settings — matching the historical single-buffer-per-frame loop.)
+            // Map this frame index to TIME so the keyframed scene is sampled at the
+            // right instant: the shutter opens at frameOffset + frame/frameRate and
+            // the Renderer integrates over [t_open, t_open + shutterTime). This is
+            // the single point that turns a frame number into a scene time; a static
+            // scene with shutterTime 0 ignores it (all photons share one instant and
+            // there are no animated transforms).
+            const double frameRate = (scene.settings.frameRate > 0.0) ? scene.settings.frameRate : 24.0;
+            scene.settings.frameTime =
+                scene.settings.frameOffset + static_cast<double>(frame) / frameRate;
+
+            std::cout << "Frame time t=" << scene.settings.frameTime << "s"
+                      << " shutter=" << scene.settings.shutterTime << "s" << std::endl;
+
             RenderResult render = Renderer::renderFrame(scene);
 
             const std::chrono::time_point renderEnd = std::chrono::system_clock::now();

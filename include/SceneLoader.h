@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AnimationQuery.h"
 #include "Camera.h"
 #include "MaterialLibrary.h"
 #include "MeshLibrary.h"
@@ -31,6 +32,14 @@ struct LoadedScene
     std::shared_ptr<MaterialLibrary> materialLibrary;
     std::shared_ptr<MeshLibrary> meshLibrary;
     RenderSettings settings;
+
+    // Keyframed animation oracle built from per-object $animation blocks in the
+    // scene JSON. Empty (no animated objects) for a static scene, in which case
+    // the Renderer uses a StaticAnimationQuery and behavior is the baseline. The
+    // Renderer threads this into the workers/gathers so each photon evaluates the
+    // scene at its own time.
+    std::shared_ptr<KeyframedAnimationQuery> animation =
+        std::make_shared<KeyframedAnimationQuery>();
 
     // Output destination parsed from $renderConfiguration ($renderPath /
     // $renderName). Empty if not specified. The executable uses these to name

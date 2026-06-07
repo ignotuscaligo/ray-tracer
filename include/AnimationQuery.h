@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Property.h"
 #include "Transform.h"
 #include "Vector.h"
 #include "Quaternion.h"
 
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 // Continuous-time animation interface. The renderer never advances "the scene" to a
 // discrete frame — it asks AnimationQuery for object transforms at arbitrary timestamps.
@@ -84,4 +86,78 @@ private:
     Vector m_basePosition;
     Quaternion m_baseRotation;
     Vector m_velocity;
+};
+
+// Keyframed animation oracle. For each animated object it holds:
+//   - a position Property<Vector>     (evaluated -> Transform::position)
+//   - a rotation-angle Property<double> about a fixed axis (-> Transform::rotation)
+//   - a base rotation the spin angle is composed onto (the object's scene-load
+//     orientation), so the authored spin layers on top of the static pose.
+//
+// The rotation is parameterized as a SCALAR ANGLE about an axis rather than as a
+// quaternion curve on purpose: the fan deliverable spins about one axis, and a
+// scalar-angle Property makes ANGULAR VELOCITY (the thing that drives motion-blur
+// length) a direct, smooth, continuous-derivative function of the keyframes. The
+// Hermite-eased angle curve is exactly what makes the blur smear-up as the fan
+// accelerates and go sharp as it slows. The general Property mechanism could carry
+// any field (material, camera) later; object transform is the wired deliverable.
+//
+// An object with no entry here -> transformAt returns nullopt -> caller falls back
+// to the scene-load transform (a static object renders unchanged).
+class KeyframedAnimationQuery : public AnimationQuery
+{
+public:
+    struct AnimatedObject
+    {
+        bool hasPosition = false;
+        Property<Vector> position;          // world position over time.
+
+        bool hasRotation = false;
+        Vector rotationAxis{0.0, 1.0, 0.0}; // spin axis (object/world space, unit).
+        Property<double> rotationAngle;     // radians about rotationAxis over time.
+        Quaternion baseRotation;            // scene-load orientation to compose onto.
+
+        Vector scale{1.0, 1.0, 1.0};        // preserved scene-load scale.
+    };
+
+    void setObject(const std::string& name, const AnimatedObject& animated)
+    {
+        m_objects[name] = animated;
+    }
+
+    bool empty() const { return m_objects.empty(); }
+
+    std::optional<Transform> transformAt(const std::string& objectName, float time) const override
+    {
+        auto it = m_objects.find(objectName);
+        if (it == m_objects.end())
+        {
+            return std::nullopt;
+        }
+
+        const AnimatedObject& a = it->second;
+        const double t = static_cast<double>(time);
+
+        Transform out;
+        out.scale = a.scale;
+
+        out.position = a.hasPosition ? a.position.evaluate(t) : Vector{0.0, 0.0, 0.0};
+
+        if (a.hasRotation)
+        {
+            const double angle = a.rotationAngle.evaluate(t);
+            const Quaternion spin = Quaternion::fromAxisAngle(a.rotationAxis, angle);
+            // Compose the authored spin onto the scene-load orientation.
+            out.rotation = spin * a.baseRotation;
+        }
+        else
+        {
+            out.rotation = a.baseRotation;
+        }
+
+        return out;
+    }
+
+private:
+    std::unordered_map<std::string, AnimatedObject> m_objects;
 };

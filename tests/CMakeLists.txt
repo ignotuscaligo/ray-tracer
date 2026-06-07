@@ -38,6 +38,7 @@ set_target_properties(tests
 target_sources(tests
     PRIVATE
         test_Bounds.cpp
+        test_Property.cpp
         test_Sphere.cpp
         test_CameraExposure.cpp
         test_CameraProjection.cpp

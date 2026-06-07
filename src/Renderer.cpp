@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 
@@ -88,21 +89,62 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
     std::shared_ptr<LightQueue> lightQueue = std::make_shared<LightQueue>();
     std::shared_ptr<WorkQueue<Photon>> photonQueue = std::make_shared<WorkQueue<Photon>>(settings.photonQueueSize);
 
-    // Continuous-time animation oracle. Default is static; if the scene contains
-    // an object named "MirrorSphere", attach a translation animation so the
-    // motion-blur pipeline can be exercised end-to-end. This wiring is preserved
-    // verbatim from the pre-refactor executable to keep render output identical.
-    std::shared_ptr<AnimationQuery> animationQuery = std::make_shared<StaticAnimationQuery>();
-    for (auto& object : scene.objects)
+    // Continuous-time animation oracle. The scene loader builds a
+    // KeyframedAnimationQuery from per-object $animation blocks; if no object is
+    // animated we use a StaticAnimationQuery so a static scene is bit-for-bit the
+    // baseline (every transformAt returns the scene-load transform). The workers
+    // and gathers evaluate this query at each photon's time, so a keyframed
+    // transform smears across the shutter into motion blur.
+    std::shared_ptr<AnimationQuery> animationQuery;
+    if (scene.animation && !scene.animation->empty())
     {
-        if (object->name() == "MirrorSphere")
+        animationQuery = scene.animation;
+    }
+    else
+    {
+        animationQuery = std::make_shared<StaticAnimationQuery>();
+    }
+
+    // Per-frame shutter window. Photons spawn with a uniform random time in
+    // [frameTime, frameTime + shutterTime) and the scene is evaluated at that
+    // time per-photon -> distributed (stochastic-time) motion blur. A zero
+    // shutter collapses the window to the instant frameTime: all photons share
+    // one time, no blur, and a static scene is unchanged. The window is set on
+    // EVERY camera so each camera's emission-time sampling + splat gate agree.
+    // [INVARIANT] Spreading photons over the shutter does NOT change total light
+    // energy: emit() still produces the same photon COUNT carrying the same
+    // per-photon flux (Phi/N, baked at emission, DESIGN.md §3). The shutter only
+    // re-tags each photon's TIME; it does not scale magnitude or drop photons
+    // (times are sampled inside [start,end) so the splat's exposure-window gate,
+    // Worker.cpp, always passes). Hence a static scene rendered with a shutter has
+    // the SAME brightness as one rendered without (verified: test_ShutterBrightness).
+    {
+        Camera::ExposureWindow window;
+        const float start = static_cast<float>(settings.frameTime);
+        const float shutter = static_cast<float>(settings.shutterTime);
+        if (shutter > 0.0f)
         {
-            animationQuery = std::make_shared<TranslatingAnimationQuery>(
-                object->name(),
-                object->position(),
-                object->rotation(),
-                Vector{40.0, 0.0, 0.0});  // 40 world-units per second along +X
-            break;
+            window.start = start;
+            window.end = start + shutter;
+        }
+        else
+        {
+            // Zero shutter: an instantaneous window [t, t+eps) so every photon is
+            // stamped exactly at frameTime (the emission sampler needs end>start;
+            // a one-ulp span yields a single representable time = frameTime).
+            window.start = start;
+            window.end = std::nextafter(start, std::numeric_limits<float>::infinity());
+        }
+        for (auto& cam : scene.cameras)
+        {
+            if (cam)
+            {
+                cam->setGlobalExposureWindow(window);
+            }
+        }
+        if (scene.camera)
+        {
+            scene.camera->setGlobalExposureWindow(window);
         }
     }
 

@@ -197,6 +197,100 @@ void setRotationFromJsonIfPresent(Quaternion& output, json jsonContainer, const 
     }
 }
 
+// Parse a keyframe list into a Property<double>. Each entry is an object
+// {"t": <seconds>, "value": <number>} with optional explicit tangents
+// {"inTangent": <num>, "outTangent": <num>} (per-second slopes; presence makes
+// the keyframe use explicit tangents instead of the auto Catmull-Rom tangent).
+Property<double> parseScalarKeyframes(const json& keyframeArray)
+{
+    Property<double> property;
+    if (!keyframeArray.is_array())
+    {
+        throw std::runtime_error("$animation keyframe list must be an array");
+    }
+    for (const auto& entry : keyframeArray)
+    {
+        if (!entry.is_object() || !entry.contains("t") || !entry.contains("value"))
+        {
+            throw std::runtime_error(
+                "Each keyframe must be an object with 't' and 'value'");
+        }
+        Keyframe<double> key;
+        key.time = entry["t"].get<double>();
+        key.value = entry["value"].get<double>();
+        if (entry.contains("inTangent") || entry.contains("outTangent"))
+        {
+            key.useAutoTangent = false;
+            key.inTangent = entry.contains("inTangent") ? entry["inTangent"].get<double>() : 0.0;
+            key.outTangent = entry.contains("outTangent") ? entry["outTangent"].get<double>() : 0.0;
+        }
+        property.addKeyframe(key);
+    }
+    return property;
+}
+
+// Parse a keyframe list into a Property<Vector>. Each entry is
+// {"t": <seconds>, "value": [x, y, z]}.
+Property<Vector> parseVectorKeyframes(const json& keyframeArray)
+{
+    Property<Vector> property;
+    if (!keyframeArray.is_array())
+    {
+        throw std::runtime_error("$animation keyframe list must be an array");
+    }
+    for (const auto& entry : keyframeArray)
+    {
+        if (!entry.is_object() || !entry.contains("t") || !entry.contains("value"))
+        {
+            throw std::runtime_error(
+                "Each keyframe must be an object with 't' and 'value'");
+        }
+        Keyframe<Vector> key;
+        key.time = entry["t"].get<double>();
+        key.value = parseVectorFromJson(entry["value"]);
+        property.addKeyframe(key);
+    }
+    return property;
+}
+
+// Parse an object's "$animation" block into an AnimatedObject. The object's
+// scene-load transform supplies the base rotation/scale/position that authored
+// curves layer onto (a $rotation curve composes onto the load-time orientation;
+// an absent $position holds the load-time position).
+//
+// Schema:
+//   "$animation": {
+//     "$rotationAxis": [x, y, z],          // optional, default [0,1,0]
+//     "$rotation": [ {"t":.., "value":..}, ... ],   // radians about the axis
+//     "$position": [ {"t":.., "value":[x,y,z]}, ... ]
+//   }
+KeyframedAnimationQuery::AnimatedObject parseAnimationBlock(
+    const json& animationJson, const Transform& loadTransform)
+{
+    KeyframedAnimationQuery::AnimatedObject animated;
+    animated.baseRotation = loadTransform.rotation;
+    animated.scale = loadTransform.scale;
+
+    if (animationJson.contains("$rotationAxis"))
+    {
+        animated.rotationAxis = parseVectorFromJson(animationJson["$rotationAxis"]).normalized();
+    }
+
+    if (animationJson.contains("$rotation"))
+    {
+        animated.rotationAngle = parseScalarKeyframes(animationJson["$rotation"]);
+        animated.hasRotation = true;
+    }
+
+    if (animationJson.contains("$position"))
+    {
+        animated.position = parseVectorKeyframes(animationJson["$position"]);
+        animated.hasPosition = true;
+    }
+
+    return animated;
+}
+
 Color parseColorFromJson(json jsonContainer)
 {
     if (!jsonContainer.is_array())
@@ -562,7 +656,7 @@ private:
     std::shared_ptr<MeshLibrary> m_meshLibrary;
 };
 
-std::vector<std::shared_ptr<Object>> parseObjectFromJson(const std::string& name, json jsonContainer, std::shared_ptr<Object> parent, ObjectFactory& objectFactory)
+std::vector<std::shared_ptr<Object>> parseObjectFromJson(const std::string& name, json jsonContainer, std::shared_ptr<Object> parent, ObjectFactory& objectFactory, KeyframedAnimationQuery& animation)
 {
     std::vector<std::shared_ptr<Object>> parsedObjects;
     std::shared_ptr<Object> parsedObject = objectFactory.createObjectFromJson(jsonContainer);
@@ -570,11 +664,22 @@ std::vector<std::shared_ptr<Object>> parseObjectFromJson(const std::string& name
     parsedObject->name(name);
     Object::setParent(parsedObject, parent);
 
+    // Per-object keyframe animation. The block layers onto the object's just-
+    // parsed scene-load transform; registering it makes the Renderer evaluate this
+    // object's pose per-photon-time. Objects without a $animation block stay
+    // static (no entry -> transformAt returns nullopt -> scene-load transform).
+    if (jsonContainer.contains("$animation"))
+    {
+        KeyframedAnimationQuery::AnimatedObject animated =
+            parseAnimationBlock(jsonContainer["$animation"], parsedObject->transform);
+        animation.setObject(name, animated);
+    }
+
     for (const auto& [childName, childObject] : jsonContainer.items())
     {
         if (childName[0] != '$')
         {
-            std::vector<std::shared_ptr<Object>> childObjects = parseObjectFromJson(childName, childObject, parsedObject, objectFactory);
+            std::vector<std::shared_ptr<Object>> childObjects = parseObjectFromJson(childName, childObject, parsedObject, objectFactory, animation);
             parsedObjects.insert(parsedObjects.end(), childObjects.begin(), childObjects.end());
         }
     }
@@ -645,6 +750,13 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.startFrame, renderConfiguration, "$startFrame", logToStdout);
         setFromJsonIfPresent(settings.endFrame, renderConfiguration, "$endFrame", logToStdout);
         setFromJsonIfPresent(settings.bounceThreshold, renderConfiguration, "$bounceThreshold", logToStdout);
+
+        // Animation / motion-blur timing. $frameRate maps frame index -> time;
+        // $shutterTime is the per-frame shutter-open duration (0 = no motion blur,
+        // an instantaneous sample); $frameOffset shifts every frame's open time.
+        setFromJsonIfPresent(settings.frameRate, renderConfiguration, "$frameRate", logToStdout);
+        setFromJsonIfPresent(settings.shutterTime, renderConfiguration, "$shutterTime", logToStdout);
+        setFromJsonIfPresent(settings.frameOffset, renderConfiguration, "$frameOffset", logToStdout);
 
         // Single-photon decay termination: kill a photon once its magnitude drops
         // below this ABSOLUTE floor (in photon-magnitude / flux units, scene-
@@ -804,7 +916,7 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
 
         for (const auto& [name, object] : sceneJson.items())
         {
-            std::vector<std::shared_ptr<Object>> parsedObjects = parseObjectFromJson(name, object, nullptr, objectFactory);
+            std::vector<std::shared_ptr<Object>> parsedObjects = parseObjectFromJson(name, object, nullptr, objectFactory, *scene.animation);
             scene.objects.insert(scene.objects.end(), parsedObjects.begin(), parsedObjects.end());
         }
     }
