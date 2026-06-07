@@ -313,6 +313,70 @@ panel z-fighting; the `EmissiveGather` epsilon is kept anyway as general numeric
 
 ---
 
+## 6e. Camera projection model — rectilinear perspective, NOT f-theta
+
+**[INVARIANT] The default camera projection is RECTILINEAR PERSPECTIVE (pinhole), NOT
+f-theta.** A pixel maps to a primary ray through a FLAT image plane via the tangent of the
+field of view; straight world lines stay straight on screen. Concretely, for normalized
+screen coords `sx, sy` in `[-1, 1]` (sx left→right, sy bottom→top), with
+`aspect = width/height` and `halfHeight = tan(verticalFieldOfView/2)`:
+
+```
+direction = normalize(forward + sx*aspect*halfHeight*right + sy*halfHeight*up)
+```
+
+The camera basis is `right = rot·X`, `up = rot·Y`, `forward = rot·Z`
+(`src/Camera.cpp` `generatePrimaryRay`).
+
+**[INVARIANT] Do NOT restore the old f-theta (equidistant fisheye) ray-gen.** The renderer
+historically built the ray as `angle = pixelOffset * angularStep` and took
+`(sin(angle), sin(angle), cos·cos)` — an f-theta / equidistant construction. That mapping
+makes the screen offset proportional to the *angle* instead of `tan(angle)`, so straight
+edges BOW outward near the frame (barrel distortion — visible on Cornell-box walls at wide
+FOV). This was a deliberate correction, not a refactor. A future agent must not "simplify"
+`generatePrimaryRay` back to the sin/cos angular form. The unit test
+`tests/test_CameraProjection.cpp` pins the tan-not-theta identity precisely so a regression
+to f-theta fails the suite.
+
+**[INVARIANT] The reverse projection is the exact inverse of the forward ray-gen.**
+`Camera::coordForPoint` / `coordForPointSubPixel` (used by the forward photon SPLAT,
+`Worker::splatToCamera`) project a world point with the same rectilinear math
+(`dx/depth / (aspect*halfHeight)` etc.). Forward ray-gen and reverse splat MUST agree, or a
+photon's splat lands in a different pixel than the gather ray for that pixel — the two
+projections are a matched pair and must change together.
+
+**Projection types (scene key `$projection`, per camera; default `"perspective"`).** A
+camera declares `Camera::Projection` (`include/Camera.h`); `SceneLoader` maps the JSON key.
+An absent key defaults to perspective, so all pre-existing scenes render unchanged (modulo
+the f-theta→perspective correction above).
+
+- **`perspective`** — the rectilinear pinhole above. Ray origin = eye for every pixel.
+- **`orthographic`** — PARALLEL rays: every pixel's direction is `forward`; the ORIGIN varies
+  across the image plane: `origin = eye + sx*aspect*(orthoHeight/2)*right +
+  sy*(orthoHeight/2)*up`. No perspective convergence — parallel world lines stay parallel and
+  object size is constant with depth. Param: `$orthoHeight` (world-space frame height; width
+  follows from aspect).
+- **`reallens`** (thin-lens depth of field) — like perspective but the ray ORIGINATES from a
+  point sampled on a finite aperture DISK (in the `right`/`up` lens plane) and is aimed at the
+  FOCUS POINT where the pinhole ray crosses the focus plane at `$focusDistance`. Result:
+  sharp at `$focusDistance`, blurred elsewhere; moving `$focusDistance` moves the focus.
+  Params: `$apertureRadius` (explicit lens-disk radius; if `<= 0`, derived as
+  `$focalLength / (2 · $fNumber)`), `$focusDistance`, `$focalLength`.
+
+**DOF sampling hook + its boundary.** `generatePrimaryRay(coord, generator)` takes an
+optional RNG: with it, each call jitters the sub-pixel film position AND (for reallens) the
+aperture-disk sample, so DOF integrates over a samples-per-pixel loop. The focus point is
+fixed by the FILM sample (pinhole direction), independent of the aperture sample — all
+aperture samples for one film point converge on the focus plane (PBRT thin-lens model).
+`MirrorGather` multi-samples the primary ray (`kCameraSamplesPerPixel`) when the camera is
+reallens, so MIRROR/GLASS (delta) and emissive pixels — the ones imaged by a *cast camera
+ray* — show DOF. **[DETAIL] DIFFUSE surfaces do NOT show DOF**: they are imaged by the
+forward photon SPLAT (`coordForPoint`), which has no aperture model. Full diffuse DOF would
+require circle-of-confusion splatting keyed on each photon hit's depth vs. the focus plane —
+deliberately out of scope; the splat stays a sharp pinhole projection.
+
+---
+
 ## 7. Camera exposure, physical units, distribution-readiness
 
 **[INVARIANT] Lights are in physical photometric units** (candela; `flux = I · solid-angle`)
