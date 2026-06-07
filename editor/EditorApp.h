@@ -341,6 +341,13 @@ private:
     glm::vec3 m_gizmoStartScale{1.0f};
     glm::vec3 m_gizmoOriginAtPress{0.0f}; // world-space gizmo origin at press
 
+    // ----- click-vs-drag discrimination for left-button selection ---------
+    // A left-press over the viewport that releases with little cursor motion is a
+    // CLICK (ray-pick select); one that moves past a threshold is a DRAG (orbit).
+    bool m_leftPressInViewport = false;   // a left-press landed over the viewport
+    glm::vec2 m_leftPressStart{0.0f};     // its position, window pixels
+    bool m_leftDragMoved = false;         // moved past the click threshold
+
     // Raster viewport state.
     RasterMesh m_mesh;
     OrbitCamera m_camera;

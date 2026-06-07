@@ -959,6 +959,530 @@ void EditorApp::drawSceneObjects(const glm::mat4& view, const glm::mat4& proj)
     }
 }
 
+// ============================================================================
+// Viewport ray-picking + transform gizmos
+// ============================================================================
+
+bool EditorApp::viewportRay(double winX, double winY, glm::vec3& origin, glm::vec3& dir) const
+{
+    const LayoutRect& vp = m_viewportScreenRect;
+    if (!vp.valid()) return false;
+    // Fractional position within the viewport image (top-left origin).
+    const float fx = (static_cast<float>(winX) - vp.x) / vp.width;
+    const float fy = (static_cast<float>(winY) - vp.y) / vp.height;
+    if (fx < 0.0f || fx > 1.0f || fy < 0.0f || fy > 1.0f) return false;
+
+    // NDC: x in [-1,1] left->right, y in [-1,1] bottom->top (so flip the
+    // top-left-origin fy).
+    const float ndcX = 2.0f * fx - 1.0f;
+    const float ndcY = 1.0f - 2.0f * fy;
+
+    const float aspect = m_fboHeight > 0
+                             ? static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight)
+                             : 1.0f;
+    const glm::mat4 view = m_camera.viewMatrix();
+    const glm::mat4 proj = m_camera.projectionMatrix(aspect);
+    const glm::mat4 invVP = glm::inverse(proj * view);
+
+    glm::vec4 nearH = invVP * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+    glm::vec4 farH = invVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+    if (std::abs(nearH.w) < 1e-9f || std::abs(farH.w) < 1e-9f) return false;
+    const glm::vec3 nearP = glm::vec3(nearH) / nearH.w;
+    const glm::vec3 farP = glm::vec3(farH) / farH.w;
+
+    origin = m_camera.eye();
+    dir = glm::normalize(farP - nearP);
+    (void)nearP;
+    return true;
+}
+
+bool EditorApp::projectToWindow(const glm::vec3& world, glm::vec2& outWin) const
+{
+    const LayoutRect& vp = m_viewportScreenRect;
+    if (!vp.valid()) return false;
+    const float aspect = m_fboHeight > 0
+                             ? static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight)
+                             : 1.0f;
+    const glm::mat4 view = m_camera.viewMatrix();
+    const glm::mat4 proj = m_camera.projectionMatrix(aspect);
+    glm::vec4 clip = proj * view * glm::vec4(world, 1.0f);
+    if (clip.w <= 1e-6f) return false;  // behind / on the camera plane
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    const float fx = 0.5f * (ndc.x + 1.0f);
+    const float fy = 0.5f * (1.0f - ndc.y);  // back to top-left origin
+    outWin = glm::vec2(vp.x + fx * vp.width, vp.y + fy * vp.height);
+    return true;
+}
+
+namespace
+{
+// Ray vs sphere: returns the nearest positive t or a negative value on a miss.
+float raySphere(const glm::vec3& o, const glm::vec3& d, const glm::vec3& c, float r)
+{
+    const glm::vec3 oc = o - c;
+    const float b = glm::dot(oc, d);
+    const float cc = glm::dot(oc, oc) - r * r;
+    const float disc = b * b - cc;
+    if (disc < 0.0f) return -1.0f;
+    const float s = std::sqrt(disc);
+    float t = -b - s;
+    if (t < 0.0f) t = -b + s;
+    return t;
+}
+
+// Ray vs world-space AABB (slab method). Returns nearest positive t or -1.
+float rayAabb(const glm::vec3& o, const glm::vec3& d, const glm::vec3& mn, const glm::vec3& mx)
+{
+    float tmin = 0.0f;
+    float tmax = std::numeric_limits<float>::max();
+    for (int i = 0; i < 3; ++i)
+    {
+        if (std::abs(d[i]) < 1e-8f)
+        {
+            if (o[i] < mn[i] || o[i] > mx[i]) return -1.0f;
+        }
+        else
+        {
+            float t1 = (mn[i] - o[i]) / d[i];
+            float t2 = (mx[i] - o[i]) / d[i];
+            if (t1 > t2) std::swap(t1, t2);
+            tmin = std::max(tmin, t1);
+            tmax = std::min(tmax, t2);
+            if (tmin > tmax) return -1.0f;
+        }
+    }
+    return tmin > 0.0f ? tmin : tmax;
+}
+
+// Shortest distance from point p to the segment [a,b] (all 2D, window pixels).
+float pointSegmentDist(const glm::vec2& p, const glm::vec2& a, const glm::vec2& b)
+{
+    const glm::vec2 ab = b - a;
+    const float len2 = glm::dot(ab, ab);
+    float t = len2 > 1e-8f ? glm::dot(p - a, ab) / len2 : 0.0f;
+    t = std::clamp(t, 0.0f, 1.0f);
+    const glm::vec2 proj = a + ab * t;
+    return glm::length(p - proj);
+}
+}  // namespace
+
+int EditorApp::pickObject(double winX, double winY) const
+{
+    glm::vec3 o, d;
+    if (!viewportRay(winX, winY, o, d)) return -1;
+
+    int best = -1;
+    float bestT = std::numeric_limits<float>::max();
+
+    for (std::size_t i = 0; i < m_scene.objects.size(); ++i)
+    {
+        const SceneModel::ObjectNode& obj = m_scene.objects[i];
+        const glm::mat4 model = objectModelMatrix(obj.position, obj.eulerDegrees, obj.scale);
+
+        float t = -1.0f;
+        if (obj.kind == SceneModel::Kind::SphereVolume)
+        {
+            // World-space center = model * local center; radius scaled by the max
+            // axis scale (a reasonable proxy for a possibly non-uniform scale).
+            const glm::vec3 worldCenter = glm::vec3(model * glm::vec4(obj.center, 1.0f));
+            const float maxScale =
+                std::max({std::abs(obj.scale.x), std::abs(obj.scale.y), std::abs(obj.scale.z)});
+            t = raySphere(o, d, worldCenter, static_cast<float>(obj.radius) * maxScale);
+        }
+        else
+        {
+            // Meshes + lights: AABB proxy. Find the drawable's local bounds (mesh
+            // bounds for meshes; a small box for lights) and transform the 8
+            // corners to world space to form a world AABB. This is a bounding
+            // proxy pick (v1) — not pixel-perfect mesh-triangle picking.
+            glm::vec3 localMin, localMax;
+            bool haveBounds = false;
+            for (const auto& dr : m_sceneDrawables)
+            {
+                if (dr.objectIndex == i && dr.mesh && dr.mesh->hasMesh())
+                {
+                    localMin = dr.mesh->minBound();
+                    localMax = dr.mesh->maxBound();
+                    haveBounds = true;
+                    break;
+                }
+            }
+            if (!haveBounds)
+            {
+                // Lights / no-mesh proxies: a unit-ish box around the local origin.
+                const float h = (obj.kind == SceneModel::Kind::AreaLight)
+                                    ? std::max(1.0f, static_cast<float>(std::max(obj.lightWidth,
+                                                                                obj.lightHeight)) *
+                                                         0.5f)
+                                    : 1.0f;
+                localMin = glm::vec3(-h);
+                localMax = glm::vec3(h);
+            }
+            // World AABB from the 8 transformed corners.
+            glm::vec3 wMin(std::numeric_limits<float>::max());
+            glm::vec3 wMax(-std::numeric_limits<float>::max());
+            for (int cx = 0; cx < 2; ++cx)
+                for (int cy = 0; cy < 2; ++cy)
+                    for (int cz = 0; cz < 2; ++cz)
+                    {
+                        const glm::vec3 corner(cx ? localMax.x : localMin.x,
+                                               cy ? localMax.y : localMin.y,
+                                               cz ? localMax.z : localMin.z);
+                        const glm::vec3 w = glm::vec3(model * glm::vec4(corner, 1.0f));
+                        wMin = glm::min(wMin, w);
+                        wMax = glm::max(wMax, w);
+                    }
+            t = rayAabb(o, d, wMin, wMax);
+        }
+
+        if (t > 0.0f && t < bestT)
+        {
+            bestT = t;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+glm::vec3 EditorApp::selectedGizmoOrigin() const
+{
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+        return glm::vec3(0.0f);
+    const SceneModel::ObjectNode& obj = m_scene.objects[static_cast<std::size_t>(m_selectedObject)];
+    // The gizmo sits at the object's transform origin. For a sphere whose volume
+    // is offset by a local $center, place it at the world center so it reads as
+    // "on" the object.
+    glm::vec3 base = obj.position;
+    if (obj.kind == SceneModel::Kind::SphereVolume)
+    {
+        const glm::mat4 model = objectModelMatrix(obj.position, obj.eulerDegrees, obj.scale);
+        base = glm::vec3(model * glm::vec4(obj.center, 1.0f));
+    }
+    return base;
+}
+
+float EditorApp::gizmoWorldScale() const
+{
+    // Size the gizmo as a constant fraction of the distance from the camera to
+    // the gizmo origin, so it looks the same size on screen at any zoom.
+    const glm::vec3 origin = selectedGizmoOrigin();
+    const float dist = glm::length(m_camera.eye() - origin);
+    return std::max(dist * 0.18f, 1e-3f);
+}
+
+int EditorApp::pickGizmoHandle(double winX, double winY) const
+{
+    if (m_tool == Tool::Select) return -1;
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+        return -1;
+
+    const glm::vec3 origin = selectedGizmoOrigin();
+    const float L = gizmoWorldScale();
+    glm::vec2 originWin;
+    if (!projectToWindow(origin, originWin)) return -1;
+
+    const glm::vec2 click(static_cast<float>(winX), static_cast<float>(winY));
+    const float pickRadius = 14.0f;  // screen pixels of slack
+
+    if (m_tool == Tool::Move || m_tool == Tool::Scale)
+    {
+        // Three axis handles: from the origin to origin + axis*L. Pick the axis
+        // whose projected segment the click is closest to (within pickRadius).
+        int best = -1;
+        float bestDist = pickRadius;
+        for (int a = 0; a < 3; ++a)
+        {
+            glm::vec3 axis(0.0f);
+            axis[a] = 1.0f;
+            glm::vec2 tipWin;
+            if (!projectToWindow(origin + axis * L, tipWin)) continue;
+            const float dist = pointSegmentDist(click, originWin, tipWin);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = a;
+            }
+        }
+        // Scale: a uniform/center handle right at the origin takes priority if the
+        // click is very close to it.
+        if (m_tool == Tool::Scale && glm::length(click - originWin) < pickRadius * 0.8f)
+        {
+            return 3;
+        }
+        return best;
+    }
+
+    // Rotate: three rings of radius L around the origin, each in a plane normal
+    // to an axis. Approximate the on-screen ring by the distance from the click
+    // to the projected ring radius (sampled). Pick the ring the click is nearest.
+    int best = -1;
+    float bestDist = pickRadius;
+    const int samples = 48;
+    for (int a = 0; a < 3; ++a)
+    {
+        // Two in-plane basis vectors for the ring normal = axis a.
+        glm::vec3 u(0.0f), v(0.0f);
+        u[(a + 1) % 3] = 1.0f;
+        v[(a + 2) % 3] = 1.0f;
+        for (int s = 0; s < samples; ++s)
+        {
+            const float ang = (static_cast<float>(s) / samples) * 2.0f * 3.14159265358979f;
+            const glm::vec3 p = origin + (u * std::cos(ang) + v * std::sin(ang)) * L;
+            glm::vec2 pw;
+            if (!projectToWindow(p, pw)) continue;
+            const float dist = glm::length(click - pw);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = a;
+            }
+        }
+    }
+    return best;
+}
+
+void EditorApp::applyGizmoDrag(const glm::vec2& startWin, const glm::vec2& curWin)
+{
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+        return;
+    if (m_gizmoAxis < 0) return;
+
+    const glm::vec2 deltaWin = curWin - startWin;
+
+    if (m_tool == Tool::Move)
+    {
+        glm::vec3 axis(0.0f);
+        if (m_gizmoAxis < 3) axis[m_gizmoAxis] = 1.0f;
+
+        // Project the axis to screen space at the gizmo origin and measure how
+        // many world units one pixel along that screen direction equals, so the
+        // handle tracks the cursor. Use the gizmo origin captured at press.
+        glm::vec2 originWin, tipWin;
+        if (projectToWindow(m_gizmoOriginAtPress, originWin) &&
+            projectToWindow(m_gizmoOriginAtPress + axis * gizmoWorldScale(), tipWin))
+        {
+            const glm::vec2 axisScreen = tipWin - originWin;
+            const float axisScreenLen2 = glm::dot(axisScreen, axisScreen);
+            if (axisScreenLen2 > 1e-6f)
+            {
+                // World units per (projected pixel along the axis):
+                // gizmoWorldScale() world units span |axisScreen| pixels.
+                const float worldPerScreenLen = gizmoWorldScale() / std::sqrt(axisScreenLen2);
+                const float screenProj = glm::dot(deltaWin, axisScreen) / std::sqrt(axisScreenLen2);
+                const float worldDelta = screenProj * worldPerScreenLen;
+                const glm::vec3 newPos = m_gizmoStartPosition + axis * worldDelta;
+                setObjectFloatField(m_selectedObject, "pos_x", newPos.x);
+                setObjectFloatField(m_selectedObject, "pos_y", newPos.y);
+                setObjectFloatField(m_selectedObject, "pos_z", newPos.z);
+            }
+        }
+    }
+    else if (m_tool == Tool::Scale)
+    {
+        if (m_gizmoAxis == 3)
+        {
+            // Uniform scale: horizontal drag grows/shrinks all axes.
+            const float factor = 1.0f + deltaWin.x * 0.01f;
+            const float f = std::max(factor, 0.01f);
+            const glm::vec3 s = m_gizmoStartScale * f;
+            setObjectFloatField(m_selectedObject, "scale_x", s.x);
+            setObjectFloatField(m_selectedObject, "scale_y", s.y);
+            setObjectFloatField(m_selectedObject, "scale_z", s.z);
+        }
+        else
+        {
+            glm::vec3 axis(0.0f);
+            axis[m_gizmoAxis] = 1.0f;
+            glm::vec2 originWin, tipWin;
+            if (projectToWindow(m_gizmoOriginAtPress, originWin) &&
+                projectToWindow(m_gizmoOriginAtPress + axis * gizmoWorldScale(), tipWin))
+            {
+                const glm::vec2 axisScreen = tipWin - originWin;
+                const float axisScreenLen = glm::length(axisScreen);
+                if (axisScreenLen > 1e-6f)
+                {
+                    const float screenProj = glm::dot(deltaWin, axisScreen) / axisScreenLen;
+                    // Map projected pixels to a multiplicative scale factor.
+                    const float factor = std::max(1.0f + screenProj * 0.01f, 0.01f);
+                    glm::vec3 s = m_gizmoStartScale;
+                    s[m_gizmoAxis] = m_gizmoStartScale[m_gizmoAxis] * factor;
+                    const char* field =
+                        (m_gizmoAxis == 0) ? "scale_x" : (m_gizmoAxis == 1) ? "scale_y" : "scale_z";
+                    setObjectFloatField(m_selectedObject, field, s[m_gizmoAxis]);
+                }
+            }
+        }
+    }
+    else if (m_tool == Tool::Rotate)
+    {
+        // Rotate about the grabbed axis by the angle the cursor sweeps around the
+        // projected gizmo origin (press vector -> current vector).
+        glm::vec2 originWin;
+        if (!projectToWindow(m_gizmoOriginAtPress, originWin)) return;
+        const glm::vec2 vStart = startWin - originWin;
+        const glm::vec2 vCur = curWin - originWin;
+        if (glm::length(vStart) < 1e-3f || glm::length(vCur) < 1e-3f) return;
+        const float angStart = std::atan2(vStart.y, vStart.x);
+        const float angCur = std::atan2(vCur.y, vCur.x);
+        float dAng = angCur - angStart;  // radians, screen space (y-down)
+        // Screen y is down, so a clockwise screen sweep is +angle here; map to a
+        // degrees delta on the chosen euler axis. Sign chosen so dragging feels
+        // consistent; exact handedness isn't load-bearing for the model edit.
+        float dDeg = glm::degrees(dAng);
+        glm::vec3 euler = m_gizmoStartEuler;
+        euler[m_gizmoAxis] += dDeg;
+        const char* field =
+            (m_gizmoAxis == 0) ? "rot_x" : (m_gizmoAxis == 1) ? "rot_y" : "rot_z";
+        setObjectFloatField(m_selectedObject, field, euler[m_gizmoAxis]);
+    }
+}
+
+void EditorApp::drawGizmo(const glm::mat4& view, const glm::mat4& proj)
+{
+    if (m_tool == Tool::Select) return;
+    if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
+        return;
+    if (!m_lineProgram) return;
+
+    const glm::vec3 origin = selectedGizmoOrigin();
+    const float L = gizmoWorldScale();
+
+    // Build interleaved pos(3)+color(3) line geometry in WORLD space; the line
+    // shader applies uView/uProjection only (no model).
+    std::vector<float> verts;
+    auto addLine = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+        verts.insert(verts.end(), {a.x, a.y, a.z, c.r, c.g, c.b});
+        verts.insert(verts.end(), {b.x, b.y, b.z, c.r, c.g, c.b});
+    };
+
+    const glm::vec3 axisColor[3] = {
+        glm::vec3(1.0f, 0.25f, 0.25f),  // X red
+        glm::vec3(0.25f, 1.0f, 0.25f),  // Y green
+        glm::vec3(0.35f, 0.5f, 1.0f),   // Z blue
+    };
+
+    if (m_tool == Tool::Move || m_tool == Tool::Scale)
+    {
+        for (int a = 0; a < 3; ++a)
+        {
+            glm::vec3 axis(0.0f);
+            axis[a] = 1.0f;
+            const glm::vec3 tip = origin + axis * L;
+            addLine(origin, tip, axisColor[a]);
+            if (m_tool == Tool::Move)
+            {
+                // A small arrowhead: two short back-angled lines in a stable plane.
+                glm::vec3 side(0.0f);
+                side[(a + 1) % 3] = 1.0f;
+                const glm::vec3 back = tip - axis * (L * 0.18f);
+                addLine(tip, back + side * (L * 0.08f), axisColor[a]);
+                addLine(tip, back - side * (L * 0.08f), axisColor[a]);
+            }
+            else
+            {
+                // Scale: a little box (cross) at the tip.
+                glm::vec3 s1(0.0f), s2(0.0f);
+                s1[(a + 1) % 3] = L * 0.06f;
+                s2[(a + 2) % 3] = L * 0.06f;
+                addLine(tip - s1, tip + s1, axisColor[a]);
+                addLine(tip - s2, tip + s2, axisColor[a]);
+            }
+        }
+        if (m_tool == Tool::Scale)
+        {
+            // Uniform/center handle: a small white cross at the origin.
+            const glm::vec3 w(0.9f);
+            const float h = L * 0.07f;
+            addLine(origin - glm::vec3(h, 0, 0), origin + glm::vec3(h, 0, 0), w);
+            addLine(origin - glm::vec3(0, h, 0), origin + glm::vec3(0, h, 0), w);
+            addLine(origin - glm::vec3(0, 0, h), origin + glm::vec3(0, 0, h), w);
+        }
+    }
+    else if (m_tool == Tool::Rotate)
+    {
+        const int seg = 48;
+        for (int a = 0; a < 3; ++a)
+        {
+            glm::vec3 u(0.0f), v(0.0f);
+            u[(a + 1) % 3] = 1.0f;
+            v[(a + 2) % 3] = 1.0f;
+            glm::vec3 prev = origin + u * L;
+            for (int s = 1; s <= seg; ++s)
+            {
+                const float ang = (static_cast<float>(s) / seg) * 2.0f * 3.14159265358979f;
+                const glm::vec3 p = origin + (u * std::cos(ang) + v * std::sin(ang)) * L;
+                addLine(prev, p, axisColor[a]);
+                prev = p;
+            }
+        }
+    }
+
+    // Upload + draw (depth test off so the gizmo is always visible).
+    GLuint vao = 0, vbo = 0;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
+                 verts.data(), GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                          reinterpret_cast<void*>(3 * sizeof(float)));
+
+    glUseProgram(m_lineProgram);
+    glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uView"), 1, GL_FALSE,
+                       glm::value_ptr(view));
+    glUniformMatrix4fv(glGetUniformLocation(m_lineProgram, "uProjection"), 1, GL_FALSE,
+                       glm::value_ptr(proj));
+    glDisable(GL_DEPTH_TEST);
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(verts.size() / 6));
+    glEnable(GL_DEPTH_TEST);
+    glUseProgram(0);
+
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+
+    // Register gizmo handle rects so they're puppet-targetable. Each handle's
+    // rect is a small box around the projected tip (Move/Scale) or a point on the
+    // ring (Rotate); the uniform Scale handle is at the origin.
+    auto recordHandle = [&](const std::string& name, const glm::vec2& center, float halfPx) {
+        m_layout.record(name, center.x - halfPx, center.y - halfPx, halfPx * 2.0f, halfPx * 2.0f);
+    };
+    glm::vec2 originWin;
+    const bool haveOrigin = projectToWindow(origin, originWin);
+    const char* axisName[3] = {"x", "y", "z"};
+    for (int a = 0; a < 3; ++a)
+    {
+        glm::vec3 axis(0.0f);
+        axis[a] = 1.0f;
+        glm::vec2 tipWin;
+        if (m_tool == Tool::Rotate)
+        {
+            // Use the +u point on the ring as a stable, queryable handle point.
+            glm::vec3 u(0.0f);
+            u[(a + 1) % 3] = 1.0f;
+            if (projectToWindow(origin + u * L, tipWin))
+                recordHandle(std::string("gizmo_") + axisName[a], tipWin, 12.0f);
+        }
+        else
+        {
+            if (projectToWindow(origin + axis * L, tipWin))
+                recordHandle(std::string("gizmo_") + axisName[a], tipWin, 12.0f);
+        }
+    }
+    if (m_tool == Tool::Scale && haveOrigin)
+    {
+        recordHandle("gizmo_uniform", originWin, 10.0f);
+    }
+    if (haveOrigin)
+    {
+        recordHandle("gizmo_origin", originWin, 10.0f);
+    }
+}
+
 void EditorApp::resizeFbo(int width, int height)
 {
     if (width <= 0 || height <= 0)
@@ -1043,6 +1567,9 @@ void EditorApp::renderViewport()
 
     // Draw the in-memory scene's objects (meshes, sphere proxies, light gizmos).
     drawSceneObjects(viewMat, projMat);
+
+    // Draw the transform gizmo for the selected object (Move/Rotate/Scale tools).
+    drawGizmo(viewMat, projMat);
 
     if (m_mesh.hasMesh() && m_shaderProgram)
     {
@@ -3007,18 +3534,61 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
         }
         else if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
-            m_orbiting = true;
-            m_panning = false;
-            m_lastCursorX = m_cursorX;
-            m_lastCursorY = m_cursorY;
+            // First, see if the press grabbed a transform gizmo handle. If so,
+            // begin a gizmo drag and suppress camera orbit for the duration.
+            const int handle = pickGizmoHandle(m_cursorX, m_cursorY);
+            if (handle >= 0)
+            {
+                m_gizmoDragging = true;
+                m_gizmoAxis = handle;
+                m_gizmoDragStart = glm::vec2(static_cast<float>(m_cursorX),
+                                             static_cast<float>(m_cursorY));
+                const SceneModel::ObjectNode& obj =
+                    m_scene.objects[static_cast<std::size_t>(m_selectedObject)];
+                m_gizmoStartPosition = obj.position;
+                m_gizmoStartEuler = obj.eulerDegrees;
+                m_gizmoStartScale = obj.scale;
+                m_gizmoOriginAtPress = selectedGizmoOrigin();
+                m_orbiting = false;
+                m_panning = false;
+            }
+            else
+            {
+                // Not on a handle: begin an orbit gesture, but remember the press
+                // so a release with little motion is treated as a click-select.
+                m_orbiting = true;
+                m_panning = false;
+                m_lastCursorX = m_cursorX;
+                m_lastCursorY = m_cursorY;
+                m_leftPressInViewport = true;
+                m_leftPressStart = glm::vec2(static_cast<float>(m_cursorX),
+                                             static_cast<float>(m_cursorY));
+                m_leftDragMoved = false;
+            }
         }
     }
     else if (!down)
     {
         if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
+            // A gizmo drag ending: just clear it (the transform was mutated live).
+            if (m_gizmoDragging)
+            {
+                m_gizmoDragging = false;
+                m_gizmoAxis = -1;
+            }
+            // A left-press that released over the viewport with little motion is a
+            // click: ray-pick to select the nearest object, or deselect on empty
+            // space. This keeps left-DRAG as orbit and left-CLICK as select.
+            else if (m_leftPressInViewport && !m_leftDragMoved && overViewport)
+            {
+                const int hit = pickObject(m_cursorX, m_cursorY);
+                m_selectedObject = hit;  // -1 on empty space = deselect
+            }
             m_orbiting = false;
             m_panning = false;
+            m_leftPressInViewport = false;
+            m_leftDragMoved = false;
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
         {
@@ -3029,6 +3599,27 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
 
 void EditorApp::onCursorPos(double x, double y)
 {
+    // An active gizmo drag takes priority over camera nav: mutate the selected
+    // object's transform from the press point to the current cursor.
+    if (m_gizmoDragging)
+    {
+        applyGizmoDrag(m_gizmoDragStart,
+                       glm::vec2(static_cast<float>(x), static_cast<float>(y)));
+        return;
+    }
+
+    // Track whether a left-press has moved far enough to count as a drag (orbit)
+    // rather than a click (select). The threshold absorbs the tiny jitter a
+    // multi-frame injected click produces between press and release.
+    if (m_leftPressInViewport && !m_leftDragMoved)
+    {
+        const glm::vec2 cur(static_cast<float>(x), static_cast<float>(y));
+        if (glm::length(cur - m_leftPressStart) > 4.0f)
+        {
+            m_leftDragMoved = true;
+        }
+    }
+
     if (!m_orbiting && !m_panning)
     {
         return;
