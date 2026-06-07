@@ -781,6 +781,14 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         // point-light/sphere-top/camera dot) without altering the normal image.
         setFromJsonIfPresent(settings.splatLuminanceClamp, renderConfiguration, "$splatLuminanceClamp", logToStdout);
 
+        // Phase 2a: probe-guided unified gather. $probeGather true replaces the
+        // splat + density-grid with one raw-bounce gather (retires the grid). The
+        // store capacity, keep-radius scale, and probe sub-sample are tunables.
+        setFromJsonIfPresent(settings.useProbeGather, renderConfiguration, "$probeGather", logToStdout);
+        setFromJsonIfPresent(settings.bounceStoreCapacity, renderConfiguration, "$bounceStoreCapacity", logToStdout);
+        setFromJsonIfPresent(settings.probeKeepRadiusScale, renderConfiguration, "$probeKeepRadiusScale", logToStdout);
+        setFromJsonIfPresent(settings.probeSubSample, renderConfiguration, "$probeSubSample", logToStdout);
+
         if (renderConfiguration.contains("$renderPath"))
         {
             scene.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), absoluteScenePath.parent_path());

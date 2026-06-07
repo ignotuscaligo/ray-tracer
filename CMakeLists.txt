@@ -324,6 +324,15 @@ target_sources(ray-tracer-lib
 
         include/EmissiveGather.h
         src/EmissiveGather.cpp
+
+        include/ProbeIndex.h
+        src/ProbeIndex.cpp
+
+        include/BounceStore.h
+        src/BounceStore.cpp
+
+        include/ProbeGather.h
+        src/ProbeGather.cpp
 )
 
 # ===== Executable

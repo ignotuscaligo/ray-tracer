@@ -1,10 +1,13 @@
 #include "Renderer.h"
 
 #include "AnimationQuery.h"
+#include "BounceStore.h"
 #include "Color.h"
 #include "DensityGrid.h"
 #include "EmissiveGather.h"
 #include "MirrorGather.h"
+#include "ProbeGather.h"
+#include "ProbeIndex.h"
 #include "LightQueue.h"
 #include "Light.h"
 #include "Photon.h"
@@ -249,6 +252,50 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
     cellSize *= cellScale;
     std::shared_ptr<DensityGrid> densityGrid = std::make_shared<DensityGrid>(cellSize);
 
+    // ===== Phase 2a: probe pass + raw-bounce store =====
+    //
+    // When probe-guided gather is enabled, run the PROBE PASS before the photon
+    // pass: cast camera rays, extend each through delta surfaces to its first
+    // non-delta hit, and index those points. During the photon pass the workers
+    // keep a non-delta bounce raw only if a probe is within the keep-radius
+    // (bounding memory by visible-surface-area), and the post-pass gather renders
+    // both direct and reflected diffuse from those raw bounces — retiring the
+    // density grid + splat. The keep-radius and probe-index cell size are tied to
+    // the same scene-depth pixel footprint that sizes everything else.
+    std::shared_ptr<ProbeIndex> probeIndex;
+    std::shared_ptr<BounceStore> bounceStore;
+    ProbeGather::ProbeResult probeResult;
+    double probeGatherMinRadius = 0.0;
+    if (settings.useProbeGather)
+    {
+        const std::shared_ptr<Camera>& primaryCam =
+            cameras.empty() ? scene.camera : cameras.front();
+        // The gather footprint scale: a pixel's world radius at scene depth. This
+        // is sceneDepthFootprint when derivable, else the configured cell size.
+        const double footprint =
+            (sceneDepthFootprint > 0.0) ? sceneDepthFootprint : cellSize;
+        const double keepRadius =
+            std::max(footprint, settings.probeKeepRadiusScale * footprint);
+        probeGatherMinRadius =
+            (sceneDepthFootprint > 0.0 && settings.splatMinRadiusScale > 0.0)
+                ? settings.splatMinRadiusScale * sceneDepthFootprint
+                : 0.0;
+
+        if (primaryCam)
+        {
+            probeResult = ProbeGather::collectProbes(
+                scene.objects, *primaryCam, *scene.materialLibrary,
+                animationQuery.get(), settings.probeSubSample);
+        }
+        // The probe-index cell size = keepRadius so a keep query touches a 3x3x3
+        // neighborhood. The gather's own bounce-index cell size is set later.
+        probeIndex = std::make_shared<ProbeIndex>(
+            probeResult.probes, keepRadius, keepRadius);
+        bounceStore = std::make_shared<BounceStore>(settings.bounceStoreCapacity);
+
+        WorkerDebug::resetBounceCounters();
+    }
+
     std::vector<std::shared_ptr<Worker>> workers{settings.workerCount};
 
     size_t workerIndex = 0;
@@ -261,13 +308,22 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         worker->materialLibrary = scene.materialLibrary;
         worker->lightQueue = lightQueue;
         worker->animationQuery = animationQuery;
-        worker->densityGrid = densityGrid;
         worker->setBounceThreshold(settings.bounceThreshold);
         worker->setTerminationThreshold(settings.terminationThreshold);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
         worker->setMinSplatRadius(minSplatRadius);
         worker->setSplatLuminanceClamp(settings.splatLuminanceClamp);
-        worker->setSplatTargets(splatTargets);
+        if (settings.useProbeGather)
+        {
+            // Probe mode: keep raw bounces near probes; NO density grid, NO splat.
+            worker->bounceStore = bounceStore;
+            worker->probeIndex = probeIndex;
+        }
+        else
+        {
+            worker->densityGrid = densityGrid;
+            worker->setSplatTargets(splatTargets);
+        }
         ++workerIndex;
     }
 
@@ -432,6 +488,24 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
 
     result.cameras.reserve(cameras.size());
 
+    // Phase 2a: build the raw-bounce spatial index ONCE after the photon pass
+    // drains (single-threaded). The unified gather queries it per camera.
+    if (settings.useProbeGather && bounceStore)
+    {
+        const std::shared_ptr<Camera>& primaryCam =
+            cameras.empty() ? scene.camera : cameras.front();
+        // Bounce-index cell size = the gather footprint scale, so a radius-r
+        // query touches a 3x3x3 neighborhood. Reuse the scene-depth footprint.
+        double gatherCell = cellSize;
+        if (sceneDepthFootprint > 0.0)
+        {
+            gatherCell = sceneDepthFootprint;
+        }
+        (void)primaryCam;
+        bounceStore->buildIndex(gatherCell);
+        result.bounceStore = bounceStore;
+    }
+
     // MULTI-CAMERA: the photon pass / splat / grid above are a SINGLE shared solve.
     // Each camera already has its own splat buffer (direct image). Now composite
     // the MIRROR GATHER into that buffer's black delta pixels — reflected radiance
@@ -460,32 +534,66 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         const bool debugCamera = (cam->bounceFilter() >= 0) || (cam->lightFilter() >= 0);
 
         const std::chrono::time_point gatherStart = std::chrono::system_clock::now();
-        if (imageBuffer && !debugCamera)
+        if (settings.useProbeGather && bounceStore)
         {
-            cr.mirror = MirrorGather::run(
-                scene.objects,
-                cam,
-                *densityGrid,
-                *scene.materialLibrary,
-                animationQuery.get(),
-                static_cast<double>(settings.photonsPerLight),
-                settings.workerCount,
-                *imageBuffer);
+            // Phase 2a UNIFIED GATHER: one path renders both directly-visible
+            // diffuse (extension depth 0) AND reflected/refracted diffuse
+            // (extension depth > 0) from the retained raw bounces. Replaces the
+            // splat (direct) + MirrorGather/density-grid (reflections). The gather
+            // OWNS the whole image, so it writes into the (cleared) buffer.
+            if (imageBuffer && !debugCamera)
+            {
+                cr.probe = ProbeGather::run(
+                    scene.objects,
+                    cam,
+                    *bounceStore,
+                    *scene.materialLibrary,
+                    animationQuery.get(),
+                    settings.workerCount,
+                    probeGatherMinRadius,
+                    *imageBuffer);
+            }
+            // Emitter fixtures are still composited via the emissive gather (a
+            // light surface's own radiance, not a gathered bounce).
+            if (imageBuffer && !debugCamera)
+            {
+                cr.emissive = EmissiveGather::run(
+                    scene.objects,
+                    cam,
+                    animationQuery.get(),
+                    settings.workerCount,
+                    *imageBuffer);
+            }
         }
-        // Emissive gather: make light fixtures camera-visible at their true
-        // surface radiance L = M/pi. Treats each emitter as a surface whose
-        // outgoing radiance the camera reads (no primary-ray-vs-light special
-        // case in the tracer) and writes it into the pixels the fixture is
-        // visible in. Composites into the same buffer; skipped for debug cameras
-        // (which isolate deposits, not direct emitter visibility).
-        if (imageBuffer && !debugCamera)
+        else
         {
-            cr.emissive = EmissiveGather::run(
-                scene.objects,
-                cam,
-                animationQuery.get(),
-                settings.workerCount,
-                *imageBuffer);
+            if (imageBuffer && !debugCamera)
+            {
+                cr.mirror = MirrorGather::run(
+                    scene.objects,
+                    cam,
+                    *densityGrid,
+                    *scene.materialLibrary,
+                    animationQuery.get(),
+                    static_cast<double>(settings.photonsPerLight),
+                    settings.workerCount,
+                    *imageBuffer);
+            }
+            // Emissive gather: make light fixtures camera-visible at their true
+            // surface radiance L = M/pi. Treats each emitter as a surface whose
+            // outgoing radiance the camera reads (no primary-ray-vs-light special
+            // case in the tracer) and writes it into the pixels the fixture is
+            // visible in. Composites into the same buffer; skipped for debug
+            // cameras (which isolate deposits, not direct emitter visibility).
+            if (imageBuffer && !debugCamera)
+            {
+                cr.emissive = EmissiveGather::run(
+                    scene.objects,
+                    cam,
+                    animationQuery.get(),
+                    settings.workerCount,
+                    *imageBuffer);
+            }
         }
         const std::chrono::time_point gatherEnd = std::chrono::system_clock::now();
 

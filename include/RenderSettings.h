@@ -110,4 +110,37 @@ struct RenderSettings
     // does NOT darken or alter the normal image: a normal splat's luminance is
     // orders of magnitude below a sane threshold and passes through untouched.
     double splatLuminanceClamp = 0.0;
+
+    // ===== Phase 2a: probe-guided unified gather =====
+    // When true, the renderer replaces the camera splat + density-grid reflection
+    // mechanisms with ONE probe-guided raw-bounce gather: a probe pass extends
+    // camera rays through delta surfaces to their first non-delta hit; non-delta
+    // photon bounces near a probe are kept RAW in a BounceStore (bounces far from
+    // every probe are discarded — this bounds memory by visible-surface-area); a
+    // unified gather renders both direct and reflected diffuse from those raw
+    // bounces. Retires the density grid. Default false keeps the legacy
+    // splat+grid path. ($probeGather in the scene render config.)
+    bool useProbeGather = false;
+
+    // Maximum raw bounces retained by the BounceStore (slot capacity). Storage is
+    // bounded by the probe keep-test (visible-surface-area), but the store still
+    // needs a fixed up-front capacity; this is the ceiling. Bounces past it are
+    // dropped and counted. Default 40M (~960 MiB at 24 B/record) comfortably holds
+    // a Cornell-scale visible surface at multi-million photon budgets.
+    size_t bounceStoreCapacity = 40 * kMillion;
+
+    // Keep-radius scale: a non-delta bounce is kept iff a probe lies within
+    // (probeKeepRadiusScale * sceneDepthFootprint) of it. >= 1 so the keep radius
+    // is at least one gather footprint (a bounce exactly one footprint from a
+    // probe can still contribute to that probe's gather). Larger = more permissive
+    // keep (more memory, no missing reflections at fast-moving geometry later);
+    // smaller = tighter cull. Default 1.5 (a small safety margin over one
+    // footprint).
+    double probeKeepRadiusScale = 1.5;
+
+    // Probe-pass pixel stride. 1 = a probe per pixel (densest coverage); >1
+    // strides the pixel grid to cut probe-pass cost. Adjacent pixels project to
+    // overlapping footprints so a modest stride still tiles the visible surface.
+    // Default 1.
+    size_t probeSubSample = 1;
 };

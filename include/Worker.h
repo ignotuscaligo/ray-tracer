@@ -1,8 +1,10 @@
 #pragma once
 
 #include "AnimationQuery.h"
+#include "BounceStore.h"
 #include "Buffer.h"
 #include "DensityGrid.h"
+#include "ProbeIndex.h"
 #include "Camera.h"
 #include "Hit.h"
 #include "Image.h"
@@ -103,6 +105,13 @@ public:
     // The mirror gather looks this up at reflected surface points after the pass.
     // May be null (then grid accumulation is skipped).
     std::shared_ptr<DensityGrid> densityGrid;
+    // Phase 2a probe-guided gather. When BOTH are set, a non-delta bounce is kept
+    // RAW in `bounceStore` (position, incoming dir, power) only if it lies within
+    // the probe keep-radius of some camera-visible probe (`probeIndex`); bounces
+    // far from every probe are discarded (they can never reach the camera). When
+    // null, the worker uses the legacy density-grid deposit + camera splat path.
+    std::shared_ptr<BounceStore> bounceStore;
+    std::shared_ptr<ProbeIndex> probeIndex;
     // Continuous-time transform oracle (vision doc pillar 1). Default initialization is
     // a StaticAnimationQuery — every transformAt() call returns the scene-load transform
     // regardless of time. Workers currently read object positions through the existing
@@ -210,4 +219,12 @@ size_t splatRadiusClamped();
 // the per-splat clamp and were scaled down. 0 when the clamp is disabled.
 size_t splatLuminanceClamped();
 void resetSplatCounters();
+
+// Phase 2a probe keep-test counters (evidence the keep-test actually culls
+// bounces / bounds memory). bounceKept = non-delta bounces stored because a
+// probe was near; bounceCulled = non-delta bounces discarded because NO probe
+// was within the keep-radius. The cull fraction is the memory-bound proof.
+size_t bounceKept();
+size_t bounceCulled();
+void resetBounceCounters();
 }

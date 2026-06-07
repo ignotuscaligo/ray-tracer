@@ -1,10 +1,12 @@
 #pragma once
 
+#include "BounceStore.h"
 #include "Buffer.h"
 #include "DensityGrid.h"
 #include "EmissiveGather.h"
 #include "Image.h"
 #include "MirrorGather.h"
+#include "ProbeGather.h"
 #include "SceneLoader.h"
 
 #include <functional>
@@ -29,6 +31,11 @@ struct CameraRender
     // Emissive-gather diagnostics for this camera (how many pixels a light
     // fixture was directly visible in, and at what radiance).
     EmissiveGather::Result emissive;
+
+    // Phase 2a probe-guided unified-gather diagnostics for this camera (pixels
+    // hit / gathered / extended through delta, deposits summed). Populated only
+    // when the probe gather is enabled; otherwise the mirror/splat path is used.
+    ProbeGather::Result probe;
 
     // Wall-clock time this camera's mirror gather took. The shared photon pass
     // time (which now includes the direct splat) is reported once at the
@@ -75,6 +82,11 @@ struct RenderResult
 
     // Storage pivot: mirror-gather diagnostics for the PRIMARY camera.
     MirrorGather::Result mirror;
+
+    // Phase 2a: the raw-bounce store built during the photon pass (probe-guided
+    // gather). Memory is bounded by the probe keep-test (visible-surface-area),
+    // not photon count. Null when the legacy density-grid path is used.
+    std::shared_ptr<BounceStore> bounceStore;
 };
 
 namespace Renderer

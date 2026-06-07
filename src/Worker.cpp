@@ -30,6 +30,11 @@ std::atomic<size_t> g_splatRadiusClamped{0};
 // the per-splat clamp and were scaled down. Stays 0 when the clamp is disabled.
 std::atomic<size_t> g_splatLuminanceClamped{0};
 
+// Phase 2a probe keep-test diagnostics: non-delta bounces kept (a probe was
+// within the keep-radius -> stored raw) vs culled (no probe near -> discarded).
+std::atomic<size_t> g_bounceKept{0};
+std::atomic<size_t> g_bounceCulled{0};
+
 }
 
 namespace WorkerDebug
@@ -42,6 +47,13 @@ void resetSplatCounters()
     g_splatTotal.store(0);
     g_splatRadiusClamped.store(0);
     g_splatLuminanceClamped.store(0);
+}
+size_t bounceKept() { return g_bounceKept.load(); }
+size_t bounceCulled() { return g_bounceCulled.load(); }
+void resetBounceCounters()
+{
+    g_bounceKept.store(0);
+    g_bounceCulled.store(0);
 }
 }
 
@@ -538,24 +550,52 @@ bool Worker::processPhotons()
             PhotonHit photonHit = m_volumeHitBuffer[minIndex];
             std::shared_ptr<Material> material = materialLibrary->fetchByIndex(photonHit.hit.material);
 
-            // Storage pivot M3: accumulate this NON-DELTA bounce's energy into the
-            // QUANTIZED DENSITY GRID cell it landed in. Storage is bounded by
-            // occupied cells, not photon count. A Lambertian surface's outgoing
-            // radiance is view-independent, so the cell accumulates the incoming
-            // photon power (an irradiance accumulator); the mirror gather reads it
-            // back and multiplies by the reflected surface's BRDF. Pure mirrors /
-            // delta materials are excluded — a delta bounce has no diffuse deposit;
-            // it is the ray-extension case in the gather. The add is sharded +
-            // locked per cell, so distinct cells do not serialize workers.
-            if (densityGrid && material && !material->isDelta())
+            if (bounceStore && probeIndex)
             {
-                densityGrid->add(photonHit.hit.position, photonHit.photon.color);
+                // Phase 2a PROBE-GUIDED RAW STORAGE. A non-delta bounce is the
+                // diffuse/glossy radiance the camera can gather (directly or via a
+                // specular chain). Keep it RAW — position, incoming direction,
+                // power — only if it lies within the probe keep-radius of some
+                // camera-visible probe; otherwise discard it (no probe near means
+                // no camera ray ever lands here, so it can never be gathered). The
+                // keep-test is what bounds memory by visible-surface-area instead
+                // of by photon count, which is what makes raw storage affordable
+                // and lets the density grid be retired. Delta bounces are NOT
+                // stored — they are the ray-extension case in the gather.
+                if (material && !material->isDelta())
+                {
+                    if (probeIndex->anyWithinKeepRadius(photonHit.hit.position))
+                    {
+                        const RawBounce record{photonHit.hit.position,
+                                               photonHit.photon.ray.direction,
+                                               photonHit.photon.color};
+                        bounceStore->append(record);
+                        g_bounceKept.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    else
+                    {
+                        g_bounceCulled.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
             }
+            else
+            {
+                // Legacy storage pivot path: density-grid deposit + direct splat.
+                //
+                // Storage pivot M3: accumulate this NON-DELTA bounce's energy into
+                // the QUANTIZED DENSITY GRID cell it landed in. Pure mirrors /
+                // delta materials are excluded — a delta bounce has no diffuse
+                // deposit; it is the ray-extension case in the gather.
+                if (densityGrid && material && !material->isDelta())
+                {
+                    densityGrid->add(photonHit.hit.position, photonHit.photon.color);
+                }
 
-            // Storage pivot M2: DIRECT CAMERA SPLAT for camera-visible non-delta
-            // surfaces. Projects this bounce into the camera and accumulates its
-            // outgoing radiance into the pixel buffer (sharp direct image).
-            splatToCamera(photonHit, material);
+                // Storage pivot M2: DIRECT CAMERA SPLAT for camera-visible
+                // non-delta surfaces. Projects this bounce into the camera and
+                // accumulates its outgoing radiance into the pixel buffer.
+                splatToCamera(photonHit, material);
+            }
 
             // Continue the random walk only while BOTH terminators allow it; the
             // photon dies at WHICHEVER fires FIRST:

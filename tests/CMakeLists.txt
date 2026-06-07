@@ -52,6 +52,7 @@ target_sources(tests
         test_AreaLight.cpp
         test_EmissiveGather.cpp
         test_MirrorGather.cpp
+        test_ProbeGather.cpp
         test_DecayTermination.cpp
         test_SinglePhotonScatter.cpp
         test_SplatToCamera.cpp
