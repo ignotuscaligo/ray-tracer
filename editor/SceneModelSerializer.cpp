@@ -89,16 +89,46 @@ json toJson(const SceneModel& model)
     // ----- $scene ----------------------------------------------------------
     json scene = json::object();
 
-    // Camera.
-    if (model.camera.present)
+    // Cameras. Each scene camera is emitted as a renderer Camera node with its
+    // per-camera resolution / exposure / debug filters / output name, matching the
+    // renderer's multi-camera format (see MultiCameraTest.json + SceneLoader).
+    int cameraOrdinal = 0;
+    for (const auto& camDesc : model.cameras)
     {
         json cam = json::object();
         cam["$type"] = "Camera";
-        cam["$verticalFieldOfView"] = model.camera.verticalFovDegrees;
-        cam["$position"] = vec3Json(model.camera.position);
-        cam["$rotation"] = rotationJson(model.camera.eulerDegrees);
-        scene[model.camera.name.empty() ? std::string("Camera") : model.camera.name] =
-            std::move(cam);
+        cam["$verticalFieldOfView"] = camDesc.verticalFovDegrees;
+        cam["$position"] = vec3Json(camDesc.position);
+        cam["$rotation"] = rotationJson(camDesc.eulerDegrees);
+
+        // Per-camera resolution override.
+        cam["$width"] = camDesc.width;
+        cam["$height"] = camDesc.height;
+
+        // Per-camera exposure.
+        cam["$fNumber"] = camDesc.fNumber;
+        cam["$shutterTime"] = camDesc.shutterTime;
+        cam["$iso"] = camDesc.iso;
+
+        // Per-camera debug filters (only when enabled; the loader defaults to -1).
+        if (camDesc.bounceFilter >= 0)
+        {
+            cam["$bounceFilter"] = camDesc.bounceFilter;
+        }
+        if (camDesc.lightFilter >= 0)
+        {
+            cam["$lightFilter"] = camDesc.lightFilter;
+        }
+
+        // Output: round-trip the editor's pattern AND emit an $outputName derived
+        // from the camera name so the renderer's own naming stays sensible.
+        cam["$outputPathPattern"] = camDesc.outputPathPattern;
+        cam["$outputName"] = camDesc.name;
+
+        const std::string key =
+            camDesc.name.empty() ? ("Camera." + std::to_string(cameraOrdinal)) : camDesc.name;
+        scene[key] = std::move(cam);
+        ++cameraOrdinal;
     }
 
     for (const auto& obj : model.objects)

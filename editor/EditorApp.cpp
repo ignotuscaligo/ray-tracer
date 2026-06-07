@@ -7,8 +7,10 @@
 #include "SceneModelSerializer.h"
 #include "Shaders.h"
 
+#include "Camera.h"
 #include "Hit.h"
 #include "Image.h"
+#include "PngWriter.h"
 #include "Ray.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
@@ -831,6 +833,7 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
     m_scene = std::move(model);
     m_scenePath = path;          // render-from-view re-serializes this scene
     m_selectedObject = -1;
+    m_selectedCamera = m_scene.hasCamera() ? 0 : -1;  // default-select first shot
     m_selectedMaterial.clear();
     m_propertiesMode = PropertiesMode::Object;
     m_meshLabel = m_scene.name;
@@ -865,12 +868,12 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
     // intended one (e.g. the interior of an enclosed Cornell box) and
     // render-from-current-view is non-black. Auto-frame is only the fallback for
     // scenes with no authored camera (e.g. File>New + inserts).
-    if (m_scene.camera.present)
+    if (const SceneModel::CameraDesc* primary = m_scene.primaryCamera())
     {
         // Choose an orbit distance that puts the pivot at the scene center (if we
         // have bounds), so orbiting rotates around the scene rather than a point
         // behind the camera. eye() still lands on the authored position.
-        const glm::vec3 camPos = m_scene.camera.position;
+        const glm::vec3 camPos = primary->position;
         float orbitDistance = 100.0f;
         if (any)
         {
@@ -881,9 +884,9 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
                 orbitDistance = toCenter;
             }
         }
-        m_camera.setFromAuthoredCamera(camPos, m_scene.camera.eulerDegrees.x,
-                                       m_scene.camera.eulerDegrees.y,
-                                       static_cast<float>(m_scene.camera.verticalFovDegrees),
+        m_camera.setFromAuthoredCamera(camPos, primary->eulerDegrees.x,
+                                       primary->eulerDegrees.y,
+                                       static_cast<float>(primary->verticalFovDegrees),
                                        orbitDistance);
     }
     else if (any)
@@ -898,7 +901,20 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
     return {};
 }
 
-nlohmann::json EditorApp::serializeWithLiveCamera()
+nlohmann::json EditorApp::serializeForRender()
+{
+    // The to-disk render uses the CONFIGURED scene cameras as-authored (each with
+    // its own resolution / exposure / debug filters). If the scene has no camera,
+    // fall back to a single camera synthesized from the live orbit view so Render
+    // still produces something.
+    if (!m_scene.hasCamera())
+    {
+        return serializeWithLiveCamera(/*singleCameraForPreview=*/true);
+    }
+    return SceneModelSerializer::toJson(m_scene);
+}
+
+nlohmann::json EditorApp::serializeWithLiveCamera(bool singleCameraForPreview)
 {
     // Convention mapping (derived from src/Quaternion.cpp::fromPitchYawRoll and
     // the orbit eye() parameterization) — see startRender for the full rationale:
@@ -913,8 +929,35 @@ nlohmann::json EditorApp::serializeWithLiveCamera()
     json sceneJson = SceneModelSerializer::toJson(m_scene);
     json& sceneBlock = sceneJson["$scene"];
 
-    // The serializer emits the model's camera (if any); from a File>New scene
-    // there is none, so synthesize one. Either way the live orbit camera wins.
+    if (singleCameraForPreview)
+    {
+        // PREVIEW / PICK path: the render must use exactly ONE camera — the orbit
+        // (roaming) view. Strip every scene camera and inject a single live one,
+        // so a multi-camera scene previews as the current viewport, not as all
+        // shots at once.
+        json kept = json::object();
+        for (auto& [name, node] : sceneBlock.items())
+        {
+            if (node.is_object() && node.value("$type", std::string{}) == "Camera")
+            {
+                continue;  // drop configured shots for the single-view preview
+            }
+            kept[name] = node;
+        }
+        kept["Camera"] = {
+            {"$type", "Camera"},
+            {"$verticalFieldOfView", renderFovDeg},
+            {"$position", {eye.x, eye.y, eye.z}},
+            {"$rotation",
+             {{"$type", "PitchYawRollDegrees"},
+              {"$value", {renderPitchDeg, renderYawDeg, 0.0}}}}};
+        sceneJson["$scene"] = std::move(kept);
+        return sceneJson;
+    }
+
+    // SAVE path: keep all configured cameras, but update the PRIMARY (first)
+    // camera to the live orbit view so the saved scene frames as the viewport
+    // shows it. From a File>New scene there is none, so synthesize one.
     bool wroteCamera = false;
     for (auto& [name, node] : sceneBlock.items())
     {
@@ -952,7 +995,8 @@ std::string EditorApp::saveScene(const std::string& path)
         return "scene is empty — nothing to save";
     }
 
-    json sceneJson = serializeWithLiveCamera();
+    // Save keeps all configured cameras; only the primary is updated to the view.
+    json sceneJson = serializeWithLiveCamera(/*singleCameraForPreview=*/false);
 
     std::filesystem::path out(path);
     if (out.has_parent_path())
@@ -2268,13 +2312,30 @@ void EditorApp::drawSceneExplorer()
         m_layout.record("panel_explorer", wp.x, wp.y, ws.x, ws.y);
     }
 
-    // Camera row first (always present once a scene is loaded).
-    if (m_scene.camera.present)
+    // Camera rows first — one per configured scene camera (shots). Selecting a
+    // camera row makes it the active camera so the render panel edits its props.
+    for (std::size_t ci = 0; ci < m_scene.cameras.size(); ++ci)
     {
-        ImGui::Selectable(("[Camera] " + m_scene.camera.name).c_str(), false);
+        const SceneModel::CameraDesc& cam = m_scene.cameras[ci];
+        const bool selected = (m_selectedCamera == static_cast<int>(ci));
+        ImGui::PushID(("cam" + std::to_string(ci)).c_str());
+        if (ImGui::Selectable(("[Camera] " + cam.name).c_str(), selected))
+        {
+            m_selectedCamera = static_cast<int>(ci);
+            dismissRenderOverlay();
+        }
         const ImVec2 mn = ImGui::GetItemRectMin();
         const ImVec2 mx = ImGui::GetItemRectMax();
-        m_layout.record("explorer_row_camera", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        m_layout.record("explorer_row_camera_" + cam.name, mn.x, mn.y, mx.x - mn.x,
+                        mx.y - mn.y);
+        m_layout.record("explorer_row_camera_index_" + std::to_string(ci), mn.x, mn.y,
+                        mx.x - mn.x, mx.y - mn.y);
+        if (ci == 0)
+        {
+            // Back-compat alias for the old single-camera row name.
+            m_layout.record("explorer_row_camera", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        }
+        ImGui::PopID();
     }
 
     // One selectable row per object. The row label carries the kind so an agent
@@ -2303,7 +2364,7 @@ void EditorApp::drawSceneExplorer()
         ImGui::PopID();
     }
 
-    if (m_scene.objects.empty() && !m_scene.camera.present)
+    if (m_scene.objects.empty() && !m_scene.hasCamera())
     {
         ImGui::TextDisabled("(empty scene — Insert > ... or right-click)");
     }
@@ -2826,27 +2887,34 @@ void EditorApp::drawUi()
         }
         (void)toolbarBottom;
     }
+    // Three-column Cinema-4D-style layout: a left controls/scene column, the
+    // central viewport (the main area), and a RIGHT render-config panel. The old
+    // bottom "Render" display panel is gone — the render now appears IN the
+    // viewport via Preview's progressive overlay, not in a panel.
     const float controlsWidth = 360.0f;
-    const float renderHeight = 260.0f;
+    const float renderPanelWidth = 340.0f;
+    const float centerWidth = size.x - controlsWidth - renderPanelWidth;
 
     ImGui::SetNextWindowPos(origin, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(controlsWidth, size.y), ImGuiCond_FirstUseEver);
 
-    // Controls + scene panel.
+    // Controls + scene panel (left column).
     ImGui::Begin("Ray Tracer Editor");
     m_layout.record("panel_controls", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
                     ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
     ImGui::TextWrapped("GUI model/scene editor for the photon path tracer.");
     ImGui::Separator();
     ImGui::Text("Scene: %s%s", m_scene.name.c_str(), m_scene.dirty ? " *" : "");
-    ImGui::Text("Objects: %zu   Materials: %zu", m_scene.objects.size(),
-                m_scene.materials.size());
-    ImGui::TextWrapped("Viewport: orbit = right-drag, pan = middle-drag or "
-                       "shift+right-drag, zoom = scroll, left-click = select / "
-                       "drag gizmo");
+    ImGui::Text("Objects: %zu   Materials: %zu   Cameras: %zu", m_scene.objects.size(),
+                m_scene.materials.size(), m_scene.cameras.size());
+    ImGui::TextWrapped("Viewport (orbit camera): orbit = right-drag, pan = "
+                       "middle-drag or shift+right-drag, zoom = scroll, left-click "
+                       "= select / drag gizmo. The orbit camera is the roaming "
+                       "PREVIEW viewpoint; scene cameras (right panel) are the "
+                       "configured shots that RENDER to disk.");
     ImGui::Separator();
 
-    // Scene explorer: the tree of named objects + the camera. Selecting a row
+    // Scene explorer: the tree of named objects + the cameras. Selecting a row
     // sets m_selectedObject (highlights it in the viewport; drives the properties
     // panel next wave). Each row registers its pixel rect in the LayoutRegistry.
     drawSceneExplorer();
@@ -2861,50 +2929,12 @@ void EditorApp::drawUi()
     // selected object, OR (when a material is the active context) the material's
     // type/color/ior. drawPropertiesPanel() arbitrates via m_propertiesMode.
     drawPropertiesPanel();
-    ImGui::Separator();
-
-    ImGui::Text("Scene file: %s",
-                m_scenePath.empty() ? "(MirrorTest.json not found)" : m_scenePath.c_str());
-    ImGui::SliderInt("Render resolution", &m_renderResolution, 64, 720);
-    ImGui::SliderInt("Photons (millions)", &m_renderPhotonsMillions, 1, 20);
-
-    const RenderState state = m_renderState.load();
-    const bool running = (state == RenderState::Running);
-
-    if (running)
-    {
-        ImGui::BeginDisabled();
-    }
-    if (ImGui::Button("Render"))
-    {
-        startRender();
-    }
-    // Record the Render button's rect (useful for click-driven validation of the
-    // controls panel; the next wave's buttons register the same way).
-    {
-        const ImVec2 mn = ImGui::GetItemRectMin();
-        const ImVec2 mx = ImGui::GetItemRectMax();
-        m_layout.record("button_render", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
-    }
-    if (running)
-    {
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::Text("Rendering...");
-    }
-
-    ImGui::TextWrapped("Status: %s", m_renderStatus.c_str());
-    if (state == RenderState::Failed && !m_renderError.empty())
-    {
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Error: %s", m_renderError.c_str());
-    }
     ImGui::End();
 
-    // Raster viewport panel — fills the area to the right of the controls,
-    // leaving room for the Render panel at the bottom.
+    // Raster viewport panel — the central area, between the controls and the
+    // right render-config panel, full height.
     ImGui::SetNextWindowPos(ImVec2(origin.x + controlsWidth, origin.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(size.x - controlsWidth, size.y - renderHeight),
-                             ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(centerWidth, size.y), ImGuiCond_FirstUseEver);
 
     // Raster viewport panel.
     ImGui::Begin("Viewport");
@@ -2935,30 +2965,223 @@ void EditorApp::drawUi()
     }
     ImGui::End();
 
-    // Path-traced render output panel — sits beneath the viewport, wide enough
-    // that its help text wraps normally instead of one character per line.
-    ImGui::SetNextWindowPos(ImVec2(origin.x + controlsWidth, origin.y + size.y - renderHeight),
+    // Right-side render-config panel: global renderer settings, the camera list +
+    // per-camera settings, and the Preview / Render buttons.
+    ImGui::SetNextWindowPos(ImVec2(origin.x + controlsWidth + centerWidth, origin.y),
                             ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(size.x - controlsWidth, renderHeight), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(renderPanelWidth, size.y), ImGuiCond_FirstUseEver);
+    drawRenderPanel();
+}
 
-    // Path-traced render output panel.
+void EditorApp::drawRenderPanel()
+{
     ImGui::Begin("Render");
     m_layout.record("panel_render", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
                     ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
-    if (m_renderTex != 0 && m_renderWidth > 0)
+
+    const RenderState state = m_renderState.load();
+    const bool running = (state == RenderState::Running);
+
+    // ----- global renderer settings ---------------------------------------
+    ImGui::TextUnformatted("Global renderer settings");
+    ImGui::Separator();
+    ImGui::SliderInt("Preview resolution", &m_renderResolution, 64, 720);
+    recordItemRect(m_layout, "render_preview_resolution");
+    ImGui::SliderInt("Photons / light (M)", &m_renderPhotonsMillions, 1, 20);
+    recordItemRect(m_layout, "render_photons");
+    ImGui::SliderInt("Bounce threshold", &m_bounceThreshold, 1, 16);
+    recordItemRect(m_layout, "render_bounce_threshold");
+    ImGui::SliderFloat("Termination threshold", &m_terminationThreshold, 0.0f, 1.0f, "%.3f");
+    recordItemRect(m_layout, "render_termination_threshold");
+    ImGui::Spacing();
+
+    // ----- camera list -----------------------------------------------------
+    ImGui::TextUnformatted("Scene cameras (shots)");
+    ImGui::Separator();
+    ImGui::TextWrapped("Preview renders the ORBIT view into the viewport. Render "
+                       "writes EACH scene camera below to its output path.");
+
+    ImGui::BeginChild("camera_list", ImVec2(0, 96), true);
     {
-        ImVec2 avail = ImGui::GetContentRegionAvail();
-        float scale = avail.x / static_cast<float>(m_renderWidth);
-        if (scale <= 0.0f || scale > 4.0f) scale = 1.0f;
-        ImGui::Image(
-            static_cast<ImTextureID>(static_cast<intptr_t>(m_renderTex)),
-            ImVec2(m_renderWidth * scale, m_renderHeight * scale));
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        m_layout.record("panel_cameras", wp.x, wp.y, ws.x, ws.y);
+    }
+    if (m_scene.cameras.empty())
+    {
+        ImGui::TextDisabled("(no scene cameras — Add from current view)");
+    }
+    for (std::size_t ci = 0; ci < m_scene.cameras.size(); ++ci)
+    {
+        const SceneModel::CameraDesc& cam = m_scene.cameras[ci];
+        const bool selected = (m_selectedCamera == static_cast<int>(ci));
+        ImGui::PushID(("rcam" + std::to_string(ci)).c_str());
+        char label[256];
+        std::snprintf(label, sizeof(label), "%s  (%dx%d)", cam.name.c_str(), cam.width,
+                      cam.height);
+        if (ImGui::Selectable(label, selected))
+        {
+            m_selectedCamera = static_cast<int>(ci);
+        }
+        m_layout.record("camera_row_" + cam.name, ImGui::GetItemRectMin().x,
+                        ImGui::GetItemRectMin().y,
+                        ImGui::GetItemRectMax().x - ImGui::GetItemRectMin().x,
+                        ImGui::GetItemRectMax().y - ImGui::GetItemRectMin().y);
+        m_layout.record("camera_row_index_" + std::to_string(ci), ImGui::GetItemRectMin().x,
+                        ImGui::GetItemRectMin().y,
+                        ImGui::GetItemRectMax().x - ImGui::GetItemRectMin().x,
+                        ImGui::GetItemRectMax().y - ImGui::GetItemRectMin().y);
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    if (ImGui::Button("Add camera from current view"))
+    {
+        addCameraFromCurrentView();
+    }
+    recordItemRect(m_layout, "button_add_camera");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(m_selectedCamera < 0 ||
+                         m_selectedCamera >= static_cast<int>(m_scene.cameras.size()));
+    if (ImGui::Button("Delete camera"))
+    {
+        if (m_selectedCamera >= 0 &&
+            m_selectedCamera < static_cast<int>(m_scene.cameras.size()))
+        {
+            m_scene.cameras.erase(m_scene.cameras.begin() + m_selectedCamera);
+            m_scene.dirty = true;
+            if (m_selectedCamera >= static_cast<int>(m_scene.cameras.size()))
+            {
+                m_selectedCamera = static_cast<int>(m_scene.cameras.size()) - 1;
+            }
+        }
+    }
+    ImGui::EndDisabled();
+    recordItemRect(m_layout, "button_delete_camera");
+
+    // ----- selected-camera per-camera settings -----------------------------
+    if (m_selectedCamera >= 0 &&
+        m_selectedCamera < static_cast<int>(m_scene.cameras.size()))
+    {
+        drawCameraSettings(m_selectedCamera);
     }
     else
     {
-        ImGui::TextWrapped("Click Render to path-trace the scene. The result appears here.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("(select a camera to edit its render settings)");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // ----- Preview + Render buttons ---------------------------------------
+    if (running)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Preview"))
+    {
+        startRender();  // in-viewport progressive render from the orbit view
+    }
+    recordItemRect(m_layout, "button_preview");
+    ImGui::SameLine();
+    if (ImGui::Button("Render"))
+    {
+        startFullRender();  // to-disk render across all scene cameras
+    }
+    recordItemRect(m_layout, "button_render");
+    if (running)
+    {
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextUnformatted("Rendering...");
+    }
+
+    ImGui::TextWrapped("Status: %s", m_renderStatus.c_str());
+    if (state == RenderState::Failed && !m_renderError.empty())
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Error: %s", m_renderError.c_str());
+    }
+    if (!m_lastRenderOutputs.empty())
+    {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Last Render wrote:");
+        for (const auto& f : m_lastRenderOutputs)
+        {
+            ImGui::BulletText("%s", f.c_str());
+        }
     }
     ImGui::End();
+}
+
+void EditorApp::drawCameraSettings(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.cameras.size()))
+    {
+        return;
+    }
+    SceneModel::CameraDesc& cam = m_scene.cameras[index];
+
+    ImGui::Spacing();
+    ImGui::Text("Camera: %s", cam.name.c_str());
+    ImGui::Separator();
+
+    // Resolution.
+    int res[2] = {cam.width, cam.height};
+    if (ImGui::InputInt2("Resolution", res))
+    {
+        cam.width = std::max(16, res[0]);
+        cam.height = std::max(16, res[1]);
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_resolution");
+
+    // Exposure.
+    double fNum = cam.fNumber, shutter = cam.shutterTime, iso = cam.iso;
+    if (ImGui::InputDouble("f-number", &fNum, 0.0, 0.0, "%.2f"))
+    {
+        cam.fNumber = fNum;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_fnumber");
+    if (ImGui::InputDouble("Shutter (s)", &shutter, 0.0, 0.0, "%.5f"))
+    {
+        cam.shutterTime = shutter;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_shutter");
+    if (ImGui::InputDouble("ISO", &iso, 0.0, 0.0, "%.0f"))
+    {
+        cam.iso = iso;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_iso");
+
+    // Debug filters.
+    if (ImGui::InputInt("Bounce filter", &cam.bounceFilter))
+    {
+        if (cam.bounceFilter < -1) cam.bounceFilter = -1;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_bounce_filter");
+    if (ImGui::InputInt("Light filter", &cam.lightFilter))
+    {
+        if (cam.lightFilter < -1) cam.lightFilter = -1;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_light_filter");
+
+    // Output path pattern.
+    char buf[512];
+    std::snprintf(buf, sizeof(buf), "%s", cam.outputPathPattern.c_str());
+    if (ImGui::InputText("Output path", buf, sizeof(buf)))
+    {
+        cam.outputPathPattern = buf;
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_output_path");
+    ImGui::TextDisabled("resolves to: %s",
+                        resolveOutputPath(cam.outputPathPattern).c_str());
 }
 
 void EditorApp::startRender()
@@ -3179,6 +3402,173 @@ void EditorApp::startRender()
     });
 }
 
+int EditorApp::addCameraFromCurrentView()
+{
+    // Snapshot the live orbit view into a new scene camera using the SAME
+    // convention serializeWithLiveCamera bakes (so a camera added here renders
+    // framed exactly as the viewport shows now):
+    //   position = orbit eye(); pitch = orbit pitch; yaw = orbit yaw + 180;
+    //   roll = 0; fov = orbit fovY.
+    SceneModel::CameraDesc cam;
+    cam.present = true;
+    cam.name = m_scene.uniqueCameraName("Camera");
+    cam.position = m_camera.eye();
+    cam.eulerDegrees = glm::vec3(glm::degrees(m_camera.pitch),
+                                 glm::degrees(m_camera.yaw) + 180.0f, 0.0f);
+    cam.verticalFovDegrees = glm::degrees(m_camera.fovYRadians);
+    // Default per-camera render props: the panel's current preview resolution and
+    // a unique output path so two cameras don't overwrite each other on disk.
+    cam.width = m_renderResolution;
+    cam.height = m_renderResolution;
+    cam.outputPathPattern = "renders/" + cam.name + ".{frame}.png";
+
+    m_scene.cameras.push_back(std::move(cam));
+    m_scene.dirty = true;
+    m_selectedCamera = static_cast<int>(m_scene.cameras.size()) - 1;
+    // The camera list lives in the explorer + render panel; the pick scene does
+    // not need rebuilding (cameras are not pickable geometry).
+    return m_selectedCamera;
+}
+
+void EditorApp::startFullRender()
+{
+    if (m_renderState.load() == RenderState::Running)
+    {
+        m_renderError = "a render is already in progress";
+        m_renderStatus = "Render failed.";
+        m_renderState.store(RenderState::Failed);
+        return;
+    }
+    if (m_scene.objects.empty())
+    {
+        m_renderState.store(RenderState::Failed);
+        m_renderError = "Scene is empty — insert an object before rendering.";
+        m_renderStatus = "Render failed.";
+        return;
+    }
+    if (!m_scene.hasCamera())
+    {
+        m_renderState.store(RenderState::Failed);
+        m_renderError = "No scene cameras — Add camera from current view first.";
+        m_renderStatus = "Render failed.";
+        return;
+    }
+
+    m_lastRenderOutputs.clear();
+    m_renderStatus = "Rendering all cameras to disk...";
+    m_renderError.clear();
+
+    // Serialize the scene with ALL configured cameras (no orbit override). Write
+    // it to a temp file next to the source scene (so $meshes resolve) and load it
+    // through the renderer's multi-camera path.
+    json sceneJson = serializeForRender();
+
+    std::filesystem::path tempPath;
+    if (!m_scenePath.empty())
+    {
+        std::filesystem::path base(m_scenePath);
+        tempPath = base.parent_path() / (".editor_render_" + base.filename().string());
+    }
+    else
+    {
+        tempPath = std::filesystem::temp_directory_path() / ".editor_render_scene.json";
+    }
+    {
+        std::ofstream out(tempPath);
+        if (!out)
+        {
+            m_renderState.store(RenderState::Failed);
+            m_renderError = "could not write temp render scene: " + tempPath.string();
+            m_renderStatus = "Render failed.";
+            return;
+        }
+        out << sceneJson.dump(2);
+    }
+
+    // The output paths are resolved relative to the SOURCE scene's directory (so a
+    // relative pattern like "renders/foo.png" lands next to the scene), falling
+    // back to the current working directory when the scene is unsaved.
+    std::filesystem::path outputBase =
+        m_scenePath.empty() ? std::filesystem::current_path()
+                            : std::filesystem::absolute(m_scenePath).parent_path();
+
+    try
+    {
+        LoadedScene scene = SceneLoader::loadFromFile(tempPath.string(), /*logToStdout=*/false);
+        // Apply the global renderer settings from the panel. Per-camera resolution
+        // overrides (set by SceneLoader from each camera's $width/$height) win over
+        // the global imageWidth/imageHeight, so leave those at the scene's values.
+        scene.settings.photonsPerLight =
+            static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
+        scene.settings.bounceThreshold = static_cast<size_t>(std::max(1, m_bounceThreshold));
+        scene.settings.terminationThreshold = static_cast<double>(m_terminationThreshold);
+
+        RenderResult result = Renderer::renderFrame(scene);
+
+        // Write each camera's image to its configured output path. The camera
+        // order in result.cameras matches the serialized declaration order, which
+        // matches m_scene.cameras order, so we pair them by index. Cameras whose
+        // resolution didn't take are still written at whatever the renderer used.
+        std::vector<std::string> written;
+        for (std::size_t i = 0; i < result.cameras.size(); ++i)
+        {
+            const CameraRender& cr = result.cameras[i];
+            if (!cr.image)
+            {
+                continue;
+            }
+            // Resolve the editor camera's output pattern (frame 0 for now).
+            std::string pattern =
+                (i < m_scene.cameras.size())
+                    ? m_scene.cameras[i].outputPathPattern
+                    : ("renders/" + cr.outputName + ".{frame}.png");
+            std::filesystem::path outPath = resolveOutputPath(pattern);
+            if (outPath.is_relative())
+            {
+                outPath = outputBase / outPath;
+            }
+            std::error_code ec;
+            if (outPath.has_parent_path())
+            {
+                std::filesystem::create_directories(outPath.parent_path(), ec);
+            }
+            const std::string title =
+                (i < m_scene.cameras.size()) ? m_scene.cameras[i].name : cr.outputName;
+            if (PngWriter::writeImage(outPath, *cr.image, title))
+            {
+                written.push_back(outPath.string());
+            }
+            else
+            {
+                m_renderError = "failed to write " + outPath.string();
+            }
+        }
+
+        m_lastRenderOutputs = written;
+        if (written.empty())
+        {
+            m_renderState.store(RenderState::Failed);
+            if (m_renderError.empty())
+            {
+                m_renderError = "render produced no camera output";
+            }
+            m_renderStatus = "Render failed.";
+        }
+        else
+        {
+            m_renderState.store(RenderState::Done);
+            m_renderStatus =
+                "Rendered " + std::to_string(written.size()) + " camera(s) to disk.";
+        }
+    }
+    catch (const std::exception& e)
+    {
+        m_renderError = e.what();
+        m_renderState.store(RenderState::Failed);
+        m_renderStatus = "Render failed.";
+    }
+}
+
 void EditorApp::pollRender()
 {
     const RenderState state = m_renderState.load();
@@ -3357,6 +3747,9 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "set_camera") return cmdSetCamera(request);
     if (cmd == "set_render_settings") return cmdSetRenderSettings(request);
     if (cmd == "render") return cmdRender(request);
+    if (cmd == "render_all") return cmdRenderAll(request);
+    if (cmd == "add_camera") return cmdAddCamera(request);
+    if (cmd == "set_camera_settings") return cmdSetCameraSettings(request);
     if (cmd == "screenshot") return cmdScreenshot(request);
     if (cmd == "inject_input") return cmdInjectInput(request);
     if (cmd == "play_input") return cmdPlayInput(request);
@@ -3462,7 +3855,21 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
         {"path", m_scenePath},
         {"object_count", m_scene.objects.size()},
         {"material_count", m_scene.materials.size()},
-        {"camera_present", m_scene.camera.present},
+        {"camera_present", m_scene.hasCamera()},
+        {"camera_count", m_scene.cameras.size()},
+        {"cameras", [this]() {
+             json arr = json::array();
+             for (const auto& c : m_scene.cameras)
+             {
+                 arr.push_back({{"name", c.name},
+                                {"width", c.width},
+                                {"height", c.height},
+                                {"output_path", resolveOutputPath(c.outputPathPattern)},
+                                {"bounce_filter", c.bounceFilter},
+                                {"light_filter", c.lightFilter}});
+             }
+             return arr;
+         }()},
         {"objects", objectNames},
         {"materials", materials},
     };
@@ -3565,7 +3972,8 @@ nlohmann::json EditorApp::cmdLoadScene(const nlohmann::json& req)
                 {"name", m_scene.name},
                 {"object_count", m_scene.objects.size()},
                 {"material_count", m_scene.materials.size()},
-                {"camera_present", m_scene.camera.present},
+                {"camera_present", m_scene.hasCamera()},
+                {"camera_count", m_scene.cameras.size()},
                 {"objects", objects}};
 }
 
@@ -3711,6 +4119,83 @@ nlohmann::json EditorApp::cmdRender(const nlohmann::json& req)
                 {"render_scene_path", m_lastRenderScenePath},
                 {"render_width", m_renderWidth},
                 {"render_height", m_renderHeight}};
+}
+
+nlohmann::json EditorApp::cmdRenderAll(const nlohmann::json& /*req*/)
+{
+    if (m_renderState.load() == RenderState::Running)
+    {
+        return json{{"ok", false}, {"error", "render already in progress"}};
+    }
+
+    // Synchronous to-disk render across all scene cameras.
+    startFullRender();
+
+    const RenderState st = m_renderState.load();
+    if (st == RenderState::Failed)
+    {
+        return json{{"ok", false}, {"error", m_renderError}, {"status", "failed"}};
+    }
+
+    // Report each written file + the dimensions actually rendered (per camera).
+    json outputs = json::array();
+    for (std::size_t i = 0; i < m_lastRenderOutputs.size(); ++i)
+    {
+        json entry = {{"path", m_lastRenderOutputs[i]}};
+        if (i < m_scene.cameras.size())
+        {
+            entry["camera"] = m_scene.cameras[i].name;
+            entry["width"] = m_scene.cameras[i].width;
+            entry["height"] = m_scene.cameras[i].height;
+        }
+        outputs.push_back(std::move(entry));
+    }
+    return json{{"ok", true}, {"status", "done"}, {"outputs", outputs}};
+}
+
+nlohmann::json EditorApp::cmdAddCamera(const nlohmann::json& /*req*/)
+{
+    const int index = addCameraFromCurrentView();
+    const SceneModel::CameraDesc& cam = m_scene.cameras[index];
+    return json{{"ok", true},
+                {"index", index},
+                {"name", cam.name},
+                {"camera_count", m_scene.cameras.size()}};
+}
+
+nlohmann::json EditorApp::cmdSetCameraSettings(const nlohmann::json& req)
+{
+    if (!req.contains("index") || !req["index"].is_number_integer())
+    {
+        return json{{"ok", false}, {"error", "set_camera_settings requires integer 'index'"}};
+    }
+    const int index = req["index"].get<int>();
+    if (index < 0 || index >= static_cast<int>(m_scene.cameras.size()))
+    {
+        return json{{"ok", false}, {"error", "camera index out of range"}};
+    }
+    SceneModel::CameraDesc& cam = m_scene.cameras[index];
+
+    if (req.contains("width")) cam.width = std::max(16, req["width"].get<int>());
+    if (req.contains("height")) cam.height = std::max(16, req["height"].get<int>());
+    if (req.contains("fnumber")) cam.fNumber = req["fnumber"].get<double>();
+    if (req.contains("shutter")) cam.shutterTime = req["shutter"].get<double>();
+    if (req.contains("iso")) cam.iso = req["iso"].get<double>();
+    if (req.contains("bounce_filter")) cam.bounceFilter = req["bounce_filter"].get<int>();
+    if (req.contains("light_filter")) cam.lightFilter = req["light_filter"].get<int>();
+    if (req.contains("output_path"))
+        cam.outputPathPattern = req["output_path"].get<std::string>();
+    if (req.contains("name") && req["name"].is_string())
+        cam.name = req["name"].get<std::string>();
+
+    m_scene.dirty = true;
+    m_selectedCamera = index;
+    return json{{"ok", true},
+                {"index", index},
+                {"name", cam.name},
+                {"width", cam.width},
+                {"height", cam.height},
+                {"output_path", resolveOutputPath(cam.outputPathPattern)}};
 }
 
 bool EditorApp::waitForRenderToFinish(double timeoutSeconds)

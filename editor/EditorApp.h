@@ -84,6 +84,13 @@ public:
     nlohmann::json cmdSetCamera(const nlohmann::json& req);
     nlohmann::json cmdSetRenderSettings(const nlohmann::json& req);
     nlohmann::json cmdRender(const nlohmann::json& req);
+    // RENDER-TO-DISK across all scene cameras; returns the written file paths.
+    nlohmann::json cmdRenderAll(const nlohmann::json& req);
+    // Add a scene camera from the current orbit view; returns the new index/name.
+    nlohmann::json cmdAddCamera(const nlohmann::json& req);
+    // Edit a scene camera's per-camera settings (resolution / exposure / debug /
+    // output path) by index. The single path the panel widgets and puppet share.
+    nlohmann::json cmdSetCameraSettings(const nlohmann::json& req);
     nlohmann::json cmdScreenshot(const nlohmann::json& req);
     nlohmann::json cmdInjectInput(const nlohmann::json& req);
     nlohmann::json cmdPlayInput(const nlohmann::json& req);
@@ -114,7 +121,17 @@ public:
     // camera baked into the Camera block (synthesizing one if the model has
     // none). Shared by render-from-view and saveScene so a saved scene and a
     // rendered scene frame identically.
-    nlohmann::json serializeWithLiveCamera();
+    // Serialize the model with the live orbit camera baked in.
+    //   singleCameraForPreview == true  (Preview / pick): emit EXACTLY ONE camera
+    //     (the orbit view), stripping any configured scene cameras.
+    //   singleCameraForPreview == false (Save): keep all configured cameras and
+    //     update only the primary to the orbit view.
+    nlohmann::json serializeWithLiveCamera(bool singleCameraForPreview = true);
+
+    // Serialize the model for the to-disk RENDER: all configured scene cameras,
+    // each with its own resolution / exposure / debug filters, NO orbit override.
+    // Synthesizes a single camera from the orbit view only if the scene has none.
+    nlohmann::json serializeForRender();
 
     nlohmann::json cmdLoadScene(const nlohmann::json& req);
     nlohmann::json cmdSaveScene(const nlohmann::json& req);
@@ -335,11 +352,31 @@ private:
     bool setObjectMeshFile(int index, const std::string& meshFile);
     bool setObjectMeshShape(int index, const std::string& shapeName);
 
-    // Phase 3: kick off a path-traced render of the current scene on a worker
-    // thread and poll its completion in the UI loop.
+    // The right-side render-config panel (global settings + camera list +
+    // per-camera settings + Preview/Render buttons). Replaces the old bottom
+    // render display panel.
+    void drawRenderPanel();
+
+    // Per-camera settings form for the camera at `index` (resolution, exposure,
+    // debug filters, output path). Drawn inside the render panel.
+    void drawCameraSettings(int index);
+
+    // "Add camera from current view": drop the live orbit view into a new scene
+    // camera and select it. Returns the new camera's index.
+    int addCameraFromCurrentView();
+
+    // Phase 3: kick off a PREVIEW path-traced render (orbit view -> in-viewport
+    // progressive overlay) on a worker thread and poll its completion in the UI
+    // loop.
     void startRender();
     void pollRender();
     void uploadRenderTexture();
+
+    // RENDER-TO-DISK: render ALL scene cameras (each at its own resolution /
+    // exposure / debug filters) via the renderer's multi-camera path and write
+    // each camera's image to its resolved output path. Populates
+    // m_lastRenderOutputs. Runs synchronously on the calling (main) thread.
+    void startFullRender();
 
     // Phase 4: render-as-viewport-overlay + live progressive preview.
     //
@@ -431,6 +468,11 @@ private:
     // Set by the scene explorer; used to highlight the row + (next wave) drive
     // the properties panel.
     int m_selectedObject = -1;
+
+    // The currently selected scene camera (index into m_scene.cameras), or -1.
+    // The render panel's per-camera settings edit this camera. Defaults to the
+    // first camera when a scene loads.
+    int m_selectedCamera = -1;
 
     // ----- renderer-side scene for accurate picking -----------------------
     // The same representation the render path builds (real Volume objects + BVH),
@@ -556,6 +598,16 @@ private:
     std::string m_lastRenderScenePath;  // temp scene file emitted by the last render
     int m_renderResolution = 256;
     int m_renderPhotonsMillions = 4;
+
+    // Global renderer settings exposed in the right render panel. bounceThreshold
+    // is the hard per-photon bounce-depth cap; terminationThreshold is the Russian-
+    // roulette termination probability floor. Both feed the render scene settings.
+    int m_bounceThreshold = 4;
+    float m_terminationThreshold = 0.0f;
+
+    // Absolute paths of the files the last to-disk Render wrote, shown in the
+    // render panel and returned by the render_all automation command.
+    std::vector<std::string> m_lastRenderOutputs;
 
     // Phase 4: render-as-viewport-overlay state.
     // True while the render texture should be drawn over the viewport FBO.

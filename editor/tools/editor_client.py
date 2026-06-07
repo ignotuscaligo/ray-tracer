@@ -156,6 +156,27 @@ class EditorClient:
     def render(self, wait: bool = True, timeout: Optional[float] = None) -> Dict[str, Any]:
         return self._command("render", wait=wait, timeout=timeout)
 
+    def render_all(self) -> Dict[str, Any]:
+        """Render ALL scene cameras to disk (Cinema-4D-style to-disk Render).
+
+        Each camera is rendered at its own resolution / exposure / debug filters
+        and written to its resolved output path. Returns {"outputs": [...]} with a
+        path + dimensions per camera.
+        """
+        return self._command("render_all")
+
+    def add_camera(self) -> Dict[str, Any]:
+        """Add a scene camera from the current orbit view; returns index + name."""
+        return self._command("add_camera")
+
+    def set_camera_settings(self, index: int, **kwargs: Any) -> Dict[str, Any]:
+        """Edit a scene camera's per-camera settings by index.
+
+        Keyword args: width, height, fnumber, shutter, iso, bounce_filter,
+        light_filter, output_path, name.
+        """
+        return self._command("set_camera_settings", index=index, **kwargs)
+
     def screenshot(self, path: str, target: str = "window") -> Dict[str, Any]:
         return self._command("screenshot", path=path, target=target)
 

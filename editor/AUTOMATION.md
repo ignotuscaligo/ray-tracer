@@ -61,7 +61,10 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `save_scene` | `path` | Serialize the in-memory model to renderer scene JSON at `path` (via `SceneModelSerializer`), baking the live orbit camera into the Camera block so the saved file renders framed as the viewport shows it. Backs File > Save. The saved JSON is directly renderable with `ray-tracer <path>`. |
 | `set_camera` | any of `eye[3]`, `target[3]`, `fov`, `orbit_yaw`, `orbit_pitch`, `dolly` | Move the orbit camera. `eye` is converted to yaw/pitch/distance about `target`. |
 | `set_render_settings` | any of `resolution`, `photons` (millions), `scene_path` | Configure the path-traced render. |
-| `render` | `wait` (default true), `timeout` (s, default 600) | Path-trace the loaded scene **from the LIVE orbit camera** (eye/target/fov are baked into a temp scene next to the source) on a worker thread. With `wait`, blocks until done. |
+| `render` | `wait` (default true), `timeout` (s, default 600) | **PREVIEW** path-trace from the **LIVE orbit camera** (eye/target/fov baked into a single-camera temp scene next to the source) on a worker thread; the result appears as the in-viewport progressive overlay. Backs the **Preview** button (`button_preview`). With `wait`, blocks until done. |
+| `render_all` | — | **RENDER to disk** across ALL configured scene cameras (the renderer's multi-camera path), each at its own resolution / exposure / debug filters, writing each camera's PNG to its resolved `output_path`. Synchronous. Backs the **Render** button (`button_render`). Returns `outputs` (array of `{path, camera, width, height}`). |
+| `add_camera` | — | Add a scene camera from the current orbit view (the "Add camera from current view" button). Returns the new `index`, `name`, `camera_count`. |
+| `set_camera_settings` | `index`, any of `width`, `height`, `fnumber`, `shutter`, `iso`, `bounce_filter`, `light_filter`, `output_path`, `name` | Edit a scene camera's per-camera render settings by index (the twin of the render panel's camera-settings widgets). Returns the updated camera. |
 | `screenshot` | `path`, `target` (`window`\|`viewport`\|`render`) | Capture pixels to an 8-bit RGBA PNG. |
 | `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path **within ONE frame** (drives camera nav + single-frame ImGui). For multi-frame interactions (menus, drags) use `play_input`. |
 | `play_input` | `actions` (array of `{t_ms, event}`), `fps` (default 60), `tail_ms` (default 50) | Replay a TIMED input sequence across REAL frames: events fire at their scheduled `t_ms` and the editor advances one render frame per simulated tick, so multi-frame ImGui interactions (open a menu popup, hover to an item, drag a DragFloat) progress like a human's hand. Blocks until the sequence + tail completes; returns `fired`, `frames`, `cursor`, `camera`, `eye`. Same scheduler in windowed + headless. |
@@ -236,10 +239,17 @@ that element; without, returns all. Rects carry `x,y,width,height` and a
 `center: [cx,cy]` an agent can click directly.
 
 Currently registered names: `menu_bar`, `menu_File`, `menu_Insert`,
-`panel_controls`, `panel_render`, `panel_explorer`, `button_render`, `viewport`,
-plus the scene-explorer rows: `explorer_row_camera`, `explorer_row_<objectName>`
-(e.g. `explorer_row_MirrorKnot`, `explorer_row_Light`), and a positional alias
-`explorer_row_index_<i>`. Clicking a row's `center` selects that object (verify
+`panel_controls`, `panel_render`, `panel_explorer`, `panel_cameras`,
+`button_preview`, `button_render`, `button_add_camera`, `button_delete_camera`,
+`viewport`, the render-panel global settings (`render_preview_resolution`,
+`render_photons`, `render_bounce_threshold`, `render_termination_threshold`), the
+per-camera settings widgets (`camera_resolution`, `camera_fnumber`,
+`camera_shutter`, `camera_iso`, `camera_bounce_filter`, `camera_light_filter`,
+`camera_output_path`), the render-panel camera-list rows (`camera_row_<name>`,
+`camera_row_index_<i>`), plus the scene-explorer rows:
+`explorer_row_camera_<name>` (with `explorer_row_camera` as a back-compat alias
+for the first camera), `explorer_row_<objectName>` (e.g. `explorer_row_MirrorKnot`,
+`explorer_row_Light`), and a positional alias `explorer_row_index_<i>`. Clicking a row's `center` selects that object (verify
 via `get_state.selected_object`). The viewport rect doubles as the gate the nav
 handlers use to decide whether a press/scroll is a viewport gesture, so injected
 and real input are gated against the same rect. Future panels/widgets register

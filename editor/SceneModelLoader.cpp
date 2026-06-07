@@ -84,17 +84,53 @@ void walk(const std::string& name, const json& node, const glm::vec3& parentPos,
                                    : glm::vec3(0.0f);
     const glm::vec3 worldPos = parentPos + localPos;
 
-    // The Camera is captured into the dedicated camera slot, not the object list.
+    // Cameras are captured into the camera list, not the object list. The scene
+    // may declare several (the renderer's multi-camera format); each carries its
+    // own resolution / exposure / debug filters / output name.
     if (type == "Camera")
     {
-        out.camera.present = true;
-        out.camera.name = name;
-        out.camera.position = worldPos;
+        SceneModel::CameraDesc cam;
+        cam.present = true;
+        cam.name = name;
+        cam.position = worldPos;
         if (node.contains("$rotation"))
         {
-            out.camera.eulerDegrees = parseRotationDegrees(node["$rotation"]);
+            cam.eulerDegrees = parseRotationDegrees(node["$rotation"]);
         }
-        out.camera.verticalFovDegrees = node.value("$verticalFieldOfView", 70.0);
+        cam.verticalFovDegrees = node.value("$verticalFieldOfView", 70.0);
+
+        // Per-camera resolution override ($width/$height). Both must be present.
+        if (node.contains("$width") && node.contains("$height"))
+        {
+            cam.width = node["$width"].get<int>();
+            cam.height = node["$height"].get<int>();
+        }
+
+        // Per-camera exposure controls (renderer defaults when omitted).
+        cam.fNumber = node.value("$fNumber", cam.fNumber);
+        cam.shutterTime = node.value("$shutterTime", cam.shutterTime);
+        cam.iso = node.value("$iso", cam.iso);
+
+        // Per-camera debug filters (-1 == disabled).
+        cam.bounceFilter = node.value("$bounceFilter", -1);
+        cam.lightFilter = node.value("$lightFilter", -1);
+
+        // Output path: prefer an explicit pattern; else derive from $outputName.
+        if (node.contains("$outputPathPattern"))
+        {
+            cam.outputPathPattern = node["$outputPathPattern"].get<std::string>();
+        }
+        else if (node.contains("$outputName"))
+        {
+            cam.outputPathPattern =
+                "renders/" + node["$outputName"].get<std::string>() + ".{frame}.png";
+        }
+        else
+        {
+            cam.outputPathPattern = "renders/" + name + ".{frame}.png";
+        }
+
+        out.cameras.push_back(std::move(cam));
     }
     else
     {

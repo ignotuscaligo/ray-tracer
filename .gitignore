@@ -11,6 +11,8 @@ imgui.ini
 # Editor render-from-current-view temp scenes (written next to the source scene
 # so relative $meshes / $renderPath still resolve). Regenerated every render.
 .editor_view_*
+# Editor to-disk multi-camera Render temp scenes. Regenerated every Render.
+.editor_render_*
 
 # Python bytecode cache
 __pycache__/

@@ -87,13 +87,43 @@ struct SceneModel
     };
 
     // ----- camera ----------------------------------------------------------
+    // A scene camera is a CONFIGURED SHOT: a transform (position/orientation/fov)
+    // plus the per-camera render properties the renderer's multi-camera path reads
+    // (resolution, exposure, debug filters) and an output-path pattern for the
+    // to-disk Render. This is distinct from the editor's roaming ORBIT camera
+    // (OrbitCamera), which is the preview viewpoint and is NOT a scene entity.
+    //
+    // Cinema-4D relationship: the orbit camera is where you're looking right now;
+    // the scene cameras are the shots you've set up. Preview renders the orbit
+    // view into the viewport; Render renders every scene camera to disk.
     struct CameraDesc
     {
         std::string name = "Camera";
         glm::vec3 position{0.0f, 0.0f, -10.0f};
         glm::vec3 eulerDegrees{0.0f};   // pitch, yaw, roll
         double verticalFovDegrees = 70.0;
-        bool present = false;
+        bool present = false;            // legacy flag; see hasCamera()
+
+        // Per-camera render resolution (renderer $width/$height override).
+        int width = 256;
+        int height = 256;
+
+        // Per-camera exposure (the renderer's physically-based photographic
+        // controls; serialized to $fNumber/$shutterTime/$iso).
+        double fNumber = 8.0;
+        double shutterTime = 0.01;   // seconds
+        double iso = 100.0;
+
+        // Per-camera debug filters (the renderer's debug-camera features).
+        // -1 == disabled. bounceFilter isolates deposits at a given bounce depth;
+        // lightFilter isolates deposits from a single light index.
+        int bounceFilter = -1;
+        int lightFilter = -1;
+
+        // Output path pattern for the to-disk Render. Supports a {frame}
+        // placeholder for future animation (for now {frame} -> 0). The literal
+        // path is computed by resolveOutputPath().
+        std::string outputPathPattern = "renders/{frame}.png";
     };
 
     // The OBJ files referenced by "$meshes". Resolved to absolute paths against
@@ -101,9 +131,44 @@ struct SceneModel
     // sub-shapes for drawing.
     std::vector<std::string> meshFiles;
 
-    CameraDesc camera;
+    // The scene's configured cameras (shots). Migrated from a single CameraDesc;
+    // a single-camera scene has exactly one entry. Empty == no authored camera
+    // (e.g. a File>New scene before "Add camera from current view").
+    std::vector<CameraDesc> cameras;
     std::vector<Material> materials;
     std::vector<ObjectNode> objects;
+
+    // True if the scene has at least one configured camera.
+    bool hasCamera() const { return !cameras.empty(); }
+
+    // The primary (first) camera, or nullptr if none. Used where older code
+    // assumed a single camera (e.g. framing the orbit rig on load).
+    const CameraDesc* primaryCamera() const
+    {
+        return cameras.empty() ? nullptr : &cameras.front();
+    }
+    CameraDesc* primaryCameraMutable()
+    {
+        return cameras.empty() ? nullptr : &cameras.front();
+    }
+
+    // Generate a camera name not already used by any camera, of the form "<base>"
+    // or "<base>.NNN". Keeps explorer rows / layout names / $scene keys unique.
+    std::string uniqueCameraName(const std::string& base) const
+    {
+        auto taken = [&](const std::string& n) {
+            for (const auto& c : cameras)
+                if (c.name == n) return true;
+            return false;
+        };
+        if (!taken(base)) return base;
+        for (int n = 1; n < 100000; ++n)
+        {
+            std::string candidate = base + "." + std::to_string(n);
+            if (!taken(candidate)) return candidate;
+        }
+        return base;
+    }
 
     // The full, unmodified parsed scene JSON. Render-from-view re-serializes this
     // with only the "Camera" block's $position/$rotation/$verticalFieldOfView
@@ -203,7 +268,7 @@ struct SceneModel
         meshFiles.clear();
         materials.clear();
         objects.clear();
-        camera = CameraDesc{};
+        cameras.clear();
         rawJson = nlohmann::json::object();
         name = "untitled";
         path.clear();
@@ -217,6 +282,23 @@ struct SceneModel
 private:
     bool m_initialized = false;
 };
+
+// Resolve a camera output-path pattern to a literal path by substituting the
+// {frame} placeholder. For now there is no animation, so frame defaults to 0;
+// the placeholder is preserved for when the animation system lands.
+inline std::string resolveOutputPath(const std::string& pattern, int frame = 0)
+{
+    const std::string token = "{frame}";
+    std::string out = pattern;
+    std::string::size_type pos = 0;
+    const std::string frameStr = std::to_string(frame);
+    while ((pos = out.find(token, pos)) != std::string::npos)
+    {
+        out.replace(pos, token.size(), frameStr);
+        pos += frameStr.size();
+    }
+    return out;
+}
 
 // Backwards-compatible alias: existing call sites refer to `Scene`. The model is
 // now the real SceneModel above.
