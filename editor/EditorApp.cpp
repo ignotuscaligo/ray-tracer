@@ -843,7 +843,32 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
             any = true;
         }
     }
-    if (any)
+    // Camera init: prefer the scene's AUTHORED camera so the default view is the
+    // intended one (e.g. the interior of an enclosed Cornell box) and
+    // render-from-current-view is non-black. Auto-frame is only the fallback for
+    // scenes with no authored camera (e.g. File>New + inserts).
+    if (m_scene.camera.present)
+    {
+        // Choose an orbit distance that puts the pivot at the scene center (if we
+        // have bounds), so orbiting rotates around the scene rather than a point
+        // behind the camera. eye() still lands on the authored position.
+        const glm::vec3 camPos = m_scene.camera.position;
+        float orbitDistance = 100.0f;
+        if (any)
+        {
+            const glm::vec3 center = 0.5f * (minB + maxB);
+            const float toCenter = glm::length(center - camPos);
+            if (toCenter > 1e-3f)
+            {
+                orbitDistance = toCenter;
+            }
+        }
+        m_camera.setFromAuthoredCamera(camPos, m_scene.camera.eulerDegrees.x,
+                                       m_scene.camera.eulerDegrees.y,
+                                       static_cast<float>(m_scene.camera.verticalFovDegrees),
+                                       orbitDistance);
+    }
+    else if (any)
     {
         m_camera.frameBounds(minB, maxB);
     }

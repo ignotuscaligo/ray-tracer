@@ -94,6 +94,43 @@ public:
         return glm::perspective(fovYRadians, aspect, nearPlane, farPlane);
     }
 
+    // Initialize the orbit rig from a scene's AUTHORED camera (the renderer's
+    // Camera block): its world position, its pitch/yaw (degrees, renderer
+    // PitchYawRoll convention), its vertical FOV (degrees), and the orbit
+    // distance to place the target in front of the eye.
+    //
+    // The renderer camera looks along forward = rotation * (0,0,1). With the
+    // PitchYawRoll convention used by render-from-view (serializeWithLiveCamera),
+    // the orbit rig that reproduces an authored (pitchDeg, yawDeg) is
+    //   orbit yaw   = yawDeg - 180   (the serializer's inverse of yaw+180)
+    //   orbit pitch = pitchDeg
+    // and the orbit forward (target - eye) equals that rig's view direction. We
+    // place the target one `orbitDistance` along that forward so eye() lands
+    // back on the authored position — making render-from-current-view match the
+    // authored framing (e.g. inside a Cornell box, not outside it).
+    void setFromAuthoredCamera(const glm::vec3& cameraPos, float pitchDeg,
+                               float yawDeg, float verticalFovDeg,
+                               float orbitDistance)
+    {
+        const float orbitYaw = glm::radians(yawDeg - 180.0f);
+        const float orbitPitch = glm::radians(pitchDeg);
+        const float clampedPitch = std::clamp(orbitPitch, -kPitchLimit, kPitchLimit);
+
+        // Forward = target - eye = -(offset/distance); offset is eye - target as
+        // parameterized by eye(). So forward = -(cosP*sin(yaw), sin(pitch), cosP*cos(yaw)).
+        const float cosP = std::cos(clampedPitch);
+        const glm::vec3 forward(-cosP * std::sin(orbitYaw), -std::sin(clampedPitch),
+                                -cosP * std::cos(orbitYaw));
+
+        yaw = orbitYaw;
+        pitch = clampedPitch;
+        distance = orbitDistance > 1e-3f ? orbitDistance : 1.0f;
+        fovYRadians = glm::radians(verticalFovDeg > 1.0f ? verticalFovDeg : 45.0f);
+        target = cameraPos + forward * distance;
+        nearPlane = std::max(distance * 0.001f, 1e-3f);
+        farPlane = std::max(distance * 100.0f, 1000.0f);
+    }
+
     // Frame the camera so an axis-aligned bounding box [minB, maxB] fits in
     // view. Sets the target to the box center and the distance so the box's
     // bounding sphere fits within the vertical FOV with a small margin.
