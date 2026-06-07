@@ -1217,6 +1217,28 @@ int EditorApp::pickGizmoHandle(double winX, double winY) const
     // to the projected ring radius (sampled). Pick the ring the click is nearest.
     int best = -1;
     float bestDist = pickRadius;
+
+    // First pass: the recorded, puppet-targetable handle point for each ring is
+    // its +u point (axis (a+1)%3 direction). Prefer it so a click on the labeled
+    // handle picks that ring unambiguously even where rings cross on screen.
+    for (int a = 0; a < 3; ++a)
+    {
+        glm::vec3 u(0.0f);
+        u[(a + 1) % 3] = 1.0f;
+        glm::vec2 hw;
+        if (!projectToWindow(origin + u * L, hw)) continue;
+        const float dist = glm::length(click - hw);
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            best = a;
+        }
+    }
+    if (best >= 0) return best;
+
+    // Fallback: nearest point on any ring (lets a drag start anywhere on a ring,
+    // not only at its labeled handle).
+    bestDist = pickRadius;
     const int samples = 48;
     for (int a = 0; a < 3; ++a)
     {
