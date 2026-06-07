@@ -398,7 +398,8 @@ fidelity"). A deliberately sparse-bright light is intended, not under-sampled.
 
 **[DETAIL]** Motion-blur / rolling-shutter machinery: photons carry an emission `time`
 (`include/Photon.h:26`); the splat gates on `Camera::exposureWindowForPixel`
-(`src/Worker.cpp:244-249`). Default window is infinite (no behavior change).
+(`src/Worker.cpp:248-252`). See §9 for the full animation/time model and the
+shutter normalization.
 
 ---
 
@@ -407,6 +408,8 @@ fidelity"). A deliberately sparse-bright light is intended, not under-sampled.
 **[INVARIANT] The headless renderer is `build/Release/ray-tracer <scene>.json`.** It reads
 `$width` / `$photonsPerLight` from the scene and writes `renders/<renderName>.0.png`
 (`src/main.cpp:20-83`). It calls the *same* `Renderer::renderFrame` as everything else.
+For an animation it loops `$startFrame`..`$endFrame`, mapping each frame to a time
+(§9c) and writing `<renderName>.<frame>.png`.
 
 **`editor --render-test` is NOT a faster/alternate render path — do not use it for renders.**
 It runs the identical `Renderer::renderFrame` but through the GLFW/ImGui/OpenGL-linked
@@ -420,6 +423,94 @@ ASan/UBSan and TSan clean, warnings-as-errors (`-Werror`, gated by `RAYTRACER_WE
 `-fsanitize=` in `CMakeLists.txt:29,52,62`), and clang-tidy (`.clang-tidy`). A behavior
 change that is only "green on the default build" has not cleared the bar — the sanitizers and
 the invariants in this doc are part of the gate.
+
+---
+
+## 9. Animation, per-photon time, and motion blur — the time model
+
+The renderer never advances "the scene" to a discrete frame. Every time-varying
+quantity is a function of a continuous timestamp, and each photon carries its own
+time. Over many photons spread across a frame's shutter, time-varying geometry
+smears into motion blur. This composes with the single-photon + bundled-magnitude
+model (§1, §4) — time is orthogonal to the energy model.
+
+### 9a. `Property<T>` — the animation atom
+
+A `Property<T>` (`include/Property.h`) is either a CONSTANT or an ANIMATED keyframe
+curve, with `T evaluate(double timeSeconds)`. `double` and `Vector` are the
+instantiated types. Interpolation is a **cubic Hermite spline** with Catmull-Rom
+auto-tangents (or explicit per-keyframe tangents).
+
+**[INVARIANT] A CONSTANT Property is time-independent — `evaluate(t)` returns the
+same value for all `t`.** A scene built from constant Properties (i.e. any
+non-animated object) is therefore bit-for-bit the pre-animation baseline. Do not
+make `evaluate` on a constant depend on `t`.
+
+**[INVARIANT] At a keyframe's exact time, `evaluate` returns that keyframe's value
+exactly; outside the authored range the endpoint value is HELD (clamped), not
+extrapolated.** Velocity (the first derivative) is C1-continuous across interior
+keyframes — this is load-bearing: **blur length tracks instantaneous speed**, so an
+eased spin-up smears progressively rather than in steps. The interpolator is pinned
+by `tests/test_Property.cpp` (endpoint exactness, hold-outside-range, eased
+midpoints, C1 velocity continuity, zero-tangent ease).
+
+`KeyframedAnimationQuery` (`include/AnimationQuery.h`) maps object name → animated
+transform: a position `Property<Vector>` plus a **scalar-angle `Property<double>`
+about a fixed axis**, composed onto the object's scene-load orientation. The angle
+parameterization (vs a quaternion curve) makes ANGULAR VELOCITY a direct smooth
+function of the keyframes — the thing that drives blur length. An object with no
+entry returns `std::nullopt` from `transformAt`, so callers fall back to the
+scene-load transform (static object → unchanged).
+
+### 9b. Time threads photon → intersection → splat
+
+- **Emission** (`src/Worker.cpp:438-461`): each freshly-emitted photon is stamped
+  with a time from the camera's global exposure window (§9c).
+- **Intersection at time** (`Volume::castRayAt`, `src/Volume.cpp:34-49`): the
+  volume's world transform is resolved by the `AnimationQuery` AT THE RAY'S TIME, so
+  a ray cast at time `t` hits the object at its time-`t` pose. The photon's full
+  random walk (and the splat's occlusion ray) all cast at the photon's time
+  (`src/Worker.cpp:496,286`).
+- **Splat** projects through the camera; the per-pixel exposure-window gate
+  (`src/Worker.cpp:248-252`) admits the photon. **[DETAIL] camera-at-photon-time:**
+  the per-photon-time path is wired end-to-end; the diffuse splat currently projects
+  through the camera's static transform (camera animation → camera motion blur is
+  the same per-photon-time mechanism but the splat's `coordForPoint` is a static
+  pinhole, consistent with the no-DOF-on-diffuse boundary in §6e).
+
+### 9c. Shutter + photometric normalization — [INVARIANT], do not "fix"
+
+Frame `f` maps to time `frameOffset + f / frameRate` (`src/main.cpp`). The
+Renderer sets every camera's global exposure window from that frame's shutter
+(`src/Renderer.cpp`):
+
+- **Finite shutter** `$shutterTime > 0`: window `[t_open, t_open + shutter)`.
+  Photons are stamped with a time sampled UNIFORMLY in that half-open interval
+  (`src/Worker.cpp:438-461`) and the scene is evaluated per-photon at that time.
+- **Zero shutter**: window `[t_open, +inf)`. Emission stamps EVERY photon at exactly
+  `t_open` (no jitter); the gate admits all. For the default static `frameTime = 0`
+  this is `time = 0` — the exact baseline.
+
+**[INVARIANT] Spreading N photons over the shutter does NOT change total light
+energy.** `emit()` still produces the same photon COUNT carrying the same
+per-photon flux (Φ/N, baked at emission, §3). The shutter only re-tags each
+photon's TIME; it does not scale magnitude. Every sampled time lies INSIDE the
+half-open window, so the splat's exposure-window gate never drops a photon. Hence a
+STATIC scene rendered with a shutter has the SAME brightness as one rendered
+without. Verified: `tests/test_ShutterBrightness.cpp` matches within ~0.1%.
+
+**Do not "fix" this by:** using a tiny `[t, t+ε)` window for the zero-shutter case.
+Sub-ulp emission times round to the EXCLUSIVE window end and fail the
+`contains()` gate, silently dropping ≈half the photons and ≈halving image energy.
+This was a real, fixed bug — the zero-shutter window is half-infinite on purpose
+(`src/Renderer.cpp`, `src/Worker.cpp:438-461`). Do not reintroduce an ε-window.
+
+**Deferred (Phase 2): continuous-time specular reflections.** The density grid
+(§6a) compresses bounce energy over the whole frame, so a time-varying object's
+REFLECTION in a mirror is smeared across the frame, not crisply time-resolved. The
+fan deliverable keeps the fan DIFFUSE so it images via the direct per-photon-time
+splat. Crisp time-varying reflections are out of scope; do not change the reflection
+storage to chase them here.
 
 ---
 
