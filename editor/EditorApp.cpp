@@ -23,6 +23,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -379,6 +380,8 @@ void EditorApp::newScene()
     }
     m_sceneDrawables.clear();
     m_selectedObject = -1;
+    m_selectedMaterial.clear();
+    m_propertiesMode = PropertiesMode::Object;
 
     m_camera.frameOrigin();
 }
@@ -474,6 +477,7 @@ int EditorApp::insertObject(Scene::Kind kind)
     // it (so the properties panel targets it right away).
     buildSceneGl();
     m_selectedObject = index;
+    m_propertiesMode = PropertiesMode::Object;
     return index;
 }
 
@@ -543,6 +547,164 @@ bool EditorApp::setObjectMaterialType(int index, const std::string& type)
 }
 
 bool EditorApp::setObjectMaterialName(int index, const std::string& materialName)
+{
+    if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
+    {
+        return false;
+    }
+    if (m_scene.findMaterial(materialName) == nullptr)
+    {
+        return false;
+    }
+    m_scene.objects[static_cast<std::size_t>(index)].materialName = materialName;
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+// ===== Material operations (shared by Material Manager GUI + puppet) =======
+
+std::string EditorApp::createMaterial()
+{
+    if (!m_scene.isInitialized())
+    {
+        m_scene.reset();
+    }
+    SceneModel::Material mat;
+    mat.name = m_scene.uniqueMaterialName("Material");
+    mat.type = "Lambertian";
+    mat.color = glm::vec3(0.8f);
+    m_scene.materials.push_back(mat);
+    m_scene.dirty = true;
+    // A new material has no geometry impact until assigned, but rebuild keeps the
+    // viewport in lockstep with the model in all paths.
+    buildSceneGl();
+    return mat.name;
+}
+
+std::string EditorApp::duplicateMaterial(const std::string& materialName)
+{
+    const SceneModel::Material* src = m_scene.findMaterial(materialName);
+    if (!src)
+    {
+        return std::string{};
+    }
+    SceneModel::Material copy = *src;
+    copy.name = m_scene.uniqueMaterialName(materialName + ".copy");
+    m_scene.materials.push_back(copy);
+    m_scene.dirty = true;
+    buildSceneGl();
+    return copy.name;
+}
+
+bool EditorApp::renameMaterial(const std::string& oldName, const std::string& newName)
+{
+    if (newName.empty() || oldName == newName)
+    {
+        return false;
+    }
+    SceneModel::Material* mat = m_scene.findMaterialMutable(oldName);
+    if (!mat)
+    {
+        return false;
+    }
+    // A name already taken by a DIFFERENT material would alias references.
+    if (m_scene.findMaterial(newName) != nullptr)
+    {
+        return false;
+    }
+    mat->name = newName;
+    // Repoint every object that referenced the old name.
+    for (auto& o : m_scene.objects)
+    {
+        if (o.materialName == oldName)
+        {
+            o.materialName = newName;
+        }
+    }
+    if (m_selectedMaterial == oldName)
+    {
+        m_selectedMaterial = newName;
+    }
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::deleteMaterial(const std::string& materialName, const std::string& reassignTo)
+{
+    const int idx = m_scene.materialIndex(materialName);
+    if (idx < 0)
+    {
+        return false;
+    }
+    const int useCount = m_scene.materialUseCount(materialName);
+    if (useCount > 0)
+    {
+        // In use: only proceed if a valid reassignment target was supplied.
+        if (reassignTo.empty() || reassignTo == materialName ||
+            m_scene.findMaterial(reassignTo) == nullptr)
+        {
+            return false;
+        }
+        for (auto& o : m_scene.objects)
+        {
+            if (o.materialName == materialName)
+            {
+                o.materialName = reassignTo;
+            }
+        }
+    }
+    m_scene.materials.erase(m_scene.materials.begin() + idx);
+    if (m_selectedMaterial == materialName)
+    {
+        m_selectedMaterial.clear();
+        // Drop back to object mode so the properties panel isn't pointed at a
+        // material that no longer exists.
+        if (m_propertiesMode == PropertiesMode::Material)
+        {
+            m_propertiesMode = PropertiesMode::Object;
+        }
+    }
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::setMaterialType(const std::string& materialName, const std::string& type)
+{
+    SceneModel::Material* mat = m_scene.findMaterialMutable(materialName);
+    if (!mat)
+    {
+        return false;
+    }
+    mat->type =
+        (type == "Mirror" || type == "Glass" || type == "Microfacet") ? type : "Lambertian";
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::setMaterialFloatField(const std::string& materialName, const std::string& field,
+                                      float value)
+{
+    SceneModel::Material* mat = m_scene.findMaterialMutable(materialName);
+    if (!mat)
+    {
+        return false;
+    }
+    if (field == "color_r") mat->color.r = value;
+    else if (field == "color_g") mat->color.g = value;
+    else if (field == "color_b") mat->color.b = value;
+    else if (field == "ior") mat->ior = value;
+    else return false;
+
+    m_scene.dirty = true;
+    buildSceneGl();
+    return true;
+}
+
+bool EditorApp::assignMaterialToObject(const std::string& materialName, int index)
 {
     if (index < 0 || index >= static_cast<int>(m_scene.objects.size()))
     {
@@ -642,6 +804,8 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
     m_scene = std::move(model);
     m_scenePath = path;          // render-from-view re-serializes this scene
     m_selectedObject = -1;
+    m_selectedMaterial.clear();
+    m_propertiesMode = PropertiesMode::Object;
     m_meshLabel = m_scene.name;
 
     buildSceneGl();
@@ -1861,6 +2025,8 @@ void EditorApp::drawSceneExplorer()
         if (ImGui::Selectable(label.c_str(), selected))
         {
             m_selectedObject = static_cast<int>(i);
+            // Selecting an object switches the Properties panel to object mode.
+            m_propertiesMode = PropertiesMode::Object;
         }
         // Register each row's pixel rect by name so the puppet port can click it.
         const ImVec2 mn = ImGui::GetItemRectMin();
@@ -1927,6 +2093,242 @@ int materialTypeIndex(const std::string& t)
 }
 }  // namespace
 
+void EditorApp::drawMaterialManager()
+{
+    // The central place to manage the scene's materials, distinct from per-object
+    // inline editing. Lists every material by name with a small type tag + color
+    // swatch; selecting a row makes it the active material context and switches
+    // the Properties panel to material-edit mode. Operations: New, Duplicate,
+    // Rename, Delete (guarded against deleting an in-use material), and Assign to
+    // the selected object. Each row + op-button registers a LayoutRegistry rect so
+    // the puppet port can drive it.
+    ImGui::Separator();
+    ImGui::Text("Material Manager");
+
+    // ----- operation buttons (row above the list) --------------------------
+    if (ImGui::Button("New"))
+    {
+        m_selectedMaterial = createMaterial();
+        m_propertiesMode = PropertiesMode::Material;
+    }
+    recordItemRect(m_layout, "button_material_new");
+    ImGui::SameLine();
+
+    const bool haveSel = !m_selectedMaterial.empty() &&
+                         m_scene.findMaterial(m_selectedMaterial) != nullptr;
+
+    ImGui::BeginDisabled(!haveSel);
+    if (ImGui::Button("Duplicate"))
+    {
+        const std::string dup = duplicateMaterial(m_selectedMaterial);
+        if (!dup.empty())
+        {
+            m_selectedMaterial = dup;
+            m_propertiesMode = PropertiesMode::Material;
+        }
+    }
+    ImGui::EndDisabled();
+    recordItemRect(m_layout, "button_material_duplicate");
+    ImGui::SameLine();
+
+    // Delete: guarded. If the material is in use, reassign references to the first
+    // OTHER material; if it's the only material, the delete is refused.
+    const int selUse = haveSel ? m_scene.materialUseCount(m_selectedMaterial) : 0;
+    ImGui::BeginDisabled(!haveSel);
+    if (ImGui::Button("Delete"))
+    {
+        std::string reassign;
+        if (selUse > 0)
+        {
+            for (const auto& m : m_scene.materials)
+            {
+                if (m.name != m_selectedMaterial) { reassign = m.name; break; }
+            }
+        }
+        // deleteMaterial refuses an in-use delete when reassign is empty (no other
+        // material exists), so an only-and-used material is protected.
+        deleteMaterial(m_selectedMaterial, reassign);
+    }
+    ImGui::EndDisabled();
+    recordItemRect(m_layout, "button_material_delete");
+    if (haveSel && selUse > 0)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(in use x%d)", selUse);
+    }
+
+    // ----- rename field ----------------------------------------------------
+    if (haveSel)
+    {
+        ImGui::SetNextItemWidth(180.0f);
+        const bool entered =
+            ImGui::InputText("##mat_rename", m_materialRenameBuf, sizeof(m_materialRenameBuf),
+                             ImGuiInputTextFlags_EnterReturnsTrue);
+        recordItemRect(m_layout, "material_rename_field");
+        ImGui::SameLine();
+        if (ImGui::Button("Rename") || entered)
+        {
+            const std::string newName(m_materialRenameBuf);
+            if (renameMaterial(m_selectedMaterial, newName))
+            {
+                m_materialRenameBuf[0] = '\0';
+            }
+        }
+        recordItemRect(m_layout, "button_material_rename");
+    }
+
+    // ----- the material list ----------------------------------------------
+    ImGui::BeginChild("material_manager", ImVec2(0, 140), true);
+    {
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        m_layout.record("panel_materials", wp.x, wp.y, ws.x, ws.y);
+    }
+
+    if (m_scene.materials.empty())
+    {
+        ImGui::TextDisabled("(no materials — click New)");
+    }
+
+    for (std::size_t i = 0; i < m_scene.materials.size(); ++i)
+    {
+        const SceneModel::Material& m = m_scene.materials[i];
+        ImGui::PushID(static_cast<int>(i));
+
+        // A small color swatch on the same line as the row.
+        const ImVec4 sw(m.color.r, m.color.g, m.color.b, 1.0f);
+        ImGui::ColorButton("##swatch", sw,
+                           ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
+                           ImVec2(14, 14));
+        ImGui::SameLine();
+
+        const bool selected = (m_selectedMaterial == m.name);
+        const int useCount = m_scene.materialUseCount(m.name);
+        const std::string label =
+            m.name + "  [" + m.type + "]  x" + std::to_string(useCount);
+        if (ImGui::Selectable(label.c_str(), selected))
+        {
+            m_selectedMaterial = m.name;
+            m_propertiesMode = PropertiesMode::Material;
+            // Seed the rename buffer with the current name for convenience.
+            std::snprintf(m_materialRenameBuf, sizeof(m_materialRenameBuf), "%s", m.name.c_str());
+        }
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record("material_row_" + m.name, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        m_layout.record("material_row_index_" + std::to_string(i), mn.x, mn.y, mx.x - mn.x,
+                        mx.y - mn.y);
+        ImGui::PopID();
+    }
+
+    ImGui::EndChild();
+
+    // ----- assign-to-selected-object button --------------------------------
+    const bool haveObj =
+        (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()));
+    ImGui::BeginDisabled(!haveSel || !haveObj);
+    if (ImGui::Button("Assign material to selected object"))
+    {
+        assignMaterialToObject(m_selectedMaterial, m_selectedObject);
+    }
+    ImGui::EndDisabled();
+    recordItemRect(m_layout, "button_assign_material_to_object");
+    if (haveObj && haveSel)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s -> %s", m_selectedMaterial.c_str(),
+                            m_scene.objects[static_cast<std::size_t>(m_selectedObject)].name.c_str());
+    }
+}
+
+void EditorApp::drawMaterialEditForm(const std::string& materialName)
+{
+    // The material-edit form, shown in the Properties panel when a material is the
+    // active context. Edits go through the by-name material mutators, so EVERY
+    // object referencing this material updates (and the viewport/render reflect
+    // it). Registers mat_type / mat_color / mat_ior for the puppet port.
+    SceneModel::Material* mat = m_scene.findMaterialMutable(materialName);
+    if (!mat)
+    {
+        ImGui::TextDisabled("(material no longer exists)");
+        return;
+    }
+
+    ImGui::Text("Material: %s", mat->name.c_str());
+    const int useCount = m_scene.materialUseCount(mat->name);
+    ImGui::TextDisabled("Used by %d object%s", useCount, useCount == 1 ? "" : "s");
+    ImGui::Separator();
+
+    // Type selector. Use a manual BeginCombo loop (not ImGui::Combo) so each popup
+    // item registers its rect (mat_type_<item>) WHILE the popup is open — the same
+    // pattern the Insert menu uses — letting the puppet open the combo and click an
+    // item across frames. The combo box itself records mat_type.
+    ImGui::SetNextItemWidth(150.0f);
+    if (ImGui::BeginCombo("Type", mat->type.c_str()))
+    {
+        for (const char* item : materialTypeItems)
+        {
+            const bool isSel = (mat->type == item);
+            if (ImGui::Selectable(item, isSel))
+            {
+                setMaterialType(materialName, item);
+            }
+            const ImVec2 mn = ImGui::GetItemRectMin();
+            const ImVec2 mx = ImGui::GetItemRectMax();
+            std::string slug = item;
+            for (char& ch : slug) ch = static_cast<char>(std::tolower(ch));
+            m_layout.record("mat_type_" + slug, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+        }
+        ImGui::EndCombo();
+    }
+    recordItemRect(m_layout, "mat_type");
+
+    // Re-fetch: setMaterialType may have rebuilt; the pointer is stable within the
+    // frame (materials vector isn't reallocated by a type edit), but read fresh to
+    // be safe against future changes.
+    mat = m_scene.findMaterialMutable(materialName);
+    if (!mat) return;
+
+    float color[3] = {mat->color.r, mat->color.g, mat->color.b};
+    ImGui::SetNextItemWidth(220.0f);
+    if (ImGui::ColorEdit3("Color", color))
+    {
+        setMaterialFloatField(materialName, "color_r", color[0]);
+        setMaterialFloatField(materialName, "color_g", color[1]);
+        setMaterialFloatField(materialName, "color_b", color[2]);
+    }
+    recordItemRect(m_layout, "mat_color");
+
+    if (mat->type == "Glass")
+    {
+        float ior = static_cast<float>(mat->ior);
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::DragFloat("IOR", &ior, 0.01f, 1.0f, 3.0f))
+        {
+            setMaterialFloatField(materialName, "ior", ior);
+        }
+        recordItemRect(m_layout, "mat_ior");
+    }
+
+    ImGui::Separator();
+    // Assign this material to the currently selected object (if any).
+    const bool haveObj =
+        (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()));
+    ImGui::BeginDisabled(!haveObj);
+    if (ImGui::Button("Assign to selected object"))
+    {
+        assignMaterialToObject(materialName, m_selectedObject);
+    }
+    ImGui::EndDisabled();
+    recordItemRect(m_layout, "button_assign_material");
+    if (haveObj)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("-> %s",
+                            m_scene.objects[static_cast<std::size_t>(m_selectedObject)].name.c_str());
+    }
+}
+
 void EditorApp::drawPropertiesPanel()
 {
     ImGui::Separator();
@@ -1939,9 +2341,21 @@ void EditorApp::drawPropertiesPanel()
         m_layout.record("panel_properties", wp.x, wp.y, ws.x, ws.y);
     }
 
+    // The panel arbitrates between two selection notions via m_propertiesMode:
+    //   Material mode  -> edit the active material (m_selectedMaterial); changes
+    //                     propagate to all objects referencing it.
+    //   Object mode    -> edit the selected object's transform + kind fields + its
+    //                     material inline, with a button to jump to material mode.
+    if (m_propertiesMode == PropertiesMode::Material && !m_selectedMaterial.empty())
+    {
+        drawMaterialEditForm(m_selectedMaterial);
+        ImGui::EndChild();
+        return;
+    }
+
     if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_scene.objects.size()))
     {
-        ImGui::TextDisabled("(select an object to edit)");
+        ImGui::TextDisabled("(select an object or material to edit)");
         ImGui::EndChild();
         return;
     }
@@ -2067,6 +2481,28 @@ void EditorApp::drawPropertiesPanel()
                 }
                 recordItemRect(m_layout, "prop_material_ior");
             }
+
+            // Jump into the Material Manager's edit context for this material —
+            // the bridge from object-centric editing to the central material view.
+            if (ImGui::Button("Edit in Material Manager"))
+            {
+                m_selectedMaterial = obj.materialName;
+                m_propertiesMode = PropertiesMode::Material;
+            }
+            recordItemRect(m_layout, "button_edit_material");
+        }
+
+        // Assign the active material context (selected in the Material Manager) to
+        // THIS object — the object-mode twin of the manager's assign button.
+        if (!m_selectedMaterial.empty() && m_selectedMaterial != obj.materialName)
+        {
+            if (ImGui::Button("Assign active material"))
+            {
+                assignMaterialToObject(m_selectedMaterial, m_selectedObject);
+            }
+            recordItemRect(m_layout, "button_assign_material");
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s)", m_selectedMaterial.c_str());
         }
     }
 
@@ -2148,8 +2584,15 @@ void EditorApp::drawUi()
     // panel next wave). Each row registers its pixel rect in the LayoutRegistry.
     drawSceneExplorer();
 
+    // Material Manager: the central list of the scene's materials with create /
+    // duplicate / rename / delete / assign. Selecting a material row switches the
+    // Properties panel into material-edit mode. Lives between the explorer and the
+    // properties panel.
+    drawMaterialManager();
+
     // Properties panel: editable transform / kind fields / material for the
-    // selected object. Lives in the controls window beneath the explorer.
+    // selected object, OR (when a material is the active context) the material's
+    // type/color/ior. drawPropertiesPanel() arbitrates via m_propertiesMode.
     drawPropertiesPanel();
     ImGui::Separator();
 
@@ -2453,6 +2896,9 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "query_layout") return cmdQueryLayout(request);
     if (cmd == "insert_object") return cmdInsertObject(request);
     if (cmd == "set_property") return cmdSetProperty(request);
+    if (cmd == "create_material") return cmdCreateMaterial(request);
+    if (cmd == "set_material") return cmdSetMaterial(request);
+    if (cmd == "assign_material") return cmdAssignMaterial(request);
     if (cmd == "new_scene")
     {
         newScene();
@@ -2505,6 +2951,17 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
     {
         objectNames.push_back(obj.name);
     }
+    // Full material list (name/type/color/ior/use_count) so the Material Manager
+    // contents can be verified without screenshotting.
+    json materials = json::array();
+    for (const auto& m : m_scene.materials)
+    {
+        materials.push_back({{"name", m.name},
+                             {"type", m.type},
+                             {"color", {m.color.r, m.color.g, m.color.b}},
+                             {"ior", m.ior},
+                             {"use_count", m_scene.materialUseCount(m.name)}});
+    }
     j["scene"] = {
         {"name", m_scene.name},
         {"path", m_scenePath},
@@ -2512,7 +2969,14 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
         {"material_count", m_scene.materials.size()},
         {"camera_present", m_scene.camera.present},
         {"objects", objectNames},
+        {"materials", materials},
     };
+
+    // Active material context + which form the Properties panel is showing.
+    j["selected_material"] =
+        m_selectedMaterial.empty() ? json(nullptr) : json(m_selectedMaterial);
+    j["properties_mode"] =
+        (m_propertiesMode == PropertiesMode::Material) ? "material" : "object";
     // Active viewport tool (top toolbar). One of select|move|rotate|scale.
     const char* toolName = "select";
     switch (m_tool)
@@ -3096,6 +3560,24 @@ json objectDetailJson(const SceneModel& scene, int index)
     }
     return j;
 }
+
+// A detailed JSON view of one material (name/type/color/ior + use count) so the
+// puppet can verify a material create/edit without screenshotting.
+json materialDetailJson(const SceneModel& scene, const std::string& name)
+{
+    const SceneModel::Material* m = scene.findMaterial(name);
+    if (!m)
+    {
+        return json(nullptr);
+    }
+    json j;
+    j["name"] = m->name;
+    j["type"] = m->type;
+    j["color"] = {m->color.r, m->color.g, m->color.b};
+    j["ior"] = m->ior;
+    j["use_count"] = scene.materialUseCount(m->name);
+    return j;
+}
 }  // namespace
 
 nlohmann::json EditorApp::cmdInsertObject(const nlohmann::json& req)
@@ -3217,6 +3699,119 @@ nlohmann::json EditorApp::cmdSetProperty(const nlohmann::json& req)
         return json{{"ok", false}, {"error", "could not set field '" + field + "'"}};
     }
     return json{{"ok", true}, {"object", objectDetailJson(m_scene, index)}};
+}
+
+nlohmann::json EditorApp::cmdCreateMaterial(const nlohmann::json& req)
+{
+    // Create a new material via the SAME path the Material Manager's New button
+    // uses (createMaterial), then optionally apply name/type/color/ior so a puppet
+    // can mint a fully-configured material in one call. Selects it as the active
+    // material context (like clicking the new row).
+    const std::string name = createMaterial();
+    m_selectedMaterial = name;
+    m_propertiesMode = PropertiesMode::Material;
+
+    if (req.contains("type") && req["type"].is_string())
+    {
+        setMaterialType(name, req["type"].get<std::string>());
+    }
+    if (req.contains("color") && req["color"].is_array() && req["color"].size() == 3)
+    {
+        setMaterialFloatField(name, "color_r", req["color"][0].get<float>());
+        setMaterialFloatField(name, "color_g", req["color"][1].get<float>());
+        setMaterialFloatField(name, "color_b", req["color"][2].get<float>());
+    }
+    if (req.contains("ior") && req["ior"].is_number())
+    {
+        setMaterialFloatField(name, "ior", req["ior"].get<float>());
+    }
+    // Optional rename to a caller-specified name (applied last so references and
+    // uniqueness are handled by renameMaterial).
+    if (req.contains("name") && req["name"].is_string())
+    {
+        const std::string desired = req["name"].get<std::string>();
+        if (!desired.empty() && desired != name && renameMaterial(name, desired))
+        {
+            m_selectedMaterial = desired;
+        }
+    }
+    return json{{"ok", true},
+                {"name", m_selectedMaterial},
+                {"material", materialDetailJson(m_scene, m_selectedMaterial)},
+                {"material_count", m_scene.materials.size()}};
+}
+
+nlohmann::json EditorApp::cmdSetMaterial(const nlohmann::json& req)
+{
+    // Edit a material BY NAME — the programmatic twin of the material-edit form
+    // (both call the same setMaterialType / setMaterialFloatField mutators). The
+    // material is identified by "name"; "field" is one of type|color_r|color_g|
+    // color_b|ior. A "type" edit takes a string value; the rest take numbers.
+    if (!req.contains("name") || !req["name"].is_string())
+    {
+        return json{{"ok", false}, {"error", "set_material requires string 'name'"}};
+    }
+    const std::string name = req["name"].get<std::string>();
+    if (m_scene.findMaterial(name) == nullptr)
+    {
+        return json{{"ok", false}, {"error", "no material named '" + name + "'"}};
+    }
+    if (!req.contains("field") || !req["field"].is_string())
+    {
+        return json{{"ok", false}, {"error", "set_material requires string 'field'"}};
+    }
+    const std::string field = req["field"].get<std::string>();
+
+    bool ok = false;
+    if (field == "type")
+    {
+        if (!req.contains("value") || !req["value"].is_string())
+        {
+            return json{{"ok", false}, {"error", "type needs a string 'value'"}};
+        }
+        ok = setMaterialType(name, req["value"].get<std::string>());
+    }
+    else
+    {
+        if (!req.contains("value") || !req["value"].is_number())
+        {
+            return json{{"ok", false}, {"error", "field '" + field + "' needs a numeric 'value'"}};
+        }
+        ok = setMaterialFloatField(name, field, req["value"].get<float>());
+    }
+    if (!ok)
+    {
+        return json{{"ok", false}, {"error", "could not set material field '" + field + "'"}};
+    }
+    return json{{"ok", true}, {"material", materialDetailJson(m_scene, name)}};
+}
+
+nlohmann::json EditorApp::cmdAssignMaterial(const nlohmann::json& req)
+{
+    // Assign a material (by "name", default the active material context) to an
+    // object (by "index", default the selected object) — the twin of the Material
+    // Manager's "Assign to selected object" button.
+    std::string name = m_selectedMaterial;
+    if (req.contains("name") && req["name"].is_string())
+    {
+        name = req["name"].get<std::string>();
+    }
+    int index = m_selectedObject;
+    if (req.contains("index") && req["index"].is_number_integer())
+    {
+        index = req["index"].get<int>();
+    }
+    if (name.empty() || m_scene.findMaterial(name) == nullptr)
+    {
+        return json{{"ok", false}, {"error", "no such material to assign: '" + name + "'"}};
+    }
+    if (!assignMaterialToObject(name, index))
+    {
+        return json{{"ok", false}, {"error", "assign failed (object index out of range?)"}};
+    }
+    return json{{"ok", true},
+                {"material_name", name},
+                {"object", objectDetailJson(m_scene, index)}};
 }
 
 std::string EditorApp::captureScreenshot(const std::string& path, const std::string& target)
@@ -3606,6 +4201,8 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
             {
                 const int hit = pickObject(m_cursorX, m_cursorY);
                 m_selectedObject = hit;  // -1 on empty space = deselect
+                // A viewport pick is an object selection: show object properties.
+                m_propertiesMode = PropertiesMode::Object;
             }
             m_orbiting = false;
             m_panning = false;

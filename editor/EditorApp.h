@@ -216,6 +216,20 @@ private:
     // and rebuild the affected viewport geometry.
     void drawPropertiesPanel();
 
+    // The Material Manager panel: lists the scene's materials (name + a small
+    // type/color swatch), with create / duplicate / rename / delete operations and
+    // an "Assign to selected object" button. Selecting a material row makes it the
+    // active material context (m_selectedMaterial) and switches the properties
+    // panel into material-edit mode. Registers panel_materials, material_row_<name>,
+    // and the material op-button rects in the LayoutRegistry.
+    void drawMaterialManager();
+
+    // The material-edit form (shown in the properties panel when a material is the
+    // active context): type dropdown, color picker, and IOR (Glass). Edits flow
+    // through the model mutators so every object referencing the material updates.
+    // Registers mat_type / mat_color / mat_ior.
+    void drawMaterialEditForm(const std::string& materialName);
+
     // ===== Model mutation (the single path both GUI + puppet go through) =====
     // Insert a new object of `kind` into the model with a sensible default
     // transform + material, rebuild its viewport geometry, and select it. Returns
@@ -241,6 +255,46 @@ private:
     // its material's name selection. Returns true if applied.
     bool setObjectMaterialType(int index, const std::string& type);
     bool setObjectMaterialName(int index, const std::string& materialName);
+
+    // ===== Material operations (the single path GUI + puppet go through) =====
+    // These mutate m_scene.materials directly, the central place to manage
+    // materials independent of any one object. Each rebuilds viewport geometry so
+    // every object referencing an edited material updates in the viewport.
+
+    // Create a new default Lambertian material with a unique name. Returns the
+    // new material's name and makes it the active material context.
+    std::string createMaterial();
+
+    // Duplicate the named material (copying type/color/ior) under a unique name.
+    // Returns the new name (empty if the source doesn't exist).
+    std::string duplicateMaterial(const std::string& materialName);
+
+    // Rename a material and repoint every object that referenced the old name.
+    // Fails (returns false) if oldName is absent or newName is empty / already
+    // taken by a different material.
+    bool renameMaterial(const std::string& oldName, const std::string& newName);
+
+    // Delete a material. If it is referenced by any object, the references are
+    // reassigned to `reassignTo` (which must exist) — pass empty to refuse the
+    // delete when the material is in use. Returns true if deleted.
+    bool deleteMaterial(const std::string& materialName, const std::string& reassignTo);
+
+    // Set a field on a material BY NAME (not via an object). `field` is one of:
+    //   type (string: Lambertian|Mirror|Glass|Microfacet),
+    //   color_r|color_g|color_b (numeric), ior (numeric).
+    // Rebuilds viewport geometry. Returns true if applied. The material-edit form
+    // and the create/edit puppet command both call this.
+    bool setMaterialType(const std::string& materialName, const std::string& type);
+    bool setMaterialFloatField(const std::string& materialName, const std::string& field,
+                               float value);
+
+    // Assign the active material context (m_selectedMaterial) to the object at
+    // `index`. Returns true if both exist and the assignment applied.
+    bool assignMaterialToObject(const std::string& materialName, int index);
+
+    nlohmann::json cmdCreateMaterial(const nlohmann::json& req);
+    nlohmann::json cmdSetMaterial(const nlohmann::json& req);
+    nlohmann::json cmdAssignMaterial(const nlohmann::json& req);
 
     // Bind a MeshVolume object at `index` to a specific OBJ sub-shape (and,
     // optionally, register a specific OBJ file). `mesh_shape` sets the $mesh
@@ -325,6 +379,27 @@ private:
     // Set by the scene explorer; used to highlight the row + (next wave) drive
     // the properties panel.
     int m_selectedObject = -1;
+
+    // ----- properties-panel arbitration (object vs. material) -------------
+    // The editor has two independent "what is selected" notions: an object (via
+    // the explorer / viewport pick) and a material (via the Material Manager). The
+    // Properties panel can only show one editable form at a time, so a small mode
+    // enum decides which it renders this frame. Selecting an object row switches to
+    // Object mode (transform + kind fields + its material, read-mostly, with a
+    // jump-to-material button). Selecting a material row switches to Material mode
+    // (the material's type/color/ior, editable; changes propagate to every object
+    // referencing it). m_selectedMaterial is the active material context by name
+    // ("" = none); it persists across object selections so "Assign" has a target.
+    enum class PropertiesMode
+    {
+        Object,
+        Material
+    };
+    PropertiesMode m_propertiesMode = PropertiesMode::Object;
+    std::string m_selectedMaterial;  // active material context (name), "" = none
+
+    // Scratch buffer backing the rename text field in the Material Manager.
+    char m_materialRenameBuf[128] = {0};
 
     // The active viewport tool (top toolbar). Defaults to Select.
     Tool m_tool = Tool::Select;

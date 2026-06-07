@@ -176,6 +176,28 @@ struct SceneModel
         return base;
     }
 
+    // Index of a material by name, or -1 if absent.
+    int materialIndex(const std::string& materialName) const
+    {
+        for (std::size_t i = 0; i < materials.size(); ++i)
+        {
+            if (materials[i].name == materialName) return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    // Number of objects that reference a material by name. Used to guard deletion
+    // and to surface "in use" state in the Material Manager.
+    int materialUseCount(const std::string& materialName) const
+    {
+        int count = 0;
+        for (const auto& o : objects)
+        {
+            if (o.materialName == materialName) ++count;
+        }
+        return count;
+    }
+
     void reset()
     {
         meshFiles.clear();

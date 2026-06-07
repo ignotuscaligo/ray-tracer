@@ -68,6 +68,9 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `query_layout` | `name` (optional) | Pixel rect(s) of named UI elements recorded last frame. With `name`: one rect; without: all. |
 | `new_scene` | — | File > New: reset to a pristine empty scene (the from-scratch start). |
 | `insert_object` | `kind` (`SphereVolume`\|`MeshVolume`\|`AreaLight`\|`OmniLight`) | Insert an object via the SAME model-mutation path as the Insert menu / explorer right-click, build its viewport geometry, and select it. Returns the new `index`, `name`, and full `object` detail. |
+| `create_material` | optional `name`, `type`, `color[3]`, `ior` | Create a new material via the SAME path as the Material Manager's New button, then apply any of name/type/color/ior. Selects it as the active material context. Returns the new `name`, `material` detail, and `material_count`. |
+| `set_material` | `name`, `field`, `value` | Edit a material BY NAME (the twin of the material-edit form). `field` is `type` (string Lambertian\|Mirror\|Glass\|Microfacet) or `color_r`/`color_g`/`color_b`/`ior` (numeric). Every object referencing the material updates. Returns the `material` detail. |
+| `assign_material` | optional `name` (default active material), `index` (default selected object) | Assign a material to an object (the twin of the Material Manager's "Assign to selected object" button). Returns the `material_name` and updated `object`. |
 | `set_property` | `field`, `value`, `index` (optional, default selected) | Edit one field of an object — the programmatic twin of the properties-panel widgets (both call the same model mutators). Numeric fields: `pos_x/y/z`, `rot_x/y/z`, `scale_x/y/z`, `radius`, `light_width`, `light_height`, `light_radius`, `mat_color_r/g/b`, `mat_ior`. String fields: `material_type` (`Lambertian`\|`Mirror`\|`Glass`\|`Microfacet`), `material_name` (assign an existing material), `mesh_file` (register an OBJ in `$meshes`; MeshVolume only — relative paths resolve upwards), `mesh_shape` (bind a MeshVolume to a named OBJ sub-shape, e.g. `Left`/`Right`/`Ceiling`/`Floor`/`Back` of CornellBox.obj). Returns the updated `object` detail. |
 | `quit` | — | Acknowledge, then shut the editor down. |
 
@@ -102,6 +105,46 @@ GUI widgets are the real feature. Two ways to drive them:
 - **`insert_object` / `set_property` (robust fallback):** the programmatic twins
   of the same model mutators the widgets call, for when you want determinism
   without simulating the gesture. Both paths mutate the model identically.
+
+### Material Manager (2b-3)
+
+The **Material Manager** (`panel_materials`) is the central place to manage the
+scene's materials, distinct from per-object inline editing. It lists every
+material by name with a color swatch, a `[type]` tag, and a `xN` use-count, plus
+op buttons: New (`button_material_new`), Duplicate (`button_material_duplicate`),
+Delete (`button_material_delete`), a rename field + button
+(`material_rename_field` / `button_material_rename`), and
+`button_assign_material_to_object`. Each material row records
+`material_row_<name>` and a positional `material_row_index_<i>`.
+
+**Properties-panel arbitration (object vs. material).** The Properties panel
+shows ONE editable form at a time, chosen by a mode that follows the last
+selection:
+
+- Selecting an **object** (explorer row, viewport pick, or insert) → *object
+  mode*: the object's transform + kind fields + its material inline
+  (`prop_material_type`/`_color`/`_ior`), with `button_edit_material` (jump into
+  the material's edit context) and, when a different material is the active
+  context, `button_assign_material` (assign it to this object).
+- Selecting a **material** (a Material Manager row, or clicking New/Duplicate) →
+  *material mode*: the material's editable type / color / IOR
+  (`mat_type` combo with per-item `mat_type_<lambertian|mirror|glass|microfacet>`
+  rects recorded while the popup is open, `mat_color`, `mat_ior`), plus
+  `button_assign_material` to assign it to the selected object. Edits flow
+  through the by-name material mutators, so EVERY object referencing the material
+  updates and the viewport/render reflect it.
+
+`m_selectedMaterial` (the active material context) persists across object
+selections so "Assign" always has a target. `get_state` reports `selected_material`,
+`properties_mode` (`object`\|`material`), and a full `scene.materials` list
+(name/type/color/ior/use_count).
+
+**Material operations + safety.** Rename repoints every referencing object and
+refuses a name already taken by a different material. Delete refuses an in-use
+material unless its references can be reassigned (the GUI auto-reassigns to the
+first other material; an only-and-used material is protected). The
+`create_material` / `set_material` / `assign_material` commands are the
+programmatic twins of these GUI buttons and go through the same model mutators.
 
 Screenshot targets:
 - `window` — the full editor window incl. ImGui panels (`glReadPixels` of the default framebuffer).

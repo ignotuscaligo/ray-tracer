@@ -362,6 +362,42 @@ class EditorClient:
         """
         return self._command("set_property", field=field, value=value, index=index)
 
+    # ----- materials (twin of the Material Manager GUI) --------------------
+
+    def create_material(
+        self,
+        name: Optional[str] = None,
+        type: Optional[str] = None,
+        color: Optional[list] = None,
+        ior: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Create a material via the same path as the Material Manager's New
+        button, optionally applying name/type/color/ior. Selects it as the active
+        material context. Returns the new name + material detail."""
+        kwargs: Dict[str, Any] = {}
+        if name is not None:
+            kwargs["name"] = name
+        if type is not None:
+            kwargs["type"] = type
+        if color is not None:
+            kwargs["color"] = color
+        if ior is not None:
+            kwargs["ior"] = ior
+        return self._command("create_material", **kwargs)
+
+    def set_material(self, name: str, field: str, value: Any) -> Dict[str, Any]:
+        """Edit a material by name (twin of the material-edit form). `field` is
+        `type` (string) or color_r/color_g/color_b/ior (numeric). Every object
+        referencing the material updates."""
+        return self._command("set_material", name=name, field=field, value=value)
+
+    def assign_material(
+        self, name: Optional[str] = None, index: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Assign a material (default the active context) to an object (default the
+        selected object) — twin of the Material Manager's assign button."""
+        return self._command("assign_material", name=name, index=index)
+
     def query_layout(self, name: Optional[str] = None) -> Dict[str, Any]:
         """Return the pixel rect(s) of named UI elements from the last frame.
 
