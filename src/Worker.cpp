@@ -432,16 +432,31 @@ bool Worker::processLights()
         // when raycasting, which is what makes motion blur fall out naturally without
         // any temporal supersampling.
         //
-        // If the window is infinite (default), all photons get time=0 — preserving
-        // the pre-motion-blur baseline. Only when the camera has a bounded window do we
-        // sample real per-photon times.
+        // Window semantics (set by the Renderer from the frame's shutter):
+        //   - INFINITE [-inf,+inf): zero-shutter at frame time 0 (the pre-animation
+        //     baseline). start is -inf, so the block below leaves every photon at
+        //     time = 0 and the splat gate (contains over infinite) admits all.
+        //   - HALF-OPEN [t_open, t_open+shutter) with finite span: spread photons
+        //     UNIFORMLY across the shutter -> distributed (stochastic-time) motion
+        //     blur. Energy is preserved: same count, same per-photon flux; only the
+        //     TIME tag varies, and every sampled time lies inside the window so the
+        //     splat gate never drops a photon (DESIGN.md §9).
+        //   - DEGENERATE point [t_open, t_open) (finite start, zero/empty span):
+        //     zero shutter at a NON-zero frame time (an animated frame with no
+        //     blur). Stamp every photon at t_open exactly so the scene is sampled at
+        //     the right instant; no jitter. (Set up by the Renderer as [t,+inf) so
+        //     this branch sees finite start, non-finite end -> the else stamps t.)
         const Camera::ExposureWindow window = camera->globalExposureWindow();
-        if (std::isfinite(window.start) && std::isfinite(window.end) && window.end > window.start)
+        if (std::isfinite(window.start))
         {
-            const float span = window.end - window.start;
+            const bool finiteSpan =
+                std::isfinite(window.end) && window.end > window.start;
+            const float span = finiteSpan ? (window.end - window.start) : 0.0f;
             for (auto& photon : photons)
             {
-                photon.time = window.start + static_cast<float>(m_generator.value(span));
+                photon.time = finiteSpan
+                    ? window.start + static_cast<float>(m_generator.value(span))
+                    : window.start;
             }
         }
 

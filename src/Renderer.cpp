@@ -119,7 +119,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
     // Worker.cpp, always passes). Hence a static scene rendered with a shutter has
     // the SAME brightness as one rendered without (verified: test_ShutterBrightness).
     {
-        Camera::ExposureWindow window;
+        Camera::ExposureWindow window;  // default = infinite [-inf, +inf).
         const float start = static_cast<float>(settings.frameTime);
         const float shutter = static_cast<float>(settings.shutterTime);
         if (shutter > 0.0f)
@@ -129,11 +129,17 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         }
         else
         {
-            // Zero shutter: an instantaneous window [t, t+eps) so every photon is
-            // stamped exactly at frameTime (the emission sampler needs end>start;
-            // a one-ulp span yields a single representable time = frameTime).
+            // Zero shutter: a half-infinite window [frameTime, +inf). Emission sees
+            // a finite start but non-finite end, so it stamps EVERY photon at exactly
+            // frameTime (no jitter) — the scene is sampled at the frame's instant
+            // (correct for a no-blur animated frame), and for the default static
+            // frameTime=0 that is just time=0. The splat gate contains(frameTime)
+            // over [frameTime,+inf) is always true, so NO photon is dropped — the
+            // static render is the exact baseline brightness. We deliberately do NOT
+            // use a tiny [t, t+eps) window: sub-ulp emission times round to the
+            // exclusive end and get dropped, silently halving image energy.
             window.start = start;
-            window.end = std::nextafter(start, std::numeric_limits<float>::infinity());
+            window.end = std::numeric_limits<float>::infinity();
         }
         for (auto& cam : scene.cameras)
         {
