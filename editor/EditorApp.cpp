@@ -22,6 +22,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -255,6 +256,17 @@ bool EditorApp::initialize()
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+
+    // In headless (automation) mode, do NOT load/save imgui.ini. A persisted
+    // layout from a prior windowed session can pin the controls window at (0,0),
+    // overlapping the main menu bar — which makes the menu bar un-hoverable, so
+    // injected clicks can't open menus. Disabling the ini gives automation a
+    // deterministic fresh layout (driven by the SetNextWindowPos FirstUseEver
+    // defaults below, which sit windows BELOW the menu bar via WorkPos).
+    if (m_headless)
+    {
+        io.IniFilename = nullptr;
+    }
 
     // install_callbacks = false: we do NOT let the backend hook GLFW. Instead we
     // own the GLFW callbacks (above) and feed ImGui's IO ourselves from
@@ -1458,8 +1470,22 @@ void EditorApp::drawUi()
     // help text wrap one character per line. FirstUseEver lets the user freely
     // move/resize afterwards (and respects any saved imgui.ini layout).
     const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
-    const ImVec2 origin = mainViewport->WorkPos;
-    const ImVec2 size = mainViewport->WorkSize;
+    // Reserve the main menu bar height in the windows' initial Y so they never
+    // overlap (and thus never steal hover from) the menu bar. mainViewport->WorkPos
+    // already excludes the menu bar AFTER its first submitted frame, but the
+    // FirstUseEver positions below are snapshotted on frame 0 — when WorkPos.y is
+    // still 0 because the menu bar height isn't known yet. Without this, the
+    // controls window pins itself at y=0, covering the menu bar and making
+    // injected menu clicks impossible. GetFrameHeight() is the menu bar's height.
+    const float menuBarH = ImGui::GetFrameHeight();
+    ImVec2 origin = mainViewport->WorkPos;
+    ImVec2 size = mainViewport->WorkSize;
+    if (origin.y < menuBarH)
+    {
+        const float delta = menuBarH - origin.y;
+        origin.y = menuBarH;
+        size.y -= delta;
+    }
     const float controlsWidth = 360.0f;
     const float renderHeight = 260.0f;
 
@@ -1785,6 +1811,7 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "render") return cmdRender(request);
     if (cmd == "screenshot") return cmdScreenshot(request);
     if (cmd == "inject_input") return cmdInjectInput(request);
+    if (cmd == "play_input") return cmdPlayInput(request);
     if (cmd == "query_layout") return cmdQueryLayout(request);
     if (cmd == "insert_object") return cmdInsertObject(request);
     if (cmd == "set_property") return cmdSetProperty(request);
@@ -2116,12 +2143,12 @@ nlohmann::json EditorApp::cmdScreenshot(const nlohmann::json& req)
 
 // ===== Puppet commands: inject input + query layout ========================
 
-nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
+bool EditorApp::applyInputEventJson(const nlohmann::json& e, std::string& errOut)
 {
-    // Accepts either a single event object or {"events": [ ... ]}. Each event is
-    // {"type": "...", ...} matching InputEvent. All events are pushed through
-    // dispatchInputEvent() on this (the main/GL) thread — the exact same path a
-    // real OS event takes — so injected input is indistinguishable downstream.
+    // Translate one {"type": ...} JSON event into an InputEvent and feed it
+    // through dispatchInputEvent() on this (the main/GL) thread — the exact same
+    // path a real OS event takes — so injected input is indistinguishable
+    // downstream.
     //
     // Supported types (coordinates in window/framebuffer pixels, top-left origin):
     //   mouse_move   {x, y}
@@ -2129,79 +2156,84 @@ nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
     //   scroll       {dx?, dy}
     //   key          {key (GLFW key code), down (bool), mods?}
     //   char         {codepoint (int)}
-    auto applyOne = [this](const json& e, std::string& errOut) -> bool {
-        const std::string type = e.value("type", std::string{});
-        if (type == "mouse_move")
+    const std::string type = e.value("type", std::string{});
+    if (type == "mouse_move")
+    {
+        if (!e.contains("x") || !e.contains("y"))
         {
-            if (!e.contains("x") || !e.contains("y"))
-            {
-                errOut = "mouse_move requires x and y";
-                return false;
-            }
-            dispatchInputEvent(InputEvent::mouseMove(e["x"].get<double>(), e["y"].get<double>()));
-            return true;
+            errOut = "mouse_move requires x and y";
+            return false;
         }
-        if (type == "mouse_button")
+        dispatchInputEvent(InputEvent::mouseMove(e["x"].get<double>(), e["y"].get<double>()));
+        return true;
+    }
+    if (type == "mouse_button")
+    {
+        if (!e.contains("button") || !e.contains("down"))
         {
-            if (!e.contains("button") || !e.contains("down"))
-            {
-                errOut = "mouse_button requires button and down";
-                return false;
-            }
-            // Accept ImGui-style indices (0/1/2) and map to GLFW button codes so
-            // the nav handlers (which compare against GLFW_MOUSE_BUTTON_*) match.
-            int btn = e["button"].get<int>();
-            int glfwBtn = (btn == 0)   ? GLFW_MOUSE_BUTTON_LEFT
-                          : (btn == 1) ? GLFW_MOUSE_BUTTON_RIGHT
-                          : (btn == 2) ? GLFW_MOUSE_BUTTON_MIDDLE
-                                       : btn;
-            dispatchInputEvent(
-                InputEvent::mouseButton(glfwBtn, e["down"].get<bool>(), e.value("mods", 0)));
-            return true;
+            errOut = "mouse_button requires button and down";
+            return false;
         }
-        if (type == "scroll")
+        // Accept ImGui-style indices (0/1/2) and map to GLFW button codes so
+        // the nav handlers (which compare against GLFW_MOUSE_BUTTON_*) match.
+        int btn = e["button"].get<int>();
+        int glfwBtn = (btn == 0)   ? GLFW_MOUSE_BUTTON_LEFT
+                      : (btn == 1) ? GLFW_MOUSE_BUTTON_RIGHT
+                      : (btn == 2) ? GLFW_MOUSE_BUTTON_MIDDLE
+                                   : btn;
+        dispatchInputEvent(
+            InputEvent::mouseButton(glfwBtn, e["down"].get<bool>(), e.value("mods", 0)));
+        return true;
+    }
+    if (type == "scroll")
+    {
+        dispatchInputEvent(InputEvent::scroll(e.value("dx", 0.0), e.value("dy", 0.0)));
+        return true;
+    }
+    if (type == "key")
+    {
+        if (!e.contains("key") || !e.contains("down"))
         {
-            dispatchInputEvent(InputEvent::scroll(e.value("dx", 0.0), e.value("dy", 0.0)));
-            return true;
+            errOut = "key requires key and down";
+            return false;
         }
-        if (type == "key")
+        const int key = e["key"].get<int>();
+        const bool down = e["down"].get<bool>();
+        const int mods = e.value("mods", 0);
+        // Feed ImGui IO through the backend's translator (it owns the
+        // GLFW->ImGuiKey table), then run the event through our abstraction.
+        ImGui_ImplGlfw_KeyCallback(m_window, key, 0, down ? GLFW_PRESS : GLFW_RELEASE, mods);
+        dispatchInputEvent(InputEvent::key(key, down, mods));
+        return true;
+    }
+    if (type == "char")
+    {
+        if (!e.contains("codepoint"))
         {
-            if (!e.contains("key") || !e.contains("down"))
-            {
-                errOut = "key requires key and down";
-                return false;
-            }
-            const int key = e["key"].get<int>();
-            const bool down = e["down"].get<bool>();
-            const int mods = e.value("mods", 0);
-            // Feed ImGui IO through the backend's translator (it owns the
-            // GLFW->ImGuiKey table), then run the event through our abstraction.
-            ImGui_ImplGlfw_KeyCallback(m_window, key, 0, down ? GLFW_PRESS : GLFW_RELEASE, mods);
-            dispatchInputEvent(InputEvent::key(key, down, mods));
-            return true;
+            errOut = "char requires codepoint";
+            return false;
         }
-        if (type == "char")
-        {
-            if (!e.contains("codepoint"))
-            {
-                errOut = "char requires codepoint";
-                return false;
-            }
-            dispatchInputEvent(
-                InputEvent::character(static_cast<unsigned int>(e["codepoint"].get<int>())));
-            return true;
-        }
-        errOut = "unknown event type '" + type + "'";
-        return false;
-    };
+        dispatchInputEvent(
+            InputEvent::character(static_cast<unsigned int>(e["codepoint"].get<int>())));
+        return true;
+    }
+    errOut = "unknown event type '" + type + "'";
+    return false;
+}
 
+nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
+{
+    // Accepts either a single event object or {"events": [ ... ]}. All events are
+    // applied within THIS frame's drain() — matching how a real drag's events
+    // arrive between frames. For a multi-frame interaction (menu popup, DragFloat
+    // drag) use play_input, which schedules events across successive frames.
     int applied = 0;
     std::string err;
     if (req.contains("events") && req["events"].is_array())
     {
         for (const auto& e : req["events"])
         {
-            if (!applyOne(e, err))
+            if (!applyInputEventJson(e, err))
             {
                 return json{{"ok", false}, {"error", err}, {"applied", applied}};
             }
@@ -2210,7 +2242,7 @@ nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
     }
     else
     {
-        if (!applyOne(req, err))
+        if (!applyInputEventJson(req, err))
         {
             return json{{"ok", false}, {"error", err}};
         }
@@ -2220,6 +2252,121 @@ nlohmann::json EditorApp::cmdInjectInput(const nlohmann::json& req)
     const glm::vec3 eye = m_camera.eye();
     return json{{"ok", true},
                 {"applied", applied},
+                {"cursor", {m_cursorX, m_cursorY}},
+                {"camera", {{"yaw", m_camera.yaw}, {"pitch", m_camera.pitch}}},
+                {"eye", {eye.x, eye.y, eye.z}}};
+}
+
+nlohmann::json EditorApp::cmdPlayInput(const nlohmann::json& req)
+{
+    // Replay a TIMED sequence of input events across REAL frames, so multi-frame
+    // ImGui interactions (opening a menu popup, hovering to an item, dragging a
+    // DragFloat) progress exactly as they would under a human's hand. This is the
+    // piece a single batched inject_input cannot do: that lands all events in one
+    // frame, but a popup only appears the frame AFTER its menu header is clicked,
+    // and a DragFloat only integrates motion across successive NewFrame() deltas.
+    //
+    // Request: {"actions": [ {"t_ms": <relative ms>, "event": {<inject event>}}, ... ],
+    //           "fps": <frames/sec to simulate, default 60>,
+    //           "tail_ms": <extra time to keep stepping after the last action,
+    //                       default 50> }
+    //
+    // Scheduling model (identical in windowed + headless): we walk a virtual
+    // clock in fixed steps of 1000/fps ms. Each step we fire every action whose
+    // t_ms is <= the current virtual time (in t_ms order), then advance ONE real
+    // frame via stepFrames(1) — which runs NewFrame()/drawUi()/Render()/present so
+    // ImGui sees the elapsed frame and popups/drags make progress. We do NOT
+    // re-drain the automation queue while stepping (we're already inside a
+    // handler running from drain()), so the in-flight sequence owns the frames it
+    // needs and other commands wait until it returns. The handler returns when
+    // all actions have fired and the tail has elapsed — so the caller's single
+    // request blocks for the whole gesture, then can immediately query results.
+    if (!req.contains("actions") || !req["actions"].is_array())
+    {
+        return json{{"ok", false}, {"error", "play_input requires 'actions' array"}};
+    }
+
+    const double fps = req.value("fps", 60.0);
+    if (fps <= 0.0)
+    {
+        return json{{"ok", false}, {"error", "fps must be > 0"}};
+    }
+    const double frameMs = 1000.0 / fps;
+    const double tailMs = req.value("tail_ms", 50.0);
+
+    // Collect + sort actions by time (stable: preserve input order at equal t).
+    struct Action
+    {
+        double tMs;
+        json event;
+        std::size_t order;
+    };
+    std::vector<Action> actions;
+    actions.reserve(req["actions"].size());
+    std::size_t order = 0;
+    for (const auto& a : req["actions"])
+    {
+        if (!a.contains("event") || !a["event"].is_object())
+        {
+            return json{{"ok", false},
+                        {"error", "each action requires an 'event' object"},
+                        {"fired", 0}};
+        }
+        actions.push_back(Action{a.value("t_ms", 0.0), a["event"], order++});
+    }
+    std::stable_sort(actions.begin(), actions.end(), [](const Action& x, const Action& y) {
+        if (x.tMs != y.tMs) return x.tMs < y.tMs;
+        return x.order < y.order;
+    });
+
+    const double lastT = actions.empty() ? 0.0 : actions.back().tMs;
+    const double endMs = lastT + tailMs;
+
+    int fired = 0;
+    int frames = 0;
+    std::size_t next = 0;          // index of the next un-fired action
+    double virtualMs = 0.0;
+    // Step the virtual clock frame-by-frame, firing due events before each frame
+    // advances, until every action has fired and the tail window has elapsed.
+    while (true)
+    {
+        // Fire every action due at or before the current virtual time.
+        while (next < actions.size() && actions[next].tMs <= virtualMs)
+        {
+            std::string err;
+            if (!applyInputEventJson(actions[next].event, err))
+            {
+                return json{{"ok", false},
+                            {"error", err},
+                            {"fired", fired},
+                            {"frames", frames}};
+            }
+            ++fired;
+            ++next;
+        }
+
+        if (next >= actions.size() && virtualMs >= endMs)
+        {
+            break;
+        }
+
+        // Advance one real frame so ImGui integrates the elapsed time (popups
+        // open, drags accumulate motion, hovers register).
+        stepFrames(1);
+        ++frames;
+        virtualMs += frameMs;
+
+        // Safety bound: never loop unbounded if fps/tail are pathological.
+        if (frames > 100000)
+        {
+            break;
+        }
+    }
+
+    const glm::vec3 eye = m_camera.eye();
+    return json{{"ok", true},
+                {"fired", fired},
+                {"frames", frames},
                 {"cursor", {m_cursorX, m_cursorY}},
                 {"camera", {{"yaw", m_camera.yaw}, {"pitch", m_camera.pitch}}},
                 {"eye", {eye.x, eye.y, eye.z}}};
@@ -2527,48 +2674,91 @@ int EditorApp::runScript(const std::string& scriptPath)
     return exitCode;
 }
 
+bool EditorApp::renderOneFrame(bool drainAutomation)
+{
+    if (glfwWindowShouldClose(m_window))
+    {
+        return false;
+    }
+
+    glfwPollEvents();
+
+    pollRender();
+
+    // Execute any queued automation commands on this (main/GL) thread. Skipped
+    // when called re-entrantly from a command handler (the timed-input
+    // scheduler): we are already inside drain(), so draining again would run
+    // queued commands out of order relative to the in-flight one.
+    if (drainAutomation && m_automation)
+    {
+        m_automation->drain();
+        if (m_automation->shouldQuit())
+        {
+            return false;
+        }
+    }
+
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+
+    // Headless fix: with a HIDDEN window and the backend's auto-callbacks
+    // disabled, ImGui_ImplGlfw_NewFrame()'s UpdateMouseData() falls into its
+    // "focused + MouseWindow==null" fallback and OVERWRITES io.MousePos with the
+    // real OS cursor (glfwGetCursorPos) every frame — clobbering the position we
+    // injected. That's why injected clicks orbit the camera (app state reads our
+    // own m_cursorX) yet never drive ImGui widgets/menus (hover is computed from
+    // the clobbered io.MousePos). Re-assert the abstraction's cursor AFTER the
+    // backend frame and BEFORE ImGui::NewFrame() so our queued position wins.
+    // Only in headless mode: a visible focused window reports the true cursor, so
+    // there's nothing to correct there.
+    if (m_headless)
+    {
+        ImGui::GetIO().AddMousePosEvent(static_cast<float>(m_cursorX),
+                                        static_cast<float>(m_cursorY));
+    }
+
+    ImGui::NewFrame();
+
+    drawUi();
+
+    // Render the raster viewport into its FBO (its texture is shown by the
+    // Viewport panel above, sampled this frame — one frame of latency is
+    // imperceptible).
+    renderViewport();
+
+    ImGui::Render();
+
+    int displayW, displayH;
+    glfwGetFramebufferSize(m_window, &displayW, &displayH);
+    m_lastWindowWidth = displayW;
+    m_lastWindowHeight = displayH;
+    glViewport(0, 0, displayW, displayH);
+    glClearColor(0.06f, 0.06f, 0.07f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    glfwSwapBuffers(m_window);
+    return true;
+}
+
+void EditorApp::stepFrames(int count)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        // drainAutomation=false: we're already inside a handler running from
+        // drain(); advancing frames here must not pop+run other queued commands.
+        if (!renderOneFrame(/*drainAutomation=*/false))
+        {
+            break;
+        }
+    }
+}
+
 void EditorApp::run()
 {
-    while (!glfwWindowShouldClose(m_window))
+    while (renderOneFrame(/*drainAutomation=*/true))
     {
-        glfwPollEvents();
-
-        pollRender();
-
-        // Execute any queued automation commands on this (main/GL) thread.
-        if (m_automation)
-        {
-            m_automation->drain();
-            if (m_automation->shouldQuit())
-            {
-                break;
-            }
-        }
-
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        drawUi();
-
-        // Render the raster viewport into its FBO (its texture is shown by the
-        // Viewport panel above, sampled this frame — one frame of latency is
-        // imperceptible).
-        renderViewport();
-
-        ImGui::Render();
-
-        int displayW, displayH;
-        glfwGetFramebufferSize(m_window, &displayW, &displayH);
-        m_lastWindowWidth = displayW;
-        m_lastWindowHeight = displayH;
-        glViewport(0, 0, displayW, displayH);
-        glClearColor(0.06f, 0.06f, 0.07f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(m_window);
     }
 }
 

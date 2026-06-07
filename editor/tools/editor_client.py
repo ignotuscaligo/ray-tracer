@@ -221,6 +221,113 @@ class EditorClient:
         events.append({"type": "mouse_button", "button": button, "down": False})
         return self.inject_input(events)
 
+    # ----- puppet: TIMED multi-frame sequences + gestures ------------------
+
+    def play_input(
+        self, actions: list, fps: float = 60.0, tail_ms: float = 50.0
+    ) -> Dict[str, Any]:
+        """Replay timestamped input across REAL frames (multi-frame interactions).
+
+        Each action is ``{"t_ms": <relative ms>, "event": {<inject event dict>}}``.
+        The editor walks a virtual clock in 1000/fps steps, fires each action when
+        the clock reaches its ``t_ms``, and advances ONE real render frame per step
+        (NewFrame/drawUi/Render) so ImGui integrates the elapsed time. This is what
+        a single batched ``inject_input`` cannot do: a menu popup only appears the
+        frame AFTER its header is clicked, and a DragFloat only accumulates motion
+        across successive frame deltas. The call blocks until the whole sequence
+        (plus ``tail_ms``) has played, so results can be queried immediately after.
+
+        Returns ``{fired, frames, cursor, camera, eye}``.
+        """
+        return self._command("play_input", actions=actions, fps=fps, tail_ms=tail_ms)
+
+    def click(
+        self,
+        x: float,
+        y: float,
+        hold_ms: float = 100.0,
+        pre_move_ms: float = 16.0,
+    ) -> Dict[str, Any]:
+        """A realistic multi-frame click: move to (x,y), small hold, down, hold, up.
+
+        Unlike ``inject_click`` (one frame), this spreads press and release across
+        frames so a widget that needs to see the button held (and the hover
+        settle) registers the interaction like a human click.
+        """
+        t = 0.0
+        actions = [{"t_ms": t, "event": {"type": "mouse_move", "x": x, "y": y}}]
+        t += pre_move_ms
+        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": True}})
+        t += hold_ms
+        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": False}})
+        return self.play_input(actions, tail_ms=hold_ms)
+
+    def click_drag(
+        self,
+        from_xy,
+        to_xy,
+        hold_ms: float = 100.0,
+        drag_ms: float = 1000.0,
+        release_hold_ms: float = 100.0,
+        fps: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Move to ``from_xy``, press, hold, interpolate to ``to_xy`` over
+        ``drag_ms``, hold, release — a true multi-frame drag.
+
+        This is the exact gesture a DragFloat needs: the button is held while the
+        cursor moves incrementally across many frames, so ImGui accumulates the
+        per-frame deltas into the value change.
+        """
+        x0, y0 = from_xy
+        x1, y1 = to_xy
+        t = 0.0
+        actions = [{"t_ms": t, "event": {"type": "mouse_move", "x": x0, "y": y0}}]
+        t += 16.0
+        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": True}})
+        t += hold_ms
+        # Interpolate the move over drag_ms, one sub-move per simulated frame.
+        steps = max(1, int(round(drag_ms / (1000.0 / fps))))
+        for i in range(1, steps + 1):
+            f = i / steps
+            actions.append(
+                {
+                    "t_ms": t + drag_ms * f,
+                    "event": {
+                        "type": "mouse_move",
+                        "x": x0 + (x1 - x0) * f,
+                        "y": y0 + (y1 - y0) * f,
+                    },
+                }
+            )
+        t += drag_ms
+        t += release_hold_ms
+        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": False}})
+        return self.play_input(actions, fps=fps, tail_ms=release_hold_ms)
+
+    def menu_pick(self, menu_name: str, item_label: str) -> Dict[str, Any]:
+        """Open a menu-bar menu and click one of its items via simulated input.
+
+        Looks up the menu header rect (``menu_<menu_name>``), clicks it to open the
+        popup, advances frames so the popup lays out + registers its item rects,
+        re-queries the item rect (``menu_<menu_name>_<slug>`` or an explicit
+        ``layout_name`` form), then clicks the item. Returns the play_input result
+        of the item click.
+
+        ``item_label`` may be the registered layout suffix (e.g. "sphere") or a
+        human label ("Sphere"); it is lowercased + spaces→underscores to match the
+        registered names (menu_insert_sphere, menu_insert_area_light, ...).
+        """
+        header = self.query_layout(f"menu_{menu_name}")["rect"]
+        hx, hy = header["center"]
+        # Click the header; popup opens on the following frame(s).
+        self.click(hx, hy)
+        # The item rects are recorded under menu_<menu_name_lower>_<slug>.
+        slug = item_label.strip().lower().replace(" ", "_")
+        item_key = f"menu_{menu_name.lower()}_{slug}"
+        rect = self.query_layout(item_key)["rect"]
+        ix, iy = rect["center"]
+        return self.click(ix, iy)
+
     # ----- model mutation (insert / edit objects) --------------------------
 
     def new_scene(self) -> Dict[str, Any]:
@@ -338,6 +445,29 @@ def _build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--steps", type=int, default=8)
     dr.add_argument("--button", type=int, default=0, choices=[0, 1, 2])
 
+    tc = sub.add_parser("timed-click", help="multi-frame click via play_input")
+    tc.add_argument("x", type=float)
+    tc.add_argument("y", type=float)
+    tc.add_argument("--hold-ms", type=float, default=100.0)
+
+    cd = sub.add_parser("click-drag", help="multi-frame held drag via play_input")
+    cd.add_argument("x0", type=float)
+    cd.add_argument("y0", type=float)
+    cd.add_argument("x1", type=float)
+    cd.add_argument("y1", type=float)
+    cd.add_argument("--hold-ms", type=float, default=100.0)
+    cd.add_argument("--drag-ms", type=float, default=1000.0)
+    cd.add_argument("--release-hold-ms", type=float, default=100.0)
+
+    mp = sub.add_parser("menu-pick", help="open a menu and click an item via injection")
+    mp.add_argument("menu", help="menu header name, e.g. Insert (matches menu_<name>)")
+    mp.add_argument("item", help="item label/slug, e.g. Sphere or sphere")
+
+    pi = sub.add_parser("play-input", help="replay a JSON actions array across frames")
+    pi.add_argument("actions_json", help="JSON array of {t_ms, event} actions, or @file")
+    pi.add_argument("--fps", type=float, default=60.0)
+    pi.add_argument("--tail-ms", type=float, default=50.0)
+
     return p
 
 
@@ -395,6 +525,26 @@ def main(argv: Optional[list] = None) -> int:
             result = client.inject_drag(
                 args.x0, args.y0, args.x1, args.y1, steps=args.steps, button=args.button
             )
+        elif args.command == "timed-click":
+            result = client.click(args.x, args.y, hold_ms=args.hold_ms)
+        elif args.command == "click-drag":
+            result = client.click_drag(
+                (args.x0, args.y0),
+                (args.x1, args.y1),
+                hold_ms=args.hold_ms,
+                drag_ms=args.drag_ms,
+                release_hold_ms=args.release_hold_ms,
+            )
+        elif args.command == "menu-pick":
+            result = client.menu_pick(args.menu, args.item)
+        elif args.command == "play-input":
+            spec = args.actions_json
+            if spec.startswith("@"):
+                with open(spec[1:], "r", encoding="utf-8") as fh:
+                    actions = json.load(fh)
+            else:
+                actions = json.loads(spec)
+            result = client.play_input(actions, fps=args.fps, tail_ms=args.tail_ms)
         elif args.command == "quit":
             result = client.quit()
         else:  # pragma: no cover - argparse enforces choices

@@ -74,6 +74,7 @@ public:
     nlohmann::json cmdRender(const nlohmann::json& req);
     nlohmann::json cmdScreenshot(const nlohmann::json& req);
     nlohmann::json cmdInjectInput(const nlohmann::json& req);
+    nlohmann::json cmdPlayInput(const nlohmann::json& req);
     nlohmann::json cmdQueryLayout(const nlohmann::json& req);
     nlohmann::json cmdInsertObject(const nlohmann::json& req);
     nlohmann::json cmdSetProperty(const nlohmann::json& req);
@@ -123,6 +124,21 @@ private:
     void drawMenuBar();
     void renderViewport();
     void resizeFbo(int width, int height);
+
+    // Run exactly one frame of the editor: poll OS events, drain queued
+    // automation commands, build + render the UI, render the viewport FBO, and
+    // present. This is the single unit of work the main loop repeats, factored
+    // out so the timed-input scheduler (cmdPlayInput) can advance ImGui across
+    // real frames from inside a command handler. `drainAutomation` is false when
+    // called re-entrantly from a handler (we're already inside drain(); draining
+    // again would deadlock / reorder commands) and true for the normal loop.
+    // Returns false if the window has been asked to close.
+    bool renderOneFrame(bool drainAutomation);
+
+    // Advance `count` whole frames (renderOneFrame without re-draining the
+    // automation queue). Used by the timed-input scheduler so popups/drags make
+    // multi-frame progress while a command handler is running.
+    void stepFrames(int count);
 
     // File > New: initialize an empty scene and show the viewport. The substrate
     // for later waves (object insertion, render-from-view, save) — see Scene.h.
@@ -195,6 +211,13 @@ private:
     // (a) feeds ImGui's IO and (b) routes to the app-state handlers below, so
     // injected and real events are indistinguishable downstream.
     void dispatchInputEvent(const InputEvent& event);
+
+    // Translate one {"type": ...} JSON event (the inject_input / play_input
+    // schema) into an InputEvent and feed it through dispatchInputEvent on the
+    // main/GL thread. Returns false and fills `errOut` on a malformed event.
+    // Shared by inject_input (batch into one frame) and play_input (one event at
+    // its scheduled time across frames).
+    bool applyInputEventJson(const nlohmann::json& e, std::string& errOut);
 
     // App-state input handlers, fed exclusively from dispatchInputEvent(). They
     // never read raw GLFW state — m_cursorX/m_cursorY track the abstraction's

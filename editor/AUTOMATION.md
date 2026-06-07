@@ -63,7 +63,8 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `set_render_settings` | any of `resolution`, `photons` (millions), `scene_path` | Configure the path-traced render. |
 | `render` | `wait` (default true), `timeout` (s, default 600) | Path-trace the loaded scene **from the LIVE orbit camera** (eye/target/fov are baked into a temp scene next to the source) on a worker thread. With `wait`, blocks until done. |
 | `screenshot` | `path`, `target` (`window`\|`viewport`\|`render`) | Capture pixels to an 8-bit RGBA PNG. |
-| `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path (drives camera nav + ImGui). |
+| `inject_input` | single event obj, or `events` (array) | Push InputEvent(s) through the editor's single input path **within ONE frame** (drives camera nav + single-frame ImGui). For multi-frame interactions (menus, drags) use `play_input`. |
+| `play_input` | `actions` (array of `{t_ms, event}`), `fps` (default 60), `tail_ms` (default 50) | Replay a TIMED input sequence across REAL frames: events fire at their scheduled `t_ms` and the editor advances one render frame per simulated tick, so multi-frame ImGui interactions (open a menu popup, hover to an item, drag a DragFloat) progress like a human's hand. Blocks until the sequence + tail completes; returns `fired`, `frames`, `cursor`, `camera`, `eye`. Same scheduler in windowed + headless. |
 | `query_layout` | `name` (optional) | Pixel rect(s) of named UI elements recorded last frame. With `name`: one rect; without: all. |
 | `new_scene` | — | File > New: reset to a pristine empty scene (the from-scratch start). |
 | `insert_object` | `kind` (`SphereVolume`\|`MeshVolume`\|`AreaLight`\|`OmniLight`) | Insert an object via the SAME model-mutation path as the Insert menu / explorer right-click, build its viewport geometry, and select it. Returns the new `index`, `name`, and full `object` detail. |
@@ -90,10 +91,17 @@ widget registers its rect: `prop_pos_x/y/z`, `prop_rot_x/y/z`, `prop_scale_x/y/z
 (glass). The Insert-menu item rects (`menu_insert_sphere`/`_mesh`/`_area_light`/
 `_omni_light`) are recorded while the menu popup is open.
 
-GUI widgets are the real feature; drive edits reliably with `insert_object` /
-`set_property` rather than injecting drag-float gestures (an ImGui DragFloat is a
-multi-frame drag, which a single batched `inject_input` cannot reproduce — the
-commands and the widgets call the identical model mutators).
+GUI widgets are the real feature. Two ways to drive them:
+- **`play_input` + gestures (drive the actual widget):** a menu popup or a
+  DragFloat is a *multi-frame* interaction — the popup only appears the frame
+  AFTER its header is clicked, and a DragFloat only integrates motion across
+  successive frame deltas — so a single batched `inject_input` (one frame) cannot
+  reproduce them. `play_input` schedules events across real frames and is the
+  proven path for menu-driven insert and DragFloat edits (see "Timed multi-frame
+  input" below).
+- **`insert_object` / `set_property` (robust fallback):** the programmatic twins
+  of the same model mutators the widgets call, for when you want determinism
+  without simulating the gesture. Both paths mutate the model identically.
 
 Screenshot targets:
 - `window` — the full editor window incl. ImGui panels (`glReadPixels` of the default framebuffer).
@@ -172,6 +180,59 @@ handlers use to decide whether a press/scroll is a viewport gesture, so injected
 and real input are gated against the same rect. Future panels/widgets register
 the same way (one `m_layout.record(...)` call as the widget is submitted).
 
+### Timed multi-frame input (`play_input`) and gestures
+
+`inject_input` applies all its events inside a single frame's `drain()`. That is
+right for a viewport drag (the camera handler reads the abstraction's own cursor
+each event) but WRONG for ImGui interactions that span frames:
+
+- a **menu popup** is submitted by `BeginMenu` only on the frame *after* its
+  header is clicked, so its item rects don't even exist yet within the click frame;
+- a **DragFloat** integrates `io.MousePos - io.MousePosPrev` per `NewFrame`, so its
+  value only changes if the button is held while the cursor moves across many frames.
+
+`play_input` solves this. Request:
+
+```json
+{"cmd": "play_input", "fps": 60, "tail_ms": 50, "actions": [
+  {"t_ms": 0,    "event": {"type": "mouse_move",   "x": 77, "y": 9}},
+  {"t_ms": 16,   "event": {"type": "mouse_button", "button": 0, "down": true}},
+  {"t_ms": 116,  "event": {"type": "mouse_button", "button": 0, "down": false}}
+]}
+```
+
+**Scheduling model (identical windowed + headless).** The editor walks a virtual
+clock in fixed `1000/fps` ms steps. Each step it fires every action whose `t_ms`
+is due (in `t_ms` order), then advances exactly ONE real render frame — a full
+`NewFrame()` / `drawUi()` / `renderViewport()` / `Render()` / present — so ImGui
+sees the elapsed frame and popups/drags make progress. It does NOT re-drain the
+automation queue while stepping (the handler is already running inside `drain()`),
+so the in-flight sequence owns the frames it needs and other commands wait until
+it returns. The handler blocks for the whole gesture plus `tail_ms`, then returns
+`{fired, frames, cursor, camera, eye}` — so the caller can `get_state` /
+`query_layout` immediately afterward and see the result.
+
+**Frame stepping in headless.** Headless steps the same per-frame work as a
+windowed loop (the window is just hidden), so ImGui state advances normally.
+
+**Headless mouse fix.** With a hidden window and the backend's auto-callbacks
+disabled, `ImGui_ImplGlfw_NewFrame()` would overwrite `io.MousePos` with the real
+OS cursor every frame, clobbering the injected position — which is why injected
+clicks orbited the camera (app state reads our own cursor) but never opened menus
+or activated widgets (ImGui hover is computed from the clobbered `io.MousePos`).
+In headless mode the editor re-asserts the injected cursor position after the
+backend frame and before `ImGui::NewFrame()`. Headless also disables `imgui.ini`
+so a stale persisted layout can't pin a window over the menu bar (which would make
+the menu un-hoverable); windows are positioned below the menu bar each launch.
+
+**Menu-item rect registration.** Each Insert-menu item records its rect
+(`menu_insert_sphere`/`_mesh`/`_area_light`/`_omni_light`) *while the popup is
+open*. `play_input` keeps the popup open across frames, so a `query_layout` right
+after opening the menu finds the item rect to click.
+
+The `editor_client.py` gesture helpers (below) are built on `play_input`:
+`click`, `click_drag`, and `menu_pick`.
+
 ## Python client
 
 `editor/tools/editor_client.py` (stdlib only — `socket`, `json`, `argparse`).
@@ -193,6 +254,11 @@ python3 editor/tools/editor_client.py --port 8780 set-property pos_y 200 --index
 python3 editor/tools/editor_client.py --port 8780 set-property material_type Mirror
 python3 editor/tools/editor_client.py --port 8780 click 800 280
 python3 editor/tools/editor_client.py --port 8780 drag 800 280 1000 340 --steps 10
+# Timed multi-frame gestures (drive the REAL widgets):
+python3 editor/tools/editor_client.py --port 8780 timed-click 77 9.5
+python3 editor/tools/editor_client.py --port 8780 click-drag 66 482 266 482 --drag-ms 1000
+python3 editor/tools/editor_client.py --port 8780 menu-pick Insert Sphere
+python3 editor/tools/editor_client.py --port 8780 play-input '[{"t_ms":0,"event":{"type":"mouse_move","x":77,"y":9}}]'
 python3 editor/tools/editor_client.py --port 8780 quit
 ```
 
@@ -208,8 +274,13 @@ with EditorClient(port=8780) as c:
     # Puppet: find a UI element, then drive it with injected input.
     vp = c.query_layout("viewport")["rect"]
     cx, cy = vp["center"]
-    c.inject_drag(cx, cy, cx + 200, cy + 60)  # orbits the camera
-    c.inject_click(cx, cy)
+    c.inject_drag(cx, cy, cx + 200, cy + 60)  # one-frame orbit (camera nav)
+    # Multi-frame gestures that drive the ACTUAL widgets:
+    c.menu_pick("Insert", "Sphere")           # open Insert menu, click Sphere
+    rect = c.query_layout("prop_pos_x")["rect"]
+    px, py = rect["center"]
+    c.click_drag((px, py), (px + 200, py), drag_ms=1000)  # drag the DragFloat
+    print(c.get_state()["selected_detail"]["position"])    # pos_x changed by drag
     c.render(wait=True)
     c.screenshot("/tmp/render.png", target="render")
     c.quit()
