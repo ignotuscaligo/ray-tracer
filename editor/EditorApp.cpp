@@ -1188,6 +1188,77 @@ void EditorApp::drawMenuBar()
     }
 }
 
+void EditorApp::drawToolbar()
+{
+    // A horizontal toolbar pinned directly below the main menu bar. Buttons:
+    //   New           — reset to an empty scene (File > New equivalent)
+    //   Select/Move/Rotate/Scale — set the active viewport tool (a mode enum),
+    //                              with the active button visually highlighted.
+    // Each button's pixel rect is registered (tool_new, tool_select, ...) so the
+    // puppet port can click it; the active tool is exposed in get_state.
+    const float menuBarH = ImGui::GetFrameHeight();
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + menuBarH));
+    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, 0.0f));
+
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                   ImGuiWindowFlags_NoSavedSettings |
+                                   ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                   ImGuiWindowFlags_NoNavFocus;
+    ImGui::Begin("##toolbar", nullptr, flags);
+
+    auto toolButton = [this](const char* label, const char* layoutName, Tool tool) {
+        const bool active = (m_tool == tool);
+        if (active)
+        {
+            // Highlight the active tool button with the ImGui "active" accent.
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                  ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        }
+        if (ImGui::Button(label))
+        {
+            m_tool = tool;
+        }
+        if (active)
+        {
+            ImGui::PopStyleColor(2);
+        }
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record(layoutName, mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+    };
+
+    // New: reset to an empty scene. Recorded as tool_new.
+    if (ImGui::Button("New"))
+    {
+        newScene();
+    }
+    {
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        m_layout.record("tool_new", mn.x, mn.y, mx.x - mn.x, mx.y - mn.y);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    toolButton("Select", "tool_select", Tool::Select);
+    ImGui::SameLine();
+    toolButton("Move", "tool_move", Tool::Move);
+    ImGui::SameLine();
+    toolButton("Rotate", "tool_rotate", Tool::Rotate);
+    ImGui::SameLine();
+    toolButton("Scale", "tool_scale", Tool::Scale);
+
+    // Record the toolbar's own rect so its height can be reserved by panels.
+    m_layout.record("toolbar", ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
+                    ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
+
+    ImGui::End();
+}
+
 namespace
 {
 const char* kindLabel(SceneModel::Kind k)
@@ -1461,6 +1532,7 @@ void EditorApp::drawUi()
     m_layout.beginFrame();
 
     drawMenuBar();
+    drawToolbar();
 
     // Give each window an explicit, non-overlapping initial layout. Without this
     // all three windows default to (0,0) and stack on top of each other: the
@@ -1485,6 +1557,23 @@ void EditorApp::drawUi()
         const float delta = menuBarH - origin.y;
         origin.y = menuBarH;
         size.y -= delta;
+    }
+    // Reserve the toolbar's height too (it sits directly below the menu bar) so
+    // the panels below never overlap it. The toolbar rect was recorded by
+    // drawToolbar() this frame; fall back to a single button row if absent.
+    {
+        LayoutRect tb;
+        const float toolbarH =
+            m_layout.find("toolbar", tb) ? tb.height : (menuBarH + 8.0f);
+        const float toolbarBottom = origin.y + toolbarH;
+        const float floorY = menuBarH + toolbarH;
+        if (origin.y < floorY)
+        {
+            const float delta = floorY - origin.y;
+            origin.y = floorY;
+            size.y -= delta;
+        }
+        (void)toolbarBottom;
     }
     const float controlsWidth = 360.0f;
     const float renderHeight = 260.0f;
@@ -1875,6 +1964,17 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
         {"camera_present", m_scene.camera.present},
         {"objects", objectNames},
     };
+    // Active viewport tool (top toolbar). One of select|move|rotate|scale.
+    const char* toolName = "select";
+    switch (m_tool)
+    {
+        case Tool::Select: toolName = "select"; break;
+        case Tool::Move: toolName = "move"; break;
+        case Tool::Rotate: toolName = "rotate"; break;
+        case Tool::Scale: toolName = "scale"; break;
+    }
+    j["tool"] = toolName;
+
     j["selected_index"] = m_selectedObject;
     j["selected_object"] =
         (m_selectedObject >= 0 && m_selectedObject < static_cast<int>(m_scene.objects.size()))

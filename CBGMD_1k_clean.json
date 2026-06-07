@@ -1,0 +1,118 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Lambertian",
+            "$color": [0.8, 0.2, 0.2]
+        },
+        "RightWall": {
+            "$type": "Lambertian",
+            "$color": [0.2, 0.8, 0.2]
+        },
+        "Wall": {
+            "$type": "Lambertian",
+            "$color": [0.85, 0.85, 0.85]
+        },
+        "Glass": {
+            "$type": "Glass",
+            "$ior": 1.5
+        },
+        "MirrorMat": {
+            "$type": "Mirror",
+            "$color": [0.95, 0.95, 0.95]
+        },
+        "DiffuseBlue": {
+            "$type": "Lambertian",
+            "$color": [0.25, 0.4, 0.9]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 16,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 40000000,
+        "$hitQueueSize": 10000000,
+        "$emittingQueueSize": 40000000,
+        "$finalQueueSize": 200000
+    },
+    "$renderConfiguration": {
+        "$width": 1024,
+        "$height": 1024,
+        "$photonsPerLight": 24000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "CBGMD_1k_clean",
+        "$bounceThreshold": 8
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 70.0,
+            "$position": [0.0, 150, -380],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "Light": {
+            "$type": "AreaLight",
+            "$shape": "Square",
+            "$size": 120,
+            "$position": [0, 298, 0],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [90, 0, 0]
+            },
+            "$color": [1.0, 1.0, 1.0],
+            "$luminousFlux": 125663706
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            },
+            "GlassSphere": {
+                "$type": "SphereVolume",
+                "$material": "Glass",
+                "$center": [0.0, 90.0, -60.0],
+                "$radius": 55.0
+            },
+            "MirrorSphere": {
+                "$type": "SphereVolume",
+                "$material": "MirrorMat",
+                "$center": [-75.0, 70.0, 80.0],
+                "$radius": 50.0
+            },
+            "DiffuseSphere": {
+                "$type": "SphereVolume",
+                "$material": "DiffuseBlue",
+                "$center": [75.0, 70.0, 80.0],
+                "$radius": 50.0
+            }
+        }
+    }
+}

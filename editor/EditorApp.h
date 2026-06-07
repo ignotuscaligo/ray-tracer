@@ -41,6 +41,16 @@ public:
         Failed
     };
 
+    // The active viewport tool (set by the top toolbar). Select picks objects;
+    // Move/Rotate/Scale show the matching transform gizmo on the selected object.
+    enum class Tool
+    {
+        Select,
+        Move,
+        Rotate,
+        Scale
+    };
+
     // Sets a mesh path to load on startup. If unset, a bundled fallback is used.
     void setInitialMeshPath(const std::string& path);
 
@@ -122,6 +132,7 @@ public:
 private:
     void drawUi();
     void drawMenuBar();
+    void drawToolbar();
     void renderViewport();
     void resizeFbo(int width, int height);
 
@@ -152,6 +163,48 @@ private:
     // Draw all uploaded scene objects (meshes + sphere proxies) and light gizmos
     // into the bound viewport FBO using the given view/projection.
     void drawSceneObjects(const glm::mat4& view, const glm::mat4& proj);
+
+    // ===== Viewport ray-picking + transform gizmos ========================
+    // Build a world-space ray from a click at (winX, winY) in window pixels,
+    // using the orbit camera and the current viewport FBO rect. Fills `origin`
+    // and `dir` (normalized). Returns false if the point is outside the viewport.
+    bool viewportRay(double winX, double winY, glm::vec3& origin, glm::vec3& dir) const;
+
+    // Project a world point to window pixels via the orbit camera + viewport rect.
+    // Returns false if behind the camera. Used to place/pick gizmo handles.
+    bool projectToWindow(const glm::vec3& world, glm::vec2& outWin) const;
+
+    // Ray-pick the scene objects at a window-pixel click: nearest object whose
+    // world-space proxy (sphere for SphereVolume, AABB for meshes/lights) the ray
+    // hits. Returns the object index or -1 on a miss (empty space). Selecting/
+    // deselecting is the caller's job (so it can sync the explorer).
+    int pickObject(double winX, double winY) const;
+
+    // World-space origin of the selected object's gizmo (its transform position).
+    glm::vec3 selectedGizmoOrigin() const;
+
+    // Pixel length of one gizmo axis on screen, used to size handles + scale the
+    // drag-to-world projection consistently regardless of zoom.
+    float gizmoWorldScale() const;
+
+    // Hit-test a gizmo handle at the drag-start (winX, winY) for the active tool.
+    // Returns the axis index (0=X,1=Y,2=Z) the drag grabbed, 3 for the uniform/
+    // center handle (Scale only), or -1 if no handle was hit. Move/Scale test
+    // proximity to the projected axis segment; Rotate tests proximity to the
+    // projected ring radius. Records the handle rects in the LayoutRegistry.
+    int pickGizmoHandle(double winX, double winY) const;
+
+    // Apply a gizmo drag (active tool + grabbed axis) given the cursor motion
+    // from the press point. Mutates the selected object's transform and rebuilds
+    // its viewport geometry. `startWin` is the press position, `curWin` the
+    // current cursor; the deltas are projected onto the axis (Move/Scale) or
+    // mapped to an angle around the gizmo origin (Rotate).
+    void applyGizmoDrag(const glm::vec2& startWin, const glm::vec2& curWin);
+
+    // Draw the transform gizmo for the selected object (Move/Rotate/Scale) into
+    // the bound viewport FBO and register handle rects. No-op for Select / no
+    // selection. Uses the line shader (world-space line geometry).
+    void drawGizmo(const glm::mat4& view, const glm::mat4& proj);
 
     // The scene-explorer panel: a tree/list of the scene's objects + camera.
     // Selecting a row sets m_selectedObject and records each row's pixel rect.
@@ -272,6 +325,21 @@ private:
     // Set by the scene explorer; used to highlight the row + (next wave) drive
     // the properties panel.
     int m_selectedObject = -1;
+
+    // The active viewport tool (top toolbar). Defaults to Select.
+    Tool m_tool = Tool::Select;
+
+    // ----- transform gizmo drag state -------------------------------------
+    // When a left-press over the viewport lands on a gizmo handle, we capture the
+    // grabbed axis and the object's transform at press time, then mutate the
+    // transform as the cursor moves (suppressing camera orbit for the drag).
+    bool m_gizmoDragging = false;
+    int m_gizmoAxis = -1;                 // 0=X,1=Y,2=Z, 3=uniform/center
+    glm::vec2 m_gizmoDragStart{0.0f};     // press position, window pixels
+    glm::vec3 m_gizmoStartPosition{0.0f}; // selected object's transform at press
+    glm::vec3 m_gizmoStartEuler{0.0f};
+    glm::vec3 m_gizmoStartScale{1.0f};
+    glm::vec3 m_gizmoOriginAtPress{0.0f}; // world-space gizmo origin at press
 
     // Raster viewport state.
     RasterMesh m_mesh;
