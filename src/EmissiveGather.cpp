@@ -174,7 +174,6 @@ void gatherRows(size_t rowBegin,
                 Result& stats)
 {
     const size_t width = camera.width();
-    const Vector cameraPos = camera.position();
     std::vector<Hit> castBuffer;
 
     for (size_t y = rowBegin; y < rowEnd; ++y)
@@ -182,8 +181,10 @@ void gatherRows(size_t rowBegin,
         for (size_t x = 0; x < width; ++x)
         {
             const PixelCoords coord{x, y};
-            const Vector dir = Vector::normalized(camera.pixelDirection(coord));
-            const Ray ray{cameraPos, dir};
+            // Deterministic pixel-center primary ray. Origin AND direction come
+            // from the camera projection (orthographic varies the origin across
+            // the image plane; perspective shares cameraPos).
+            const Ray ray = camera.generatePrimaryRay(coord);
 
             // Closest emissive patch the pixel ray hits.
             double bestT = std::numeric_limits<double>::infinity();

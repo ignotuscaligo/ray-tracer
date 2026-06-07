@@ -1,6 +1,7 @@
 #include "Camera.h"
 
 #include "Pyramid.h"
+#include "RandomGenerator.h"
 #include "Utility.h"
 
 #include <cmath>
@@ -88,6 +89,71 @@ double Camera::iso() const
     return m_iso;
 }
 
+void Camera::projection(Projection type)
+{
+    m_projection = type;
+}
+
+Camera::Projection Camera::projection() const
+{
+    return m_projection;
+}
+
+void Camera::orthographicHeight(double height)
+{
+    m_orthographicHeight = height;
+}
+
+double Camera::orthographicHeight() const
+{
+    return m_orthographicHeight;
+}
+
+void Camera::apertureRadius(double radius)
+{
+    m_apertureRadius = radius;
+}
+
+double Camera::apertureRadius() const
+{
+    return m_apertureRadius;
+}
+
+void Camera::focusDistance(double distance)
+{
+    m_focusDistance = distance;
+}
+
+double Camera::focusDistance() const
+{
+    return m_focusDistance;
+}
+
+void Camera::focalLength(double length)
+{
+    m_focalLength = length;
+}
+
+double Camera::focalLength() const
+{
+    return m_focalLength;
+}
+
+double Camera::effectiveApertureRadius() const
+{
+    if (m_apertureRadius > 0.0)
+    {
+        return m_apertureRadius;
+    }
+    // Physical relation: aperture diameter = focal length / f-number, so
+    // radius = focalLength / (2 * N). Guard a zero/negative f-number.
+    if (m_fNumber <= 0.0)
+    {
+        return 0.0;
+    }
+    return m_focalLength / (2.0 * m_fNumber);
+}
+
 double Camera::saturationLuminance() const
 {
     // L_max = (N^2 * K) / (t * S). Guard against degenerate (zero) controls.
@@ -153,38 +219,92 @@ int Camera::lightFilter() const
     return m_lightFilter;
 }
 
+namespace
+{
+
+// Rectilinear reverse projection: world point -> normalized image fraction
+// (u, v) in [0,1] with depth along the view axis. This is the exact inverse of
+// the perspective forward ray-gen (generatePrimaryRay), so a photon's splat lands
+// in the same pixel the gather ray for that pixel would hit. Returns nullopt if
+// the point is behind the camera or outside the frustum. depth is the
+// forward-axis distance (> 0 in front).
+struct ProjectedPoint
+{
+    double u;
+    double v;
+    double depth;
+};
+
+std::optional<ProjectedPoint> projectRectilinear(const Vector& point,
+                                                 const Vector& eye,
+                                                 const Quaternion& rot,
+                                                 double verticalFovDegrees,
+                                                 double aspect)
+{
+    const Vector right = rot * Vector::unitX;
+    const Vector up = rot * Vector::unitY;
+    const Vector forward = rot * Vector::unitZ;
+
+    const Vector toPoint = point - eye;
+    const double depth = Vector::dot(toPoint, forward);
+    if (depth <= 0.0)
+    {
+        return std::nullopt;  // behind the camera
+    }
+
+    const double halfHeight = std::tan(Utility::radians(verticalFovDegrees) / 2.0);
+    if (halfHeight <= 0.0)
+    {
+        return std::nullopt;
+    }
+
+    const double dx = Vector::dot(toPoint, right);
+    const double dy = Vector::dot(toPoint, up);
+
+    // Screen coords sx,sy in [-1,1] mirror generatePrimaryRay's mapping.
+    const double sx = (dx / depth) / (aspect * halfHeight);
+    const double sy = (dy / depth) / halfHeight;
+
+    if (sx < -1.0 || sx > 1.0 || sy < -1.0 || sy > 1.0)
+    {
+        return std::nullopt;  // outside the frustum
+    }
+
+    return ProjectedPoint{(sx + 1.0) / 2.0, (sy + 1.0) / 2.0, depth};
+}
+
+}  // namespace
+
 std::optional<PixelCoords> Camera::coordForPoint(const Vector& point) const
 {
-    Pyramid frustum = Pyramid(position(), rotation(), m_verticalFieldOfView, m_horizontalFieldOfView);
-    Vector position = frustum.relativePositionInFrustum(point);
-
-    if (position.z <= 0.0 || position.x < 0.0 || position.x > 1.0 || position.y < 0.0 || position.y > 1.0)
+    const std::optional<ProjectedPoint> projected =
+        projectRectilinear(point, position(), rotation(), m_verticalFieldOfView, m_aspectRatio);
+    if (!projected)
     {
         return std::nullopt;
     }
 
     return PixelCoords{
-        std::min(m_width - 1, static_cast<size_t>(std::round(position.x * m_width))),
-        std::min(m_height - 1, static_cast<size_t>(std::round(position.y * m_height)))
+        std::min(m_width - 1, static_cast<size_t>(std::round(projected->u * m_width))),
+        std::min(m_height - 1, static_cast<size_t>(std::round(projected->v * m_height)))
     };
 }
 
 std::optional<Camera::SubPixelCoords> Camera::coordForPointSubPixel(const Vector& point) const
 {
-    Pyramid frustum = Pyramid(position(), rotation(), m_verticalFieldOfView, m_horizontalFieldOfView);
-    Vector position = frustum.relativePositionInFrustum(point);
-
-    if (position.z <= 0.0 || position.x < 0.0 || position.x > 1.0 || position.y < 0.0 || position.y > 1.0)
+    const std::optional<ProjectedPoint> projected =
+        projectRectilinear(point, position(), rotation(), m_verticalFieldOfView, m_aspectRatio);
+    if (!projected)
     {
         return std::nullopt;
     }
 
-    // Pixel centers live at integer values; pixelDirection(coord) maps coord.x = k to
-    // normalized fraction k / width. So the continuous pixel coordinate is just
-    // (normalized fraction) * dimension.
+    // Pixel centers live at integer values; the forward mapping puts pixel coord
+    // k at normalized fraction (k + 0.5) / dimension. We invert to a continuous
+    // coordinate consistent with that.
     return SubPixelCoords{
-        position.x * static_cast<double>(m_width),
-        position.y * static_cast<double>(m_height)
+        projected->u * static_cast<double>(m_width),
+        projected->v * static_cast<double>(m_height)
     };
 }
 
@@ -206,18 +326,128 @@ Camera::ExposureWindow Camera::globalExposureWindow() const
     return m_globalExposureWindow;
 }
 
+namespace
+{
+
+// Normalized image-plane coordinates for a pixel. sx,sy in [-1, 1): sx increases
+// left->right, sy increases bottom->top (NOT flipped — y=0 maps to sy=-1, matching
+// the historical vertical-angle convention and coordForPointSubPixel's inverse).
+// With subPixelOffset in [0,1)^2 the sample lands inside the pixel cell; (0.5,0.5)
+// is the pixel center.
+struct ScreenSample
+{
+    double sx;
+    double sy;
+};
+
+ScreenSample screenSampleFor(const PixelCoords& coord,
+                             size_t width,
+                             size_t height,
+                             double offsetX,
+                             double offsetY)
+{
+    const double u = (static_cast<double>(coord.x) + offsetX) / static_cast<double>(width);
+    const double v = (static_cast<double>(coord.y) + offsetY) / static_cast<double>(height);
+    return ScreenSample{2.0 * u - 1.0, 2.0 * v - 1.0};
+}
+
+}  // namespace
+
 Vector Camera::pixelDirection(const PixelCoords& coord) const
 {
-    double horizontal = static_cast<double>(coord.x) / static_cast<double>(m_width);
-    double vertical = static_cast<double>(coord.y) / static_cast<double>(m_height);
-    double horizontalAngle = (-m_horizontalFieldOfView / 2.0) + (horizontal * m_horizontalFieldOfView);
-    double verticalAngle = (-m_verticalFieldOfView / 2.0) + (vertical * m_verticalFieldOfView);
+    // Direction of the deterministic pixel-center primary ray. For perspective and
+    // reallens this is the rectilinear pinhole direction; for orthographic every
+    // pixel shares the forward direction. (reallens uses the same center direction
+    // here; aperture jitter only happens through generatePrimaryRay with a
+    // generator.) Kept for callers that only need a direction.
+    return generatePrimaryRay(coord, nullptr).direction;
+}
 
-    Vector direction{
-        std::sin(Utility::radians(horizontalAngle)),
-        std::sin(Utility::radians(verticalAngle)),
-        std::cos(Utility::radians(horizontalAngle)) * std::cos(Utility::radians(verticalAngle))
-    };
+Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* generator) const
+{
+    const Quaternion rot = rotation();
+    const Vector right = rot * Vector::unitX;
+    const Vector up = rot * Vector::unitY;
+    const Vector forward = rot * Vector::unitZ;
 
-    return rotation() * direction;
+    // Sub-pixel jitter: center (0.5,0.5) when no generator, else uniform within the
+    // pixel cell for anti-aliasing across samples.
+    double offX = 0.5;
+    double offY = 0.5;
+    if (generator != nullptr)
+    {
+        offX = generator->value(1.0);
+        offY = generator->value(1.0);
+    }
+    const ScreenSample s = screenSampleFor(coord, m_width, m_height, offX, offY);
+
+    const double halfHeight = std::tan(Utility::radians(m_verticalFieldOfView) / 2.0);
+    const double aspect = m_aspectRatio;
+
+    switch (m_projection)
+    {
+        case Projection::Orthographic:
+        {
+            // Parallel rays: all share the forward direction. The ORIGIN varies
+            // across the image plane (size set by orthographicHeight). No
+            // perspective convergence.
+            const double halfH = m_orthographicHeight / 2.0;
+            const Vector origin = position()
+                + (right * (s.sx * aspect * halfH))
+                + (up * (s.sy * halfH));
+            return Ray{origin, forward.normalized()};
+        }
+
+        case Projection::RealLens:
+        {
+            // Thin-lens DOF. The pinhole direction defines the ray that would be
+            // cast by a perspective camera; it crosses the focus plane at
+            // focusDistance along the view axis. We originate the ray from a
+            // sampled point on the aperture disk and aim it at that focus point, so
+            // everything at focusDistance stays sharp while nearer/farther points
+            // blur. Each sample jitters the aperture point.
+            const Vector pinholeDir =
+                (forward + (right * (s.sx * aspect * halfHeight)) + (up * (s.sy * halfHeight)))
+                    .normalized();
+
+            // Focus point: where the pinhole ray crosses the focus plane (a plane
+            // perpendicular to forward at focusDistance). t along the ray such that
+            // its forward-axis depth == focusDistance.
+            const double cosToAxis = Vector::dot(pinholeDir, forward);
+            const double t = (cosToAxis > 1e-9)
+                ? (m_focusDistance / cosToAxis)
+                : m_focusDistance;
+            const Vector focusPoint = position() + (pinholeDir * t);
+
+            // Sample a point on the aperture disk (concentric within the lens
+            // plane spanned by right/up). Center when no generator -> degenerates
+            // to the sharp pinhole ray.
+            double lensX = 0.0;
+            double lensY = 0.0;
+            if (generator != nullptr)
+            {
+                const double radius = effectiveApertureRadius();
+                // Uniform disk sample via sqrt-radius / angle.
+                const double r = radius * std::sqrt(generator->value(1.0));
+                const double theta = generator->value(Utility::pi2);
+                lensX = r * std::cos(theta);
+                lensY = r * std::sin(theta);
+            }
+            const Vector aperturePoint = position() + (right * lensX) + (up * lensY);
+            const Vector dir = (focusPoint - aperturePoint).normalized();
+            return Ray{aperturePoint, dir};
+        }
+
+        case Projection::Perspective:
+        default:
+        {
+            // Rectilinear pinhole: ray through a flat image plane. Straight world
+            // lines stay straight on screen. [INVARIANT] tangent-based, NOT f-theta.
+            const Vector direction =
+                forward
+                + (right * (s.sx * aspect * halfHeight))
+                + (up * (s.sy * halfHeight));
+            return Ray{position(), direction.normalized()};
+        }
+    }
 }

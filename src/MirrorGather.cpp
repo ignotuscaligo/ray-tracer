@@ -160,7 +160,6 @@ void gatherRows(size_t rowBegin,
                 Result& stats)
 {
     const size_t width = camera.width();
-    const Vector cameraPos = camera.position();
 
     std::vector<Hit> castBuffer;
     RandomGenerator generator;
@@ -170,9 +169,11 @@ void gatherRows(size_t rowBegin,
         for (size_t x = 0; x < width; ++x)
         {
             const PixelCoords coord{x, y};
-            const Vector dir = Vector::normalized(camera.pixelDirection(coord));
+            // Deterministic pixel-center primary ray (origin + direction from the
+            // camera projection; orthographic varies the origin across the plane).
+            const Ray ray = camera.generatePrimaryRay(coord);
+            const Vector dir = ray.direction;
 
-            const Ray ray{cameraPos, dir};
             std::optional<Hit> hit = firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation);
             if (!hit)
             {

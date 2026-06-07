@@ -2,15 +2,32 @@
 
 #include "Object.h"
 #include "PixelCoords.h"
+#include "Ray.h"
 
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
 
+class RandomGenerator;
+
 class Camera : public Object
 {
 public:
+    // --- Camera projection model (scene key "$projection") ---
+    //
+    // [INVARIANT] perspective is RECTILINEAR (pinhole), NOT f-theta. A pixel maps
+    // to a ray through a flat image plane via tan(fov/2), so straight world lines
+    // stay straight on screen. The renderer historically used an f-theta
+    // (equidistant fisheye) construction — angle = pixelOffset * angularStep with
+    // sin/cos — which barrel-distorted straight edges. Do NOT "restore" that.
+    enum class Projection
+    {
+        Perspective,   // rectilinear pinhole (default)
+        Orthographic,  // parallel rays; origin varies across the image plane
+        RealLens,      // thin-lens depth of field (finite aperture + focus plane)
+    };
+
     // Half-open exposure interval [start, end) in the same time units as Photon::time
     // (seconds). A photon contributes to a pixel only if its emission timestamp falls
     // within the exposure window returned for that pixel.
@@ -96,6 +113,49 @@ public:
     void lightFilter(int lightIndex);
     int lightFilter() const;
 
+    // --- Projection configuration ---
+    void projection(Projection type);
+    Projection projection() const;
+
+    // Orthographic: world-space HEIGHT of the image plane (the vertical extent the
+    // frame spans). Width follows from the aspect ratio. Only used when
+    // projection() == Orthographic.
+    void orthographicHeight(double height);
+    double orthographicHeight() const;
+
+    // RealLens (thin-lens) depth-of-field controls. Only used when projection()
+    // == RealLens.
+    //   apertureRadius — world-space radius of the lens aperture disk. Larger =
+    //                    shallower depth of field (more blur away from focus). If
+    //                    set to <= 0, the radius is derived from focalLength /
+    //                    (2 * fNumber) instead (a physical lens relation).
+    //   focusDistance  — distance along the view axis to the plane of perfect
+    //                    focus. Objects at this distance are sharp; nearer/farther
+    //                    objects blur.
+    //   focalLength    — used with the camera fNumber() to derive an aperture
+    //                    radius when apertureRadius is not given directly.
+    void apertureRadius(double radius);
+    double apertureRadius() const;
+
+    void focusDistance(double distance);
+    double focusDistance() const;
+
+    void focalLength(double length);
+    double focalLength() const;
+
+    // Effective aperture radius actually used for DOF sampling: the explicit
+    // apertureRadius() if > 0, else focalLength() / (2 * fNumber()).
+    double effectiveApertureRadius() const;
+
+    // Generate a primary camera ray for the given pixel.
+    //
+    // The (optional) RandomGenerator drives multi-sample jitter: sub-pixel
+    // anti-alias offset AND, for RealLens, the aperture-disk sample. When null the
+    // ray passes through the exact pixel center with NO aperture jitter (the
+    // single-sample / deterministic path the photon gather uses today). Passing a
+    // generator per sample is how DOF and AA hook into a samples-per-pixel loop.
+    Ray generatePrimaryRay(const PixelCoords& coord, RandomGenerator* generator = nullptr) const;
+
     std::optional<PixelCoords> coordForPoint(const Vector& point) const;
     // Continuous (floating-point) pixel-space coordinate of a world point. Pixel centers
     // are at integer values (matching pixelDirection's coord -> direction mapping). The
@@ -139,6 +199,14 @@ private:
     double m_fNumber = 8.0;
     double m_shutterTime = 0.01;  // seconds
     double m_iso = 100.0;
+
+    // Projection model + per-projection params (see public accessors / Projection
+    // enum). Defaults: rectilinear perspective, no DOF.
+    Projection m_projection = Projection::Perspective;
+    double m_orthographicHeight = 100.0;
+    double m_apertureRadius = 0.0;     // <= 0 => derive from focalLength / (2*N)
+    double m_focusDistance = 100.0;
+    double m_focalLength = 50.0;
 
     // Wave 6 multi-camera / debug-camera attributes.
     std::string m_outputName;

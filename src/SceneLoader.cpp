@@ -264,6 +264,53 @@ public:
 
         object->verticalFieldOfView(verticalFieldOfView);
 
+        // Camera projection model. "$projection": "perspective" (default) |
+        // "orthographic" | "reallens". perspective is rectilinear pinhole; an
+        // absent key keeps existing scenes on perspective.
+        std::string projection;
+        setFromJsonIfPresent(projection, jsonContainer, "$projection");
+        if (projection == "orthographic")
+        {
+            object->projection(Camera::Projection::Orthographic);
+        }
+        else if (projection == "reallens")
+        {
+            object->projection(Camera::Projection::RealLens);
+        }
+        else if (projection.empty() || projection == "perspective")
+        {
+            object->projection(Camera::Projection::Perspective);
+        }
+        else
+        {
+            throw std::runtime_error(
+                "Unknown $projection \"" + projection +
+                "\" (expected perspective | orthographic | reallens)");
+        }
+
+        // Orthographic image-plane height (world units). Only used when
+        // $projection == orthographic.
+        double orthoHeight = object->orthographicHeight();
+        setFromJsonIfPresent(orthoHeight, jsonContainer, "$orthoHeight");
+        object->orthographicHeight(orthoHeight);
+
+        // Thin-lens DOF params. Only used when $projection == reallens.
+        //   $apertureRadius — explicit lens-disk radius (world units). If absent or
+        //                     <= 0 the radius is derived from $focalLength / (2 * N).
+        //   $focusDistance  — distance to the plane of perfect focus.
+        //   $focalLength     — used with $fNumber to derive an aperture radius.
+        double apertureRadius = object->apertureRadius();
+        setFromJsonIfPresent(apertureRadius, jsonContainer, "$apertureRadius");
+        object->apertureRadius(apertureRadius);
+
+        double focusDistance = object->focusDistance();
+        setFromJsonIfPresent(focusDistance, jsonContainer, "$focusDistance");
+        object->focusDistance(focusDistance);
+
+        double focalLength = object->focalLength();
+        setFromJsonIfPresent(focalLength, jsonContainer, "$focalLength");
+        object->focalLength(focalLength);
+
         // Wave 2: physically-based photographic exposure controls. Omitted keys
         // keep the Camera's neutral defaults (f/8, 1/100s, ISO 100).
         double fNumber = object->fNumber();
