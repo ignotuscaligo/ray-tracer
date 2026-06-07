@@ -11,6 +11,28 @@ bool PngWriter::writeImage(const std::filesystem::path& path, Image& image,
     std::cout << "---" << std::endl;
     std::cout << "Write image " << path.generic_string() << std::endl;
 
+    // Ensure the destination directory exists before opening the file. The
+    // first render of a scene whose $renderPath dir doesn't exist used to fail
+    // the PNG write outright. An empty/relative-with-no-parent path resolves to
+    // the current directory, so skip the create in that case.
+    const std::filesystem::path parent = path.parent_path();
+    if (!parent.empty())
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+        // create_directories returns false (with no error) when the directory
+        // already exists; only a populated error_code is a genuine failure
+        // (e.g. permission denied). Surface that instead of proceeding into a
+        // doomed PNG write.
+        if (ec)
+        {
+            std::cout << "Failed to create output directory "
+                      << parent.generic_string() << ": " << ec.message()
+                      << std::endl;
+            return false;
+        }
+    }
+
     const uint32_t width = static_cast<uint32_t>(image.width());
     const uint32_t height = static_cast<uint32_t>(image.height());
 

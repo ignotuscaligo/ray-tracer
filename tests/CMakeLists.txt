@@ -56,6 +56,7 @@ target_sources(tests
         test_OrbitCamera.cpp
         test_RasterMesh.cpp
         test_PngExport.cpp
+        test_PngWriter.cpp
         test_PngWriteSession.cpp
         test_AutomationServer.cpp
         ${CMAKE_SOURCE_DIR}/editor/ObjLoader.cpp
