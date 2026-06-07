@@ -118,9 +118,10 @@ struct RenderSettings
     // photon bounces near a probe are kept RAW in a BounceStore (bounces far from
     // every probe are discarded — this bounds memory by visible-surface-area); a
     // unified gather renders both direct and reflected diffuse from those raw
-    // bounces. Retires the density grid. Default false keeps the legacy
-    // splat+grid path. ($probeGather in the scene render config.)
-    bool useProbeGather = false;
+    // bounces. Retires the density grid. Default TRUE (Phase 2a): the probe-guided
+    // unified gather is the renderer's gather path. Set $probeGather false to fall
+    // back to the legacy splat + density-grid path (kept for comparison/preview).
+    bool useProbeGather = true;
 
     // Maximum raw bounces retained by the BounceStore (slot capacity). Storage is
     // bounded by the probe keep-test (visible-surface-area), but the store still

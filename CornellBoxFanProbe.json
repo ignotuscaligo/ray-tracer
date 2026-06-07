@@ -1,0 +1,180 @@
+{
+    "$meshes": [
+        "meshes/CornellBox.obj",
+        "meshes/Fan.obj"
+    ],
+    "$materials": {
+        "LeftWall": {
+            "$type": "Diffuse",
+            "$color": [
+                1.0,
+                0.0,
+                0.0
+            ]
+        },
+        "RightWall": {
+            "$type": "Diffuse",
+            "$color": [
+                0.0,
+                1.0,
+                0.0
+            ]
+        },
+        "Wall": {
+            "$type": "Diffuse",
+            "$color": [
+                1.0
+            ]
+        },
+        "FanMat": {
+            "$type": "Diffuse",
+            "$color": [
+                0.95,
+                0.85,
+                0.2
+            ]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 32,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000
+    },
+    "$renderConfiguration": {
+        "$width": 256,
+        "$height": 256,
+        "$photonsPerLight": 6000000,
+        "$startFrame": 0,
+        "$endFrame": 16,
+        "$frameRate": 8.0,
+        "$shutterTime": 0.11,
+        "$renderPath": "/tmp/anim",
+        "$renderName": "CornellBoxFanProbe",
+        "$bounceThreshold": 2,
+        "$probeGather": true
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 90.0,
+            "$position": [
+                0.0,
+                150,
+                -300
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            }
+        },
+        "Light": {
+            "$type": "AreaLight",
+            "$shape": "Square",
+            "$size": 120,
+            "$position": [
+                0,
+                298,
+                0
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    90,
+                    0,
+                    0
+                ]
+            },
+            "$color": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "$luminousFlux": 125663706
+        },
+        "Fan": {
+            "$type": "MeshVolume",
+            "$material": "FanMat",
+            "$mesh": "Fan",
+            "$position": [
+                0,
+                150,
+                60
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0,
+                    0,
+                    0
+                ]
+            },
+            "$animation": {
+                "$rotationAxis": [
+                    0,
+                    0,
+                    1
+                ],
+                "$rotation": [
+                    {
+                        "t": 0.0,
+                        "value": 0.0
+                    },
+                    {
+                        "t": 0.5,
+                        "value": 1.2
+                    },
+                    {
+                        "t": 1.0,
+                        "value": 9.0
+                    },
+                    {
+                        "t": 1.5,
+                        "value": 9.6,
+                        "inTangent": 0.0,
+                        "outTangent": 0.0
+                    },
+                    {
+                        "t": 2.0,
+                        "value": 2.0
+                    },
+                    {
+                        "t": 2.5,
+                        "value": 0.0
+                    }
+                ]
+            }
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            }
+        }
+    }
+}
