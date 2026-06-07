@@ -409,6 +409,9 @@ void EditorApp::newScene()
     }
     m_sceneDrawables.clear();
     m_selectedObject = -1;
+    m_selectedCamera = -1;
+    m_activeCamera = -1;
+    m_haveSavedEditorCamera = false;
     m_selectedMaterial.clear();
     m_propertiesMode = PropertiesMode::Object;
 
@@ -834,6 +837,10 @@ std::string EditorApp::loadSceneFromPath(const std::string& path)
     m_scenePath = path;          // render-from-view re-serializes this scene
     m_selectedObject = -1;
     m_selectedCamera = m_scene.hasCamera() ? 0 : -1;  // default-select first shot
+    // A fresh scene starts on the EDITOR camera (no shot active); drop any saved
+    // editor pose from a prior scene's activation.
+    m_activeCamera = -1;
+    m_haveSavedEditorCamera = false;
     m_selectedMaterial.clear();
     m_propertiesMode = PropertiesMode::Object;
     m_meshLabel = m_scene.name;
@@ -944,13 +951,35 @@ nlohmann::json EditorApp::serializeWithLiveCamera(bool singleCameraForPreview)
             }
             kept[name] = node;
         }
-        kept["Camera"] = {
+        json previewCam = {
             {"$type", "Camera"},
             {"$verticalFieldOfView", renderFovDeg},
             {"$position", {eye.x, eye.y, eye.z}},
             {"$rotation",
              {{"$type", "PitchYawRollDegrees"},
               {"$value", {renderPitchDeg, renderYawDeg, 0.0}}}}};
+        // When a scene camera is ACTIVE, the Preview is a true preview of THAT
+        // camera's output: carry its optical config (projection + lens + exposure)
+        // into the single preview camera so the letterboxed preview matches what
+        // the to-disk Render of that camera would produce. The pose still comes
+        // from the live orbit rig (which equals the active camera's pose while
+        // active, and is kept in sync by navigation).
+        if (m_activeCamera >= 0 && m_activeCamera < static_cast<int>(m_scene.cameras.size()))
+        {
+            const SceneModel::CameraDesc& ac =
+                m_scene.cameras[static_cast<std::size_t>(m_activeCamera)];
+            previewCam["$projection"] = ac.projection;
+            previewCam["$orthoHeight"] = ac.orthoHeight;
+            previewCam["$apertureRadius"] = ac.apertureRadius;
+            previewCam["$focusDistance"] = ac.focusDistance;
+            previewCam["$focalLength"] = ac.focalLength;
+            previewCam["$fNumber"] = ac.fNumber;
+            previewCam["$shutterTime"] = ac.shutterTime;
+            previewCam["$iso"] = ac.iso;
+            if (ac.bounceFilter >= 0) previewCam["$bounceFilter"] = ac.bounceFilter;
+            if (ac.lightFilter >= 0) previewCam["$lightFilter"] = ac.lightFilter;
+        }
+        kept["Camera"] = std::move(previewCam);
         sceneJson["$scene"] = std::move(kept);
         return sceneJson;
     }
@@ -2012,6 +2041,111 @@ void EditorApp::resizeFbo(int width, int height)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void EditorApp::setActiveCamera(int index)
+{
+    const int count = static_cast<int>(m_scene.cameras.size());
+
+    // Toggling the already-active camera (or passing -1) deactivates: restore the
+    // editor (orbit) camera to exactly where it was left when a shot was activated.
+    if (index < 0 || index == m_activeCamera || index >= count)
+    {
+        if (m_activeCamera >= 0)
+        {
+            if (m_haveSavedEditorCamera)
+            {
+                m_camera = m_savedEditorCamera;
+                m_haveSavedEditorCamera = false;
+            }
+            m_activeCamera = -1;
+        }
+        dismissRenderOverlay();
+        return;
+    }
+
+    // Activating a shot: SAVE the current editor-camera pose once (only when we're
+    // transitioning FROM the editor camera, so re-activating between two shots
+    // doesn't clobber the saved editor pose), then drive the orbit rig to the
+    // scene camera's authored pose so the viewport renders from that camera.
+    if (m_activeCamera < 0)
+    {
+        m_savedEditorCamera = m_camera;
+        m_haveSavedEditorCamera = true;
+    }
+    m_activeCamera = index;
+
+    const SceneModel::CameraDesc& cam = m_scene.cameras[static_cast<std::size_t>(index)];
+    // Place the orbit pivot a sensible distance in front of the camera so orbit
+    // nav rotates around something in view, while eye() lands on the camera pos.
+    float orbitDistance = static_cast<float>(cam.focusDistance);
+    if (!(orbitDistance > 1e-3f)) orbitDistance = 10.0f;
+    m_camera.setFromAuthoredCamera(cam.position, cam.eulerDegrees.x, cam.eulerDegrees.y,
+                                   static_cast<float>(cam.verticalFovDegrees),
+                                   orbitDistance);
+    m_selectedCamera = index;  // editing the active camera in the panel is natural
+    dismissRenderOverlay();
+}
+
+void EditorApp::syncActiveCameraFromOrbit()
+{
+    if (m_activeCamera < 0 || m_activeCamera >= static_cast<int>(m_scene.cameras.size()))
+    {
+        return;
+    }
+    // Same convention serializeWithLiveCamera / addCameraFromCurrentView bake:
+    //   position = orbit eye(); pitch = orbit pitch; yaw = orbit yaw + 180; roll = 0.
+    SceneModel::CameraDesc& cam = m_scene.cameras[static_cast<std::size_t>(m_activeCamera)];
+    cam.position = m_camera.eye();
+    cam.eulerDegrees = glm::vec3(glm::degrees(m_camera.pitch),
+                                 glm::degrees(m_camera.yaw) + 180.0f, 0.0f);
+    cam.verticalFovDegrees = glm::degrees(m_camera.fovYRadians);
+    m_scene.dirty = true;
+}
+
+float EditorApp::viewportAspect() const
+{
+    if (m_activeCamera >= 0 && m_activeCamera < static_cast<int>(m_scene.cameras.size()))
+    {
+        const SceneModel::CameraDesc& cam = m_scene.cameras[static_cast<std::size_t>(m_activeCamera)];
+        if (cam.width > 0 && cam.height > 0)
+        {
+            return static_cast<float>(cam.width) / static_cast<float>(cam.height);
+        }
+    }
+    if (m_fboHeight > 0)
+    {
+        return static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight);
+    }
+    return 1.0f;
+}
+
+void EditorApp::letterboxRegion(float aspect, int& x, int& y, int& w, int& h) const
+{
+    // Default: the full FBO (the editor-camera / no-letterbox case).
+    x = 0;
+    y = 0;
+    w = m_fboWidth;
+    h = m_fboHeight;
+    if (m_fboWidth <= 0 || m_fboHeight <= 0 || aspect <= 0.0f)
+    {
+        return;
+    }
+    const float fboAspect = static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight);
+    if (fboAspect > aspect)
+    {
+        // FBO is wider than the target -> pillarbox (bars left/right).
+        w = static_cast<int>(std::lround(static_cast<float>(m_fboHeight) * aspect));
+        if (w > m_fboWidth) w = m_fboWidth;
+        x = (m_fboWidth - w) / 2;
+    }
+    else
+    {
+        // FBO is taller than the target -> letterbox (bars top/bottom).
+        h = static_cast<int>(std::lround(static_cast<float>(m_fboWidth) / aspect));
+        if (h > m_fboHeight) h = m_fboHeight;
+        y = (m_fboHeight - h) / 2;
+    }
+}
+
 void EditorApp::renderViewport()
 {
     if (m_fbo == 0)
@@ -2020,11 +2154,49 @@ void EditorApp::renderViewport()
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+
+    // When a scene camera is active, mask the viewport to the camera's aspect
+    // ratio: clear the whole FBO to a dark "bar" color (the letterbox), then
+    // restrict ALL viewport rendering (scene, gizmos, overlay) to the centered
+    // sub-rect matching the camera's aspect via glViewport + glScissor. When the
+    // editor camera is active, this is the full FBO (no letterbox).
+    const bool cameraActive =
+        (m_activeCamera >= 0 && m_activeCamera < static_cast<int>(m_scene.cameras.size()));
+    int lbX = 0, lbY = 0, lbW = m_fboWidth, lbH = m_fboHeight;
+    if (cameraActive)
+    {
+        letterboxRegion(viewportAspect(), lbX, lbY, lbW, lbH);
+    }
+
+    // Clear the full FBO. With a letterbox, the bars get a darker shade so the
+    // framed region reads as the active camera's output.
     glViewport(0, 0, m_fboWidth, m_fboHeight);
-    glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+    glDisable(GL_SCISSOR_TEST);
+    if (cameraActive)
+    {
+        glClearColor(0.04f, 0.04f, 0.05f, 1.0f);  // dark letterbox bars
+    }
+    else
+    {
+        glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    const float aspectGrid = static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight);
+    if (cameraActive)
+    {
+        // Re-clear the framed region to the normal viewport background so the
+        // scene sits on it, and confine subsequent draws to that region.
+        glViewport(lbX, lbY, lbW, lbH);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(lbX, lbY, lbW, lbH);
+        glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    // Aspect used for the GL projection: the FRAMED region's aspect (the active
+    // camera's aspect when one is active, else the FBO aspect) so the viewport
+    // shows exactly what that camera frames.
+    const float aspectGrid = static_cast<float>(lbW) / static_cast<float>(lbH);
     const glm::mat4 viewMat = m_camera.viewMatrix();
     const glm::mat4 projMat = m_camera.projectionMatrix(aspectGrid);
 
@@ -2063,10 +2235,9 @@ void EditorApp::renderViewport()
     {
         glUseProgram(m_shaderProgram);
 
-        const float aspect = static_cast<float>(m_fboWidth) / static_cast<float>(m_fboHeight);
         const glm::mat4 model(1.0f);
         const glm::mat4 view = m_camera.viewMatrix();
-        const glm::mat4 proj = m_camera.projectionMatrix(aspect);
+        const glm::mat4 proj = m_camera.projectionMatrix(aspectGrid);
 
         glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uModel"), 1, GL_FALSE, glm::value_ptr(model));
         glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uView"), 1, GL_FALSE, glm::value_ptr(view));
@@ -2085,7 +2256,17 @@ void EditorApp::renderViewport()
     // active, draw it over the live scene INTO this FBO so both the on-screen
     // viewport and screenshot(target=viewport) show the path-traced image. It is
     // dismissed (m_overlayShown=false) the instant the user touches the view.
+    // The overlay's clip-space quad is mapped into the current glViewport, which
+    // is already the letterbox region when a camera is active — so the preview
+    // (rendered at the camera aspect) fills exactly the framed region.
     drawOverlay();
+
+    // Release the letterbox scissor/viewport so nothing downstream inherits it.
+    if (cameraActive)
+    {
+        glDisable(GL_SCISSOR_TEST);
+        glViewport(0, 0, m_fboWidth, m_fboHeight);
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -2318,8 +2499,31 @@ void EditorApp::drawSceneExplorer()
     {
         const SceneModel::CameraDesc& cam = m_scene.cameras[ci];
         const bool selected = (m_selectedCamera == static_cast<int>(ci));
+        const bool active = (m_activeCamera == static_cast<int>(ci));
         ImGui::PushID(("cam" + std::to_string(ci)).c_str());
-        if (ImGui::Selectable(("[Camera] " + cam.name).c_str(), selected))
+
+        // Active-camera TOGGLE column: a checkbox left of the name. Checking it
+        // makes this the active camera (the viewport renders FROM it + letterbox);
+        // un-checking the active one returns to the editor (orbit) camera.
+        // setActiveCamera handles the exactly-one-active + toggle-off semantics.
+        bool activeFlag = active;
+        if (ImGui::Checkbox("##active", &activeFlag))
+        {
+            setActiveCamera(activeFlag ? static_cast<int>(ci) : -1);
+        }
+        {
+            const ImVec2 tmn = ImGui::GetItemRectMin();
+            const ImVec2 tmx = ImGui::GetItemRectMax();
+            m_layout.record("camera_active_toggle_" + cam.name, tmn.x, tmn.y,
+                            tmx.x - tmn.x, tmx.y - tmn.y);
+            m_layout.record("camera_active_toggle_index_" + std::to_string(ci), tmn.x,
+                            tmn.y, tmx.x - tmn.x, tmx.y - tmn.y);
+        }
+        ImGui::SameLine();
+
+        const std::string rowLabel =
+            std::string(active ? "[Camera*] " : "[Camera] ") + cam.name;
+        if (ImGui::Selectable(rowLabel.c_str(), selected))
         {
             m_selectedCamera = static_cast<int>(ci);
             dismissRenderOverlay();
@@ -2982,24 +3186,31 @@ void EditorApp::drawRenderPanel()
     const RenderState state = m_renderState.load();
     const bool running = (state == RenderState::Running);
 
-    // ----- global renderer settings ---------------------------------------
-    ImGui::TextUnformatted("Global renderer settings");
+    // ----- GLOBAL render QUALITY (applies to every preview + render) -------
+    // The settings split: photon count, bounce threshold, and termination floor
+    // are GLOBAL quality knobs shared by every preview and every to-disk render.
+    // The CAMERA owns aspect/FOV/exposure/lens (the per-camera "optical" block
+    // below). Preview resolution is NOT a setting anymore — Preview uses the live
+    // viewport (or the active camera's letterbox-region) pixel resolution 1:1.
+    ImGui::TextUnformatted("Global render quality (all previews + renders)");
     ImGui::Separator();
-    ImGui::SliderInt("Preview resolution", &m_renderResolution, 64, 720);
-    recordItemRect(m_layout, "render_preview_resolution");
     ImGui::SliderInt("Photons / light (M)", &m_renderPhotonsMillions, 1, 20);
     recordItemRect(m_layout, "render_photons");
     ImGui::SliderInt("Bounce threshold", &m_bounceThreshold, 1, 16);
     recordItemRect(m_layout, "render_bounce_threshold");
     ImGui::SliderFloat("Termination threshold", &m_terminationThreshold, 0.0f, 1.0f, "%.3f");
     recordItemRect(m_layout, "render_termination_threshold");
+    ImGui::TextDisabled("Preview resolution = viewport pixels (no forced size).");
     ImGui::Spacing();
 
     // ----- camera list -----------------------------------------------------
     ImGui::TextUnformatted("Scene cameras (shots)");
     ImGui::Separator();
-    ImGui::TextWrapped("Preview renders the ORBIT view into the viewport. Render "
-                       "writes EACH scene camera below to its output path.");
+    ImGui::TextWrapped("Toggle a camera's checkbox in the Scene Explorer to make "
+                       "it ACTIVE: the viewport renders from it (letterboxed to its "
+                       "aspect) and Preview previews that camera. With no active "
+                       "camera, Preview uses the orbit view. Render writes EACH "
+                       "camera below to its output path.");
 
     ImGui::BeginChild("camera_list", ImVec2(0, 96), true);
     {
@@ -3048,6 +3259,17 @@ void EditorApp::drawRenderPanel()
         if (m_selectedCamera >= 0 &&
             m_selectedCamera < static_cast<int>(m_scene.cameras.size()))
         {
+            // Keep the active-camera index consistent across the erase: if the
+            // active camera is the one being deleted, deactivate (restore the
+            // editor camera); if it sits after the deleted index, shift it down.
+            if (m_activeCamera == m_selectedCamera)
+            {
+                setActiveCamera(-1);
+            }
+            else if (m_activeCamera > m_selectedCamera)
+            {
+                --m_activeCamera;
+            }
             m_scene.cameras.erase(m_scene.cameras.begin() + m_selectedCamera);
             m_scene.dirty = true;
             if (m_selectedCamera >= static_cast<int>(m_scene.cameras.size()))
@@ -3121,20 +3343,54 @@ void EditorApp::drawCameraSettings(int index)
         return;
     }
     SceneModel::CameraDesc& cam = m_scene.cameras[index];
+    const bool isActive = (m_activeCamera == index);
 
     ImGui::Spacing();
-    ImGui::Text("Camera: %s", cam.name.c_str());
+    // The per-camera OPTICAL block: this camera owns its aspect (resolution),
+    // FOV, exposure, and lens/projection. (Global quality lives in the block at
+    // the top of this panel.)
+    ImGui::Text("Camera optics: %s%s", cam.name.c_str(), isActive ? "  [ACTIVE]" : "");
     ImGui::Separator();
 
-    // Resolution.
+    // Resolution (sets the aspect ratio the viewport letterboxes to when active).
     int res[2] = {cam.width, cam.height};
-    if (ImGui::InputInt2("Resolution", res))
+    if (ImGui::InputInt2("Resolution (aspect)", res))
     {
         cam.width = std::max(16, res[0]);
         cam.height = std::max(16, res[1]);
         m_scene.dirty = true;
     }
     recordItemRect(m_layout, "camera_resolution");
+    ImGui::TextDisabled("aspect: %.3f", cam.height > 0
+                                            ? static_cast<float>(cam.width) /
+                                                  static_cast<float>(cam.height)
+                                            : 0.0f);
+
+    // Vertical FOV. Editing it while the camera is ACTIVE drives the live viewport
+    // FOV too (so the framing updates immediately).
+    double fov = cam.verticalFovDegrees;
+    if (ImGui::InputDouble("Vertical FOV (deg)", &fov, 0.0, 0.0, "%.2f"))
+    {
+        cam.verticalFovDegrees = std::clamp(fov, 1.0, 179.0);
+        if (isActive)
+        {
+            m_camera.fovYRadians = glm::radians(static_cast<float>(cam.verticalFovDegrees));
+        }
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_fov");
+
+    // Projection model (perspective / orthographic / reallens).
+    const char* projItems[] = {"perspective", "orthographic", "reallens"};
+    int projIdx = (cam.projection == "orthographic") ? 1
+                  : (cam.projection == "reallens")    ? 2
+                                                      : 0;
+    if (ImGui::Combo("Projection", &projIdx, projItems, IM_ARRAYSIZE(projItems)))
+    {
+        cam.projection = projItems[projIdx];
+        m_scene.dirty = true;
+    }
+    recordItemRect(m_layout, "camera_projection");
 
     // Exposure.
     double fNum = cam.fNumber, shutter = cam.shutterTime, iso = cam.iso;
@@ -3215,7 +3471,30 @@ void EditorApp::startRender()
     m_renderCancel.store(false);
     const uint64_t generation = m_renderGeneration.fetch_add(1) + 1;
 
-    const int resolution = m_renderResolution;
+    // PREVIEW RESOLUTION = the actual VIEWPORT pixel resolution (the FBO size),
+    // not a forced square. This fixes the stretched/pixelated preview: the
+    // path-traced image is generated at exactly the on-screen pixels it fills.
+    // When a scene camera is ACTIVE, render ONLY the letterboxed region at the
+    // camera's aspect (a true preview of that camera's framed output); the result
+    // is drawn into the same letterbox region (drawOverlay runs under the
+    // letterbox glViewport). When the editor camera is active, render the full
+    // viewport from the orbit view.
+    int previewW = m_fboWidth > 0 ? m_fboWidth : m_renderResolution;
+    int previewH = m_fboHeight > 0 ? m_fboHeight : m_renderResolution;
+    if (m_activeCamera >= 0 && m_activeCamera < static_cast<int>(m_scene.cameras.size()))
+    {
+        int lbx = 0, lby = 0, lbw = previewW, lbh = previewH;
+        letterboxRegion(viewportAspect(), lbx, lby, lbw, lbh);
+        if (lbw > 0 && lbh > 0)
+        {
+            previewW = lbw;
+            previewH = lbh;
+        }
+    }
+    if (previewW < 16) previewW = 16;
+    if (previewH < 16) previewH = 16;
+    const int renderW = previewW;
+    const int renderH = previewH;
     const size_t photons = static_cast<size_t>(m_renderPhotonsMillions) * 1000000;
 
     // RENDER-FROM-CURRENT-VIEW: serialize the CURRENT in-memory model (so inserts
@@ -3277,13 +3556,15 @@ void EditorApp::startRender()
     //     fraction so brightness is stable as photons accumulate, not dark-then-
     //     bright), converts to RGBA, and stages it for the main thread to upload.
     //     Throttled to ~6 Hz so the snapshot cost doesn't steal worker time.
-    m_renderThread = std::thread([this, renderScenePath, resolution, photons, generation]() {
+    m_renderThread = std::thread([this, renderScenePath, renderW, renderH, photons, generation]() {
         try
         {
             LoadedScene scene = SceneLoader::loadFromFile(renderScenePath, /*logToStdout=*/false);
             // Override resolution + photon budget for an interactive-speed render.
-            scene.settings.imageWidth = static_cast<size_t>(resolution);
-            scene.settings.imageHeight = static_cast<size_t>(resolution);
+            // The resolution is the viewport (or letterbox-region) pixel size so
+            // the preview is 1:1 with what it fills on screen — never stretched.
+            scene.settings.imageWidth = static_cast<size_t>(renderW);
+            scene.settings.imageHeight = static_cast<size_t>(renderH);
             scene.settings.photonsPerLight = photons;
             if (scene.camera)
             {
@@ -3817,6 +4098,33 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
         {"pitch", m_camera.pitch},
         {"distance", m_camera.distance},
     };
+
+    // ----- active scene camera (Cinema-4D active-camera workflow) ----------
+    // Which viewpoint the viewport renders FROM: -1 / null == the editor (orbit)
+    // camera; otherwise the index+name of the active scene camera. When a scene
+    // camera is active, viewport_fov_y_degrees == that camera's vertical FOV and
+    // the viewport is letterboxed to viewport_aspect (the camera's aspect).
+    const bool camActive =
+        (m_activeCamera >= 0 && m_activeCamera < static_cast<int>(m_scene.cameras.size()));
+    j["active_camera"] = camActive ? json(m_activeCamera) : json(nullptr);
+    j["active_camera_name"] =
+        camActive ? json(m_scene.cameras[static_cast<std::size_t>(m_activeCamera)].name)
+                  : json(nullptr);
+    j["viewport_fov_y_degrees"] = glm::degrees(m_camera.fovYRadians);
+    j["viewport_aspect"] = viewportAspect();
+    {
+        int lbx = 0, lby = 0, lbw = m_fboWidth, lbh = m_fboHeight;
+        if (camActive)
+        {
+            letterboxRegion(viewportAspect(), lbx, lby, lbw, lbh);
+        }
+        // Letterbox region in FBO pixels (bottom-left origin, as GL uses).
+        j["letterbox"] = {{"active", camActive},
+                          {"x", lbx},
+                          {"y", lby},
+                          {"width", lbw},
+                          {"height", lbh}};
+    }
     j["render_settings"] = {
         {"resolution", m_renderResolution},
         {"photons_millions", m_renderPhotonsMillions},
@@ -4045,6 +4353,13 @@ nlohmann::json EditorApp::cmdSetCamera(const nlohmann::json& req)
     if (req.contains("dolly"))
     {
         m_camera.dolly(req["dolly"].get<float>());
+    }
+
+    // If a scene camera is active, a camera change moves THAT camera (same as
+    // interactive nav): bake the new orbit pose back into the active CameraDesc.
+    if (m_activeCamera >= 0)
+    {
+        syncActiveCameraFromOrbit();
     }
 
     const glm::vec3 eye = m_camera.eye();
@@ -5279,6 +5594,13 @@ void EditorApp::onCursorPos(double x, double y)
         m_camera.pan(static_cast<float>(-dx) * worldPerPixel,
                      static_cast<float>(dy) * worldPerPixel);
     }
+
+    // While a scene camera is active, navigation moves THAT camera (C4D
+    // behavior): bake the new orbit pose back into the active CameraDesc.
+    if (m_activeCamera >= 0)
+    {
+        syncActiveCameraFromOrbit();
+    }
 }
 
 void EditorApp::onScroll(double /*xoffset*/, double yoffset)
@@ -5297,6 +5619,10 @@ void EditorApp::onScroll(double /*xoffset*/, double yoffset)
     // Scroll up -> zoom in (smaller distance).
     const float factor = (yoffset > 0) ? 0.9f : 1.0f / 0.9f;
     m_camera.dolly(factor);
+    if (m_activeCamera >= 0)
+    {
+        syncActiveCameraFromOrbit();
+    }
 }
 
 // ===== GLFW raw callbacks: TRANSLATE OS events into InputEvents only ========

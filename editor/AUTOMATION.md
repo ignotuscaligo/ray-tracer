@@ -55,7 +55,7 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 | `cmd` | Fields | Effect |
 |---|---|---|
 | `ping` | — | Liveness check. Returns `pong`, `version`. |
-| `get_state` | — | Mesh path/label, camera (eye/target/fov/yaw/pitch/distance), render settings + status, viewport + window sizes, **`scene` model summary (name/objects/material_count/camera_present), and `selected_object` / `selected_index`**. |
+| `get_state` | — | Mesh path/label, camera (eye/target/fov/yaw/pitch/distance), render settings + status, viewport + window sizes, **`scene` model summary (name/objects/material_count/camera_present), `selected_object` / `selected_index`, and the active-camera fields (`active_camera`, `active_camera_name`, `viewport_fov_y_degrees`, `viewport_aspect`, `letterbox`)**. |
 | `load_mesh` | `path` | Load an OBJ into the viewport (GL upload + reframe camera). |
 | `load_scene` | `path` | Load a renderer scene JSON INTO the in-memory model (camera, materials, named objects), upload each object's geometry to the viewport, frame the orbit camera on the scene, and set it as the render target. Returns the object-name list. |
 | `save_scene` | `path` | Serialize the in-memory model to renderer scene JSON at `path` (via `SceneModelSerializer`), baking the live orbit camera into the Camera block so the saved file renders framed as the viewport shows it. Backs File > Save. The saved JSON is directly renderable with `ray-tracer <path>`. |
@@ -241,19 +241,47 @@ that element; without, returns all. Rects carry `x,y,width,height` and a
 Currently registered names: `menu_bar`, `menu_File`, `menu_Insert`,
 `panel_controls`, `panel_render`, `panel_explorer`, `panel_cameras`,
 `button_preview`, `button_render`, `button_add_camera`, `button_delete_camera`,
-`viewport`, the render-panel global settings (`render_preview_resolution`,
-`render_photons`, `render_bounce_threshold`, `render_termination_threshold`), the
-per-camera settings widgets (`camera_resolution`, `camera_fnumber`,
-`camera_shutter`, `camera_iso`, `camera_bounce_filter`, `camera_light_filter`,
-`camera_output_path`), the render-panel camera-list rows (`camera_row_<name>`,
-`camera_row_index_<i>`), plus the scene-explorer rows:
+`viewport`, the render-panel GLOBAL render-quality settings (`render_photons`,
+`render_bounce_threshold`, `render_termination_threshold` — these apply to every
+preview and render), the per-camera OPTICAL settings widgets (`camera_resolution`,
+`camera_fov`, `camera_projection`, `camera_fnumber`, `camera_shutter`,
+`camera_iso`, `camera_bounce_filter`, `camera_light_filter`, `camera_output_path`
+— aspect/FOV/exposure/lens are owned by the camera), the render-panel camera-list
+rows (`camera_row_<name>`, `camera_row_index_<i>`), plus the scene-explorer rows:
 `explorer_row_camera_<name>` (with `explorer_row_camera` as a back-compat alias
-for the first camera), `explorer_row_<objectName>` (e.g. `explorer_row_MirrorKnot`,
+for the first camera), the per-camera ACTIVE toggle
+(`camera_active_toggle_<name>` and `camera_active_toggle_index_<i>`),
+`explorer_row_<objectName>` (e.g. `explorer_row_MirrorKnot`,
 `explorer_row_Light`), and a positional alias `explorer_row_index_<i>`. Clicking a row's `center` selects that object (verify
 via `get_state.selected_object`). The viewport rect doubles as the gate the nav
 handlers use to decide whether a press/scroll is a viewport gesture, so injected
 and real input are gated against the same rect. Future panels/widgets register
 the same way (one `m_layout.record(...)` call as the widget is submitted).
+
+### Active scene camera (Cinema-4D active-camera workflow)
+
+The editor separates the **editor (orbit) camera** — the roaming preview
+viewpoint — from the **scene cameras** (configured shots). Exactly one camera is
+*active* at a time; the active camera is the viewpoint the viewport renders from.
+
+- **Activate / deactivate:** click a camera row's `camera_active_toggle_<name>`
+  checkbox. Activating a camera drives the viewport to its pose + FOV + projection
+  and draws a faint **letterbox** masking the viewport to the camera's aspect
+  ratio. Clicking the active camera's toggle again (or activating a different
+  camera) deactivates / switches. Deactivating restores the **editor camera to
+  exactly where it was left** — its position is retained across activations.
+- **Navigation while active moves the active camera** (C4D behavior): orbit / pan
+  / zoom (and `set_camera`) bake the new pose back into the active `CameraDesc`.
+- **`get_state` reports:** `active_camera` (index or null), `active_camera_name`,
+  `viewport_fov_y_degrees` (matches the active camera's vertical FOV when one is
+  active), `viewport_aspect`, and `letterbox` (`{active, x, y, width, height}` in
+  FBO pixels, bottom-left origin).
+- **Preview honors the active camera:** `render` (Preview) uses the actual
+  VIEWPORT pixel resolution (never a forced square). With a camera active it
+  renders ONLY the letterbox region at the camera's aspect / FOV / projection /
+  exposure (a true preview of that camera's output); with the editor camera it
+  renders the full viewport from the orbit view. `render_all` is unchanged (each
+  scene camera at its own resolution / exposure to disk).
 
 ### Timed multi-frame input (`play_input`) and gestures
 

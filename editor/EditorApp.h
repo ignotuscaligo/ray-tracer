@@ -471,8 +471,49 @@ private:
 
     // The currently selected scene camera (index into m_scene.cameras), or -1.
     // The render panel's per-camera settings edit this camera. Defaults to the
-    // first camera when a scene loads.
+    // first camera when a scene loads. NOTE: selection (which camera the panel
+    // EDITS) is distinct from ACTIVATION (which viewpoint the viewport renders
+    // FROM) — see m_activeCamera below.
     int m_selectedCamera = -1;
+
+    // ----- active scene camera (Cinema-4D "active camera") ----------------
+    // The scene camera the viewport currently renders FROM, or -1 for the editor
+    // (orbit) camera. Exactly one is active at a time. When -1, the viewport uses
+    // the roaming orbit camera (m_camera) at its retained position; when >= 0, the
+    // viewport renders from that scene camera's pose/FOV/projection and draws a
+    // letterbox masking the viewport to the camera's aspect ratio.
+    //
+    // Mechanism: activating a scene camera SAVES the editor camera's orbit state
+    // into m_savedEditorCamera and drives the orbit rig (m_camera) to the scene
+    // camera's authored pose (via OrbitCamera::setFromAuthoredCamera). While
+    // active, orbit navigation moves the rig and is written BACK to the active
+    // CameraDesc each frame (C4D moves the active camera when you navigate).
+    // Deactivating restores m_savedEditorCamera so the editor camera returns to
+    // exactly where it was left.
+    int m_activeCamera = -1;
+    OrbitCamera m_savedEditorCamera;       // editor-camera pose while a shot is active
+    bool m_haveSavedEditorCamera = false;  // whether m_savedEditorCamera holds a pose
+
+    // Activate the scene camera at `index` (drives the orbit rig to its pose and
+    // saves the editor camera). Pass -1 to deactivate (restore the editor camera).
+    // Toggling the already-active index deactivates. No-op on an invalid index.
+    void setActiveCamera(int index);
+
+    // Write the live orbit rig pose back into the active CameraDesc (position /
+    // euler / fov), using the same convention serializeWithLiveCamera bakes. Call
+    // after navigation while a scene camera is active so the shot tracks the view.
+    void syncActiveCameraFromOrbit();
+
+    // The viewport's effective aspect ratio: the active scene camera's
+    // width/height when one is active, else the FBO aspect. Drives the letterbox
+    // and the preview-render region.
+    float viewportAspect() const;
+
+    // Compute the letterboxed sub-rect of the FBO (in FBO pixels, bottom-left
+    // origin for GL) that matches `aspect`, centered in the FBO. When the FBO is
+    // wider than the target it pillarboxes (bars left/right); taller, letterboxes
+    // (bars top/bottom). Returns the full FBO when no camera is active.
+    void letterboxRegion(float aspect, int& x, int& y, int& w, int& h) const;
 
     // ----- renderer-side scene for accurate picking -----------------------
     // The same representation the render path builds (real Volume objects + BVH),
