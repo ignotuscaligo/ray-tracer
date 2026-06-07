@@ -2617,8 +2617,9 @@ void EditorApp::drawUi()
     ImGui::Text("Scene: %s%s", m_scene.name.c_str(), m_scene.dirty ? " *" : "");
     ImGui::Text("Objects: %zu   Materials: %zu", m_scene.objects.size(),
                 m_scene.materials.size());
-    ImGui::TextWrapped("Viewport: orbit = left-drag, pan = middle-drag or "
-                       "shift+left-drag, zoom = scroll");
+    ImGui::TextWrapped("Viewport: orbit = right-drag, pan = middle-drag or "
+                       "shift+right-drag, zoom = scroll, left-click = select / "
+                       "drag gizmo");
     ImGui::Separator();
 
     // Scene explorer: the tree of named objects + the camera. Selecting a row
@@ -4376,16 +4377,20 @@ void EditorApp::dispatchInputEvent(const InputEvent& event)
 
 void EditorApp::onMouseButton(int button, bool down, int mods)
 {
-    // DCC navigation conventions:
-    //   left-drag                -> orbit
+    // Viewport mouse conventions (reworked so LEFT is reserved for selection +
+    // gizmo handles, leaving RIGHT free to orbit without fighting picks):
+    //   RIGHT-drag               -> orbit
+    //   shift + RIGHT-drag       -> pan
     //   middle-drag              -> pan
-    //   shift + left-drag        -> pan (for mice/trackpads without a middle
-    //                               button)
-    // A drag only begins when the press lands over the viewport; releases always
-    // clear the active gesture so a release outside the viewport still ends it.
-    // "Over the viewport" is computed from the recorded viewport screen rect and
-    // the abstraction's cursor position, so injected presses are gated the same
-    // way real ones are (independent of ImGui's frame-lagged hover state).
+    //   LEFT-click               -> select the object under the cursor (renderer
+    //                               ray-pick); empty space deselects
+    //   LEFT-drag on a gizmo     -> drag that transform handle (Move/Rotate/Scale)
+    //   scroll                   -> zoom (see onScroll)
+    // A gesture only begins when the press lands over the viewport; releases
+    // always clear the active gesture so a release outside the viewport still
+    // ends it. "Over the viewport" is computed from the recorded viewport screen
+    // rect and the abstraction's cursor position, so injected presses are gated
+    // the same way real ones are (independent of ImGui's frame-lagged hover state).
     const bool shift = (mods & GLFW_MOD_SHIFT) != 0;
     const bool overViewport = m_viewportScreenRect.valid() &&
                               m_cursorX >= m_viewportScreenRect.x &&
@@ -4401,17 +4406,25 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
         dismissRenderOverlay();
 
         if (button == GLFW_MOUSE_BUTTON_MIDDLE ||
-            (button == GLFW_MOUSE_BUTTON_LEFT && shift))
+            (button == GLFW_MOUSE_BUTTON_RIGHT && shift))
         {
             m_panning = true;
             m_orbiting = false;
             m_lastCursorX = m_cursorX;
             m_lastCursorY = m_cursorY;
         }
+        else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+        {
+            // Right-drag orbits the camera.
+            m_orbiting = true;
+            m_panning = false;
+            m_lastCursorX = m_cursorX;
+            m_lastCursorY = m_cursorY;
+        }
         else if (button == GLFW_MOUSE_BUTTON_LEFT)
         {
-            // First, see if the press grabbed a transform gizmo handle. If so,
-            // begin a gizmo drag and suppress camera orbit for the duration.
+            // Left is selection / gizmo only — never orbit. First see if the press
+            // grabbed a transform gizmo handle; if so, begin a gizmo drag.
             const int handle = pickGizmoHandle(m_cursorX, m_cursorY);
             if (handle >= 0)
             {
@@ -4430,12 +4443,10 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
             }
             else
             {
-                // Not on a handle: begin an orbit gesture, but remember the press
-                // so a release with little motion is treated as a click-select.
-                m_orbiting = true;
+                // Not on a handle: remember the press; on release we ray-pick to
+                // select (left no longer orbits, so any small drift still selects).
+                m_orbiting = false;
                 m_panning = false;
-                m_lastCursorX = m_cursorX;
-                m_lastCursorY = m_cursorY;
                 m_leftPressInViewport = true;
                 m_leftPressStart = glm::vec2(static_cast<float>(m_cursorX),
                                              static_cast<float>(m_cursorY));
@@ -4453,20 +4464,22 @@ void EditorApp::onMouseButton(int button, bool down, int mods)
                 m_gizmoDragging = false;
                 m_gizmoAxis = -1;
             }
-            // A left-press that released over the viewport with little motion is a
-            // click: ray-pick to select the nearest object, or deselect on empty
-            // space. This keeps left-DRAG as orbit and left-CLICK as select.
-            else if (m_leftPressInViewport && !m_leftDragMoved && overViewport)
+            // A left-press that released over the viewport is a select: ray-pick
+            // the nearest object, or deselect on empty space.
+            else if (m_leftPressInViewport && overViewport)
             {
                 const int hit = pickObject(m_cursorX, m_cursorY);
                 m_selectedObject = hit;  // -1 on empty space = deselect
                 // A viewport pick is an object selection: show object properties.
                 m_propertiesMode = PropertiesMode::Object;
             }
-            m_orbiting = false;
-            m_panning = false;
             m_leftPressInViewport = false;
             m_leftDragMoved = false;
+        }
+        else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+        {
+            m_orbiting = false;
+            m_panning = false;
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
         {

@@ -247,19 +247,25 @@ class EditorClient:
         y: float,
         hold_ms: float = 100.0,
         pre_move_ms: float = 16.0,
+        button: int = 0,
     ) -> Dict[str, Any]:
         """A realistic multi-frame click: move to (x,y), small hold, down, hold, up.
 
         Unlike ``inject_click`` (one frame), this spreads press and release across
         frames so a widget that needs to see the button held (and the hover
-        settle) registers the interaction like a human click.
+        settle) registers the interaction like a human click. ``button`` is
+        0=left (select / gizmo / UI), 1=right (orbit), 2=middle (pan).
         """
         t = 0.0
         actions = [{"t_ms": t, "event": {"type": "mouse_move", "x": x, "y": y}}]
         t += pre_move_ms
-        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": True}})
+        actions.append(
+            {"t_ms": t, "event": {"type": "mouse_button", "button": button, "down": True}}
+        )
         t += hold_ms
-        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": False}})
+        actions.append(
+            {"t_ms": t, "event": {"type": "mouse_button", "button": button, "down": False}}
+        )
         return self.play_input(actions, tail_ms=hold_ms)
 
     def click_drag(
@@ -270,20 +276,24 @@ class EditorClient:
         drag_ms: float = 1000.0,
         release_hold_ms: float = 100.0,
         fps: float = 60.0,
+        button: int = 0,
     ) -> Dict[str, Any]:
         """Move to ``from_xy``, press, hold, interpolate to ``to_xy`` over
         ``drag_ms``, hold, release — a true multi-frame drag.
 
         This is the exact gesture a DragFloat needs: the button is held while the
         cursor moves incrementally across many frames, so ImGui accumulates the
-        per-frame deltas into the value change.
+        per-frame deltas into the value change. ``button`` selects which mouse
+        button is held: 0=left (gizmo handle drag), 1=right (orbit), 2=middle (pan).
         """
         x0, y0 = from_xy
         x1, y1 = to_xy
         t = 0.0
         actions = [{"t_ms": t, "event": {"type": "mouse_move", "x": x0, "y": y0}}]
         t += 16.0
-        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": True}})
+        actions.append(
+            {"t_ms": t, "event": {"type": "mouse_button", "button": button, "down": True}}
+        )
         t += hold_ms
         # Interpolate the move over drag_ms, one sub-move per simulated frame.
         steps = max(1, int(round(drag_ms / (1000.0 / fps))))
@@ -301,7 +311,9 @@ class EditorClient:
             )
         t += drag_ms
         t += release_hold_ms
-        actions.append({"t_ms": t, "event": {"type": "mouse_button", "button": 0, "down": False}})
+        actions.append(
+            {"t_ms": t, "event": {"type": "mouse_button", "button": button, "down": False}}
+        )
         return self.play_input(actions, fps=fps, tail_ms=release_hold_ms)
 
     def menu_pick(self, menu_name: str, item_label: str) -> Dict[str, Any]:
@@ -485,6 +497,8 @@ def _build_parser() -> argparse.ArgumentParser:
     tc.add_argument("x", type=float)
     tc.add_argument("y", type=float)
     tc.add_argument("--hold-ms", type=float, default=100.0)
+    tc.add_argument("--button", type=int, default=0, choices=[0, 1, 2],
+                    help="0=left (select/gizmo/UI), 1=right (orbit), 2=middle (pan)")
 
     cd = sub.add_parser("click-drag", help="multi-frame held drag via play_input")
     cd.add_argument("x0", type=float)
@@ -494,6 +508,8 @@ def _build_parser() -> argparse.ArgumentParser:
     cd.add_argument("--hold-ms", type=float, default=100.0)
     cd.add_argument("--drag-ms", type=float, default=1000.0)
     cd.add_argument("--release-hold-ms", type=float, default=100.0)
+    cd.add_argument("--button", type=int, default=0, choices=[0, 1, 2],
+                    help="0=left (gizmo handle drag), 1=right (orbit), 2=middle (pan)")
 
     mp = sub.add_parser("menu-pick", help="open a menu and click an item via injection")
     mp.add_argument("menu", help="menu header name, e.g. Insert (matches menu_<name>)")
@@ -562,7 +578,7 @@ def main(argv: Optional[list] = None) -> int:
                 args.x0, args.y0, args.x1, args.y1, steps=args.steps, button=args.button
             )
         elif args.command == "timed-click":
-            result = client.click(args.x, args.y, hold_ms=args.hold_ms)
+            result = client.click(args.x, args.y, hold_ms=args.hold_ms, button=args.button)
         elif args.command == "click-drag":
             result = client.click_drag(
                 (args.x0, args.y0),
@@ -570,6 +586,7 @@ def main(argv: Optional[list] = None) -> int:
                 hold_ms=args.hold_ms,
                 drag_ms=args.drag_ms,
                 release_hold_ms=args.release_hold_ms,
+                button=args.button,
             )
         elif args.command == "menu-pick":
             result = client.menu_pick(args.menu, args.item)

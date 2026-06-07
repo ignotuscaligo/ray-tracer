@@ -206,6 +206,27 @@ A batched `inject_input` lands entirely within one frame's `drain()`, matching
 how a real drag's events arrive between frames — so a full press→moves→release
 gesture orbits the camera just like a hand-driven drag.
 
+### Viewport mouse conventions (which button does what)
+
+The viewport reserves the LEFT button for selection + gizmos so it never fights
+the orbit gesture:
+
+| Gesture | Effect |
+|---|---|
+| RIGHT-drag (`button: 1`) | Orbit the camera (yaw/pitch). |
+| shift + RIGHT-drag | Pan (track/truck the target in the view plane). |
+| MIDDLE-drag (`button: 2`) | Pan. |
+| LEFT-click (`button: 0`) | Select the object under the cursor via the renderer ray-pick; empty space deselects. |
+| LEFT-drag on a gizmo handle | Drag that transform handle (Move/Rotate/Scale tools). |
+| scroll | Zoom (dolly). |
+
+So injected input drives both halves: send a `button: 1` press→moves→release to
+orbit, and a `button: 0` click to select / a `button: 0` drag on a handle to move
+the gizmo. The `editor_client.py` `click` / `click_drag` gesture helpers and the
+`timed-click` / `click-drag` CLI subcommands take a `button` argument (default 0)
+so a puppet can orbit (`button=1`) or select/gizmo (`button=0`) through the same
+timed-input path.
+
 ### `query_layout`
 
 Each frame the UI build records a registry of `{element_name -> pixel rect}`

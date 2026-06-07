@@ -440,12 +440,13 @@ private:
     glm::vec3 m_gizmoStartScale{1.0f};
     glm::vec3 m_gizmoOriginAtPress{0.0f}; // world-space gizmo origin at press
 
-    // ----- click-vs-drag discrimination for left-button selection ---------
-    // A left-press over the viewport that releases with little cursor motion is a
-    // CLICK (ray-pick select); one that moves past a threshold is a DRAG (orbit).
+    // ----- left-button selection press tracking ---------------------------
+    // A left-press over the viewport (that did not grab a gizmo handle) is a
+    // pending selection: on release we ray-pick the object under the cursor.
+    // Left no longer orbits, so there is no click-vs-drag arbitration to do.
     bool m_leftPressInViewport = false;   // a left-press landed over the viewport
     glm::vec2 m_leftPressStart{0.0f};     // its position, window pixels
-    bool m_leftDragMoved = false;         // moved past the click threshold
+    bool m_leftDragMoved = false;         // retained for gizmo-drag bookkeeping
 
     // Raster viewport state.
     RasterMesh m_mesh;
@@ -460,8 +461,9 @@ private:
     int m_fboHeight = 0;
     float m_meshColor[3] = {0.75f, 0.75f, 0.78f};
 
-    // Viewport navigation input tracking. Orbit = left-drag, pan = middle-drag
-    // or shift+left-drag, zoom = scroll (DCC conventions).
+    // Viewport navigation input tracking. Orbit = right-drag, pan = middle-drag
+    // or shift+right-drag, zoom = scroll. Left is reserved for selection +
+    // gizmo-handle dragging.
     bool m_orbiting = false;
     bool m_panning = false;
     double m_lastCursorX = 0.0;
