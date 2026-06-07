@@ -7,9 +7,13 @@
 #include "SceneModelSerializer.h"
 #include "Shaders.h"
 
+#include "Hit.h"
 #include "Image.h"
+#include "Ray.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
+#include "Vector.h"
+#include "Volume.h"
 
 #include <GLFW/glfw3.h>
 
@@ -963,6 +967,11 @@ std::string EditorApp::saveScene(const std::string& path)
 
 void EditorApp::buildSceneGl()
 {
+    // The model is being rebuilt (load / insert / delete / transform / material /
+    // mesh edit), so the cached renderer-side pick scene is now stale. Mark it
+    // dirty; ensurePickScene() rebuilds it on the next pick.
+    m_pickSceneDirty = true;
+
     // Release any previous scene geometry.
     for (auto& d : m_sceneDrawables)
     {
@@ -1264,7 +1273,113 @@ float pointSegmentDist(const glm::vec2& p, const glm::vec2& a, const glm::vec2& 
 }
 }  // namespace
 
+bool EditorApp::ensurePickScene()
+{
+    if (m_pickScene && !m_pickSceneDirty)
+    {
+        return true;
+    }
+    if (!m_scene.isInitialized() || m_scene.isEmpty())
+    {
+        m_pickScene.reset();
+        return false;
+    }
+
+    // Serialize the LIVE model (same JSON the render path emits) and parse it
+    // into the renderer's real Volume objects + BVH. $meshes are absolute paths,
+    // so the temp file's directory does not affect mesh resolution. We write the
+    // temp next to the source scene when one exists, else into the system temp dir.
+    try
+    {
+        const json sceneJson = serializeWithLiveCamera();
+
+        std::filesystem::path tempPath;
+        if (!m_scenePath.empty())
+        {
+            std::filesystem::path base(m_scenePath);
+            tempPath = base.parent_path() / (".editor_pick_" + base.filename().string());
+        }
+        else
+        {
+            tempPath = std::filesystem::temp_directory_path() / ".editor_pick_scene.json";
+        }
+        {
+            std::ofstream out(tempPath);
+            if (!out)
+            {
+                return false;
+            }
+            out << sceneJson.dump(2);
+        }
+
+        LoadedScene loaded = SceneLoader::loadFromFile(tempPath.string(), /*logToStdout=*/false);
+        m_pickScene = std::make_unique<LoadedScene>(std::move(loaded));
+        m_pickSceneDirty = false;
+
+        std::error_code ec;
+        std::filesystem::remove(tempPath, ec);  // best-effort cleanup
+        return true;
+    }
+    catch (const std::exception&)
+    {
+        // Serialization/parse failed (e.g. a half-built model): fall back to proxy.
+        m_pickScene.reset();
+        return false;
+    }
+}
+
 int EditorApp::pickObject(double winX, double winY) const
+{
+    glm::vec3 o, d;
+    if (!viewportRay(winX, winY, o, d)) return -1;
+
+    // Renderer-accurate path: cast the unprojected world ray into the same
+    // Volume/BVH representation the renderer shades, and select the object whose
+    // volume the ray hits nearest. Map the hit back to the editor object by name
+    // (renderer object names == editor object names == the JSON $scene keys).
+    EditorApp* self = const_cast<EditorApp*>(this);  // ensurePickScene caches
+    if (self->ensurePickScene() && self->m_pickScene)
+    {
+        const Ray ray{Vector(o.x, o.y, o.z), Vector(d.x, d.y, d.z)};
+        std::vector<Hit> castBuffer;
+        double bestDist = std::numeric_limits<double>::max();
+        std::string bestName;
+        bool anyHit = false;
+        for (const auto& object : self->m_pickScene->objects)
+        {
+            if (!object || !object->hasType<Volume>())
+            {
+                continue;
+            }
+            std::optional<Hit> hit =
+                std::static_pointer_cast<Volume>(object)->castRay(ray, castBuffer);
+            if (hit && hit->distance > 0.0 && hit->distance < bestDist)
+            {
+                bestDist = hit->distance;
+                bestName = object->name();
+                anyHit = true;
+            }
+        }
+        if (!anyHit)
+        {
+            return -1;  // ray missed all geometry = empty space (deselect)
+        }
+        // Map the renderer object name back to an editor object index.
+        for (std::size_t i = 0; i < m_scene.objects.size(); ++i)
+        {
+            if (m_scene.objects[i].name == bestName)
+            {
+                return static_cast<int>(i);
+            }
+        }
+        // Hit an object with no editor twin (shouldn't happen): fall through.
+    }
+
+    // Fallback: the AABB/sphere bounding-proxy pick.
+    return pickObjectProxy(winX, winY);
+}
+
+int EditorApp::pickObjectProxy(double winX, double winY) const
 {
     glm::vec3 o, d;
     if (!viewportRay(winX, winY, o, d)) return -1;
@@ -3137,6 +3252,31 @@ nlohmann::json EditorApp::handleCommand(const nlohmann::json& request)
     if (cmd == "inject_input") return cmdInjectInput(request);
     if (cmd == "play_input") return cmdPlayInput(request);
     if (cmd == "query_layout") return cmdQueryLayout(request);
+    if (cmd == "pick")
+    {
+        // Diagnostic: report BOTH the renderer-accurate pick and the AABB/sphere
+        // proxy pick at a screen point, so automation can prove the renderer pick
+        // differs from (and is more accurate than) the old proxy. Does NOT change
+        // the selection. Fields: x, y (window pixels).
+        if (!request.contains("x") || !request.contains("y"))
+        {
+            return {{"ok", false}, {"error", "pick requires x and y"}};
+        }
+        const double px = request["x"].get<double>();
+        const double py = request["y"].get<double>();
+        const int rendererIdx = pickObject(px, py);
+        const int proxyIdx = pickObjectProxy(px, py);
+        auto nameOf = [this](int idx) -> json {
+            if (idx >= 0 && idx < static_cast<int>(m_scene.objects.size()))
+                return m_scene.objects[static_cast<std::size_t>(idx)].name;
+            return nullptr;
+        };
+        return {{"ok", true},
+                {"renderer_index", rendererIdx},
+                {"renderer_object", nameOf(rendererIdx)},
+                {"proxy_index", proxyIdx},
+                {"proxy_object", nameOf(proxyIdx)}};
+    }
     if (cmd == "insert_object") return cmdInsertObject(request);
     if (cmd == "set_property") return cmdSetProperty(request);
     if (cmd == "create_material") return cmdCreateMaterial(request);

@@ -22,6 +22,7 @@
 
 struct GLFWwindow;
 class AutomationServer;
+struct LoadedScene;  // renderer-side scene (SceneLoader.h), used for accurate picking
 
 // Top-level editor application. Owns the GLFW window + GL context, the ImGui
 // context, the raster viewport (offscreen FBO + mesh + orbit camera), and the
@@ -175,11 +176,30 @@ private:
     // Returns false if behind the camera. Used to place/pick gizmo handles.
     bool projectToWindow(const glm::vec3& world, glm::vec2& outWin) const;
 
-    // Ray-pick the scene objects at a window-pixel click: nearest object whose
-    // world-space proxy (sphere for SphereVolume, AABB for meshes/lights) the ray
-    // hits. Returns the object index or -1 on a miss (empty space). Selecting/
-    // deselecting is the caller's job (so it can sync the explorer).
+    // Ray-pick the scene objects at a window-pixel click: nearest object the ray
+    // hits. Uses the RENDERER's real intersection (triangle-accurate for meshes,
+    // exact for spheres) via a cached renderer-side scene (see ensurePickScene),
+    // so a click on a thin mesh selects exactly what the renderer would shade —
+    // not its bounding box. Returns the object index or -1 on a miss (empty
+    // space). Falls back to the AABB/sphere proxy pick if the renderer scene
+    // can't be built. Selecting/deselecting is the caller's job.
     int pickObject(double winX, double winY) const;
+
+    // The AABB/sphere bounding-proxy pick (the previous picking path). Retained as
+    // a fallback for when the renderer-side scene is unavailable (e.g. an empty /
+    // un-serializable model). Returns the object index or -1.
+    int pickObjectProxy(double winX, double winY) const;
+
+    // Build (or reuse) the renderer-side scene used for accurate picking. The
+    // scene is the SAME representation the render path builds: the live model is
+    // serialized to JSON (serializeWithLiveCamera) and parsed by SceneLoader into
+    // real Volume objects with a BVH, kept in m_pickScene. It is rebuilt lazily
+    // whenever the model changes (m_pickSceneDirty, set by buildSceneGl), so it
+    // stays in sync with inserts/deletes/transforms/material/mesh edits. The
+    // renderer object names match the editor object names (both are the JSON
+    // $scene keys), which is how a hit maps back to an editor object index.
+    // Returns true if a usable scene is available. Non-const: it caches.
+    bool ensurePickScene();
 
     // World-space origin of the selected object's gizmo (its transform position).
     glm::vec3 selectedGizmoOrigin() const;
@@ -403,6 +423,17 @@ private:
     // Set by the scene explorer; used to highlight the row + (next wave) drive
     // the properties panel.
     int m_selectedObject = -1;
+
+    // ----- renderer-side scene for accurate picking -----------------------
+    // The same representation the render path builds (real Volume objects + BVH),
+    // cached so a viewport left-click can cast the unprojected world ray with the
+    // renderer's true intersection and select the object the ray hits NEAREST
+    // (triangle-accurate for meshes). Rebuilt lazily by ensurePickScene() when
+    // m_pickSceneDirty is set — buildSceneGl() sets it on every model change, so
+    // the pick scene tracks inserts/deletes/transforms/material/mesh edits. Held
+    // by pointer so EditorApp.h need not include the renderer scene headers.
+    std::unique_ptr<LoadedScene> m_pickScene;
+    bool m_pickSceneDirty = true;
 
     // ----- properties-panel arbitration (object vs. material) -------------
     // The editor has two independent "what is selected" notions: an object (via
