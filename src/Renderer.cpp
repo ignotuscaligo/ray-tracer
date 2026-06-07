@@ -291,7 +291,25 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         // neighborhood. The gather's own bounce-index cell size is set later.
         probeIndex = std::make_shared<ProbeIndex>(
             probeResult.probes, keepRadius, keepRadius);
-        bounceStore = std::make_shared<BounceStore>(settings.bounceStoreCapacity);
+
+        // Size the raw-bounce store from the VISIBLE-SURFACE-AREA proxy (the probe
+        // count) rather than always reserving the full configured capacity: the
+        // keep-test bounds the kept bounces by visible area, so the store only
+        // needs ~ (photons per visible surface region) slots. Reserve a generous
+        // per-probe budget so a bright, heavily-deposited visible surface doesn't
+        // overflow, but cap at the configured ceiling so a pathological probe
+        // count can't request unbounded RAM. This is what turns the "bounded by
+        // visible area" property into an actual smaller ALLOCATION, not just a
+        // smaller used-prefix. (At 36 B/slot the default ceiling is ~1.3 GiB.)
+        constexpr std::size_t kSlotsPerProbe = 256;
+        const std::size_t probeSized =
+            probeResult.probes.empty()
+                ? settings.bounceStoreCapacity
+                : probeResult.probes.size() * kSlotsPerProbe;
+        const std::size_t capacity =
+            std::min(settings.bounceStoreCapacity,
+                     std::max<std::size_t>(1, probeSized));
+        bounceStore = std::make_shared<BounceStore>(capacity);
 
         WorkerDebug::resetBounceCounters();
     }

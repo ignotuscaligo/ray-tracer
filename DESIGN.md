@@ -34,22 +34,48 @@ Line numbers drift; the surrounding code comment is the durable anchor.
 
 ## 0. Pipeline shape
 
-Single-machine forward (light-side) photon tracer with a camera-side gather for specular.
-The shape is **emit → trace-each-photon-to-completion → gather**:
+Single-machine forward (light-side) photon tracer with a camera-side
+**probe-guided unified gather** (Phase 2a). The shape is **probe → emit →
+trace-each-photon-to-completion (keep raw bounces near probes) → unified gather**:
 
+0. **Probe pass (Phase 2a).** Before the photon pass, cast camera rays and EXTEND
+   each through delta surfaces (mirror/glass) to its FIRST NON-DELTA hit; collect
+   those points as PROBES and index them (`ProbeGather::collectProbes` +
+   `ProbeIndex`, `src/ProbeGather.cpp`, `src/ProbeIndex.cpp`). The probes are
+   exactly the diffuse/glossy surface points the camera can see directly OR via any
+   specular path.
 1. **Emit.** Each `Light` produces photons into the one bounded `photonQueue`. The
    per-photon magnitude `Phi/N` is baked at emission (`LightQueue::registerLight`,
    `src/LightQueue.cpp:16`).
 2. **Trace to completion.** A worker fetches a batch and traces each photon's *entire*
-   random walk in a single loop (`Worker::processPhotons`, `src/Worker.cpp:439-589`):
-   raycast → deposit into the density grid (non-delta only) → splat to camera (non-delta
-   only) → check terminators → scatter exactly one continuation photon → repeat. The
-   continuation lives in a local stack slot; it **never re-enters the queue**. The source
-   batch's queue slots are released only after the whole batch finishes
-   (`src/Worker.cpp:582`).
-3. **Gather (post-pass, per camera).** `MirrorGather` traces camera rays, extends through
-   delta surfaces, and reads radiance from the density grid at diffuse ends.
-   `EmissiveGather` makes light fixtures camera-visible.
+   random walk in a single loop (`Worker::processPhotons`, `src/Worker.cpp`):
+   raycast → if non-delta, KEEP the bounce RAW in the `BounceStore` iff a probe is
+   within the keep-radius (else discard) → check terminators → scatter exactly one
+   continuation photon → repeat. The continuation lives in a local stack slot; it
+   **never re-enters the queue**. The source batch's queue slots are released only
+   after the whole batch finishes.
+3. **Unified gather (post-pass, per camera).** `ProbeGather::run` traces camera
+   rays, extends through delta surfaces to the first non-delta hit, and density-
+   estimates the retained RAW bounces near that hit. The SAME path renders both
+   directly-visible diffuse (extension depth 0) AND reflected/refracted diffuse
+   (extension depth > 0). `EmissiveGather` makes light fixtures camera-visible.
+
+**[INVARIANT] Mirror == direct (Phase 2a headline).** A reflection in a mirror is
+the scene gathered the SAME way as the direct view: a reflected diffuse point is
+gathered identically to a directly-visible one (extension depth is the only
+difference), so a flat mirror shows the scene at the SAME fidelity as pointing the
+camera at it directly — not blurrier/blockier. Verified by `MirrorDirectTest.json`
+(flat mirror wall + ball: the reflected ball matches the direct ball in size,
+brightness, and sharpness; reflection visibly crisper than the retired density
+grid). Do not reintroduce a separate, lower-fidelity reflection path.
+
+**[INVARIANT] Density grid retired from the default path.** The probe-guided raw-
+bounce gather replaces BOTH the direct-diffuse SPLAT and the quantized
+DENSITY-GRID reflection lookup. `$probeGather` defaults true. The legacy splat +
+`DensityGrid` + `MirrorGather` path is kept ONLY behind `$probeGather false` for
+A/B comparison and is deprecated pending deletion; do not build new behavior on
+it. Memory under the gather is bounded by the probe KEEP-TEST (visible-surface-
+area), not by photon count — see §6f.
 
 **[INVARIANT] One bounded queue, trace-to-completion, no per-bounce requeue.** The photon
 population is constant (one-in, one-out per bounce — see §1). The old multi-queue
@@ -246,26 +272,61 @@ candidates; their presence is not a behavioral statement.
 
 ---
 
-## 6. Density grid, specular gather, glass, and fixture visibility
+## 6. Probe-guided gather (default), legacy density grid, glass, fixture visibility
 
-### 6a. Density grid — [INVARIANT] quantized, additive, distribution-ready
+### 6f. Probe-guided unified gather — [INVARIANT] the default gather (Phase 2a)
 
-Energy is accumulated into spatial cells and the bounce discarded; storage is bounded by
-**occupied cells**, not photon count (`src/DensityGrid.cpp:25-33`). The brightness model is
-**density-of-deposits**: sum of per-photon bundle magnitudes in a cell, divided by cell
-footprint area at lookup. Per-shard locking (`shardOf` → `lock_guard`) lets distinct cells
-proceed concurrently. This replaced an earlier per-photon-record hash-grid that blew up
-memory (15.6 GiB at 2M photons) — do not revert to storing every bounce record
-(architecture-vision "quantized density grid" pivot).
+The renderer's gather is the probe-guided raw-bounce gather (`$probeGather` true by
+default). Three pieces:
+
+- **Probe pass + index** (`ProbeGather::collectProbes`, `ProbeIndex`). Camera rays
+  extended through delta surfaces to the first non-delta hit → probe points →
+  uniform-grid index. `anyWithinKeepRadius()` is the photon-pass keep-test.
+- **Guided raw storage** (`Worker::processPhotons` + `BounceStore`). A non-delta
+  bounce is stored RAW (position, incoming dir, power) iff a probe is within the
+  keep-radius; else DISCARDED. **[INVARIANT] the keep-test is what bounds memory by
+  visible-surface-area, not photon count** — bounces far from every probe can never
+  reach the camera, so dropping them is exact, not lossy. Evidence: `bounceCulled`
+  ≫ `bounceKept` on a scene with off-camera geometry (`WorkerDebug::bounceKept/
+  bounceCulled`); the store size tracks visible area, not the (much larger) total
+  bounce count.
+- **Unified gather** (`ProbeGather::run` / `gatherRadiance` / `shade`). Extend
+  through delta to the first non-delta hit, then density-estimate the retained raw
+  bounces in the footprint: `L = (1/πr²)·Σ f(wi,wo)·Φ`, with a tangent-plane band
+  to suppress cross-surface leak. The footprint `r` is a RAY DIFFERENTIAL (min with
+  the perpendicular footprint) so it tracks rectilinear edge distortion without
+  grazing blowup. A `4/π` parity factor reproduces the retired splat's energy-per-
+  pixel (the splat binned a full pixel but normalized by a half-pixel-radius disc).
+
+**[INVARIANT] No cos(θ_view) term in the gather.** The density estimate divides by
+the on-surface gather AREA only; the deposited photons already carry incoming
+geometry and the BRDF handles the view direction (the retired splat's `cosCamera`
+was a perpendicular-footprint-to-surface-area correction, folded into the `4/π`
+parity factor here). Adding a cos(θ_view) double-darkens grazing surfaces.
+
+Brightness parity with the legacy splat+grid on CornellBoxArea: mean luminance
+within ~5% (stable across seeds); the per-region spread is the density-estimate-vs-
+splat estimator difference (an accepted, documented bias — see architecture-vision
+"biased — density-estimate blur").
+
+### 6a. Density grid — LEGACY (retired from the default path)
+
+The quantized `DensityGrid` + `MirrorGather` reflection lookup is RETIRED: the
+probe gather (§6f) replaces it. It is reachable only behind `$probeGather false`
+for A/B comparison and is deprecated pending deletion. Its still-valid component
+unit tests (`test_DensityGrid`, `test_MirrorGather`, `test_SplatToCamera`) keep the
+primitives covered. Historical model (unchanged in the legacy path): energy
+accumulated into spatial cells, bounded by occupied cells; **density-of-deposits**
+brightness; per-shard locking. Do not build new behavior on this path.
 
 ### 6b. Specular gather — EXTEND, do not gather, at a delta vertex
 
 **[INVARIANT]** At a delta hit the camera path follows the single reflection/refraction ray
-and recurses (`reflectedRadiance`, `src/MirrorGather.cpp:113-138`); it gathers the grid only
-when the chain lands on a non-delta surface (`src/MirrorGather.cpp:147`). A perfect mirror is
-a path-extension problem, NOT a too-narrow-cone gather. Recursion depth is capped at
-`kMaxSpecularDepth = 8` (`src/MirrorGather.cpp:25,86`) — a hall of mirrors returns black at
-the cap, it does not infinite-loop.
+and recurses; it gathers only when the chain lands on a non-delta surface. A perfect mirror
+is a path-extension problem, NOT a too-narrow-cone gather. This holds for BOTH the probe
+gather (`ProbeGather::shade`, `src/ProbeGather.cpp`) and the legacy `MirrorGather`. Recursion
+depth is capped at `kMaxSpecularDepth = 8` — a hall of mirrors returns black at the cap, it
+does not infinite-loop.
 
 ### 6c. Glass camera path — STOCHASTIC Fresnel, single ray — looks like a bug, it is not
 

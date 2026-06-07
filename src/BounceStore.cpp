@@ -48,7 +48,7 @@ void BounceStore::buildIndex(double cellSize)
     const std::size_t count = size();
     for (std::size_t i = 0; i < count; ++i)
     {
-        m_cells[cellOf(m_records[i].position)].push_back(i);
+        m_cells[cellOf(m_records[i].position())].push_back(i);
     }
 }
 
@@ -79,10 +79,10 @@ std::vector<std::size_t> BounceStore::radiusSearch(const Vector& p, double r) co
                 }
                 for (const std::size_t index : it->second)
                 {
-                    const Vector& pos = m_records[index].position;
-                    const double ddx = pos.x - p.x;
-                    const double ddy = pos.y - p.y;
-                    const double ddz = pos.z - p.z;
+                    const RawBounce& rec = m_records[index];
+                    const double ddx = static_cast<double>(rec.px) - p.x;
+                    const double ddy = static_cast<double>(rec.py) - p.y;
+                    const double ddz = static_cast<double>(rec.pz) - p.z;
                     if (ddx * ddx + ddy * ddy + ddz * ddz <= r2)
                     {
                         result.push_back(index);

@@ -258,12 +258,12 @@ Color gatherRadiance(const Context& ctx,
     {
         const RawBounce& record = ctx.store[index];
         const double planeDist =
-            std::abs(Vector::dot(record.position - hit.position, hit.normal));
+            std::abs(Vector::dot(record.position() - hit.position, hit.normal));
         if (planeDist > planeBand)
         {
             continue;  // deposit is on an adjacent surface, not this one
         }
-        const Vector wi = -record.incoming;  // direction the bounce photon came from
+        const Vector wi = -record.incoming();  // direction the bounce photon came from
         const Color f = material->evaluate(wi, wo, hitNormal);
         sum += f * record.power;
         ++kept;

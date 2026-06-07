@@ -30,11 +30,31 @@
 // lock-free, past capacity it drops and bumps an overflow counter. The buffer is
 // never reallocated, so reader access (the grid build + the gather) is valid once
 // the photon pass drains.
+// Compact deposit record (36 B, not 80). `position`/`incoming` are stored as 3
+// floats each rather than `Vector` (32 B, AVX-padded) because the store holds
+// MILLIONS of these and the gather only needs single-precision positions for the
+// radius search and BRDF evaluation. The accessors return `Vector` so call sites
+// stay typed. Trivially copyable for the lock-free append.
 struct RawBounce
 {
-    Vector position;  // world-space surface point of the bounce
-    Vector incoming;  // incoming photon travel direction (into the surface)
-    Color power{0.0f, 0.0f, 0.0f};  // photon's carried power at this bounce
+    float px = 0.0f, py = 0.0f, pz = 0.0f;  // world-space bounce position
+    float ix = 0.0f, iy = 0.0f, iz = 0.0f;  // incoming photon travel direction
+    Color power{0.0f, 0.0f, 0.0f};          // photon's carried power at this bounce
+
+    RawBounce() = default;
+    RawBounce(const Vector& position, const Vector& incoming, const Color& pow)
+        : px(static_cast<float>(position.x))
+        , py(static_cast<float>(position.y))
+        , pz(static_cast<float>(position.z))
+        , ix(static_cast<float>(incoming.x))
+        , iy(static_cast<float>(incoming.y))
+        , iz(static_cast<float>(incoming.z))
+        , power(pow)
+    {
+    }
+
+    Vector position() const noexcept { return Vector{px, py, pz}; }
+    Vector incoming() const noexcept { return Vector{ix, iy, iz}; }
 };
 
 class BounceStore

@@ -5,11 +5,13 @@
 // drive the same code path. This file is now a thin CLI wrapper: parse args,
 // load the scene, render each frame, write PNGs, print timing.
 
+#include "BounceStore.h"
 #include "Image.h"
 #include "MirrorGather.h"
 #include "PngWriter.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
+#include "Worker.h"
 
 #include <chrono>
 #include <exception>
@@ -87,6 +89,30 @@ int main(int argc, char** argv)
                       << " reflected=" << m.pixelsReflected
                       << " black=" << m.pixelsBlack
                       << std::endl;
+
+            // Phase 2a probe-guided gather diagnostics: the keep-test cull (the
+            // memory-bound proof) and the raw-bounce store occupancy. bounceKept
+            // = non-delta bounces stored (a probe was near); bounceCulled = those
+            // discarded (no probe near → never camera-reachable). A large cull
+            // fraction with store size ≪ total bounces is the evidence that memory
+            // is bounded by visible-surface-area, not photon count.
+            if (render.bounceStore)
+            {
+                const size_t kept = WorkerDebug::bounceKept();
+                const size_t culled = WorkerDebug::bounceCulled();
+                const size_t total = kept + culled;
+                const double cullPct =
+                    (total > 0) ? (100.0 * static_cast<double>(culled) /
+                                   static_cast<double>(total))
+                                : 0.0;
+                std::cout << "Probe gather: kept=" << kept << " culled=" << culled
+                          << " (" << cullPct << "% culled)"
+                          << " storeSize=" << render.bounceStore->size()
+                          << " storeMiB="
+                          << (render.bounceStore->memoryBytes() / (1024 * 1024))
+                          << (render.bounceStore->budgetHit() ? " [BUDGET HIT]" : "")
+                          << std::endl;
+            }
 
             std::string fileName = scene.renderName + "." + std::to_string(frame) + ".png";
             std::filesystem::path outputPath = scene.renderPath / fileName;
