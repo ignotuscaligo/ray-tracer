@@ -568,6 +568,7 @@ bool Worker::processPhotons()
                     {
                         const RawBounce record{photonHit.hit.position,
                                                photonHit.photon.ray.direction,
+                                               photonHit.hit.normal,
                                                photonHit.photon.color};
                         bounceStore->append(record);
                         g_bounceKept.fetch_add(1, std::memory_order_relaxed);

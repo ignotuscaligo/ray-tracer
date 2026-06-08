@@ -30,15 +30,23 @@
 // lock-free, past capacity it drops and bumps an overflow counter. The buffer is
 // never reallocated, so reader access (the grid build + the gather) is valid once
 // the photon pass drains.
-// Compact deposit record (36 B, not 80). `position`/`incoming` are stored as 3
-// floats each rather than `Vector` (32 B, AVX-padded) because the store holds
+// Compact deposit record (48 B, not 80). `position`/`incoming`/`normal` are stored
+// as 3 floats each rather than `Vector` (32 B, AVX-padded) because the store holds
 // MILLIONS of these and the gather only needs single-precision positions for the
 // radius search and BRDF evaluation. The accessors return `Vector` so call sites
 // stay typed. Trivially copyable for the lock-free append.
+//
+// `normal` is the surface normal at the deposit. The gather uses it for the
+// leak-suppression test: a deposit is kept only if its surface normal AGREES with
+// the gather point's normal (same surface), rather than the old hard tangent-plane
+// distance cutoff. Normal agreement still rejects an adjacent PERPENDICULAR surface
+// (corner light leak) but does NOT reject a smoothly-CURVED same surface near its
+// silhouette (which the distance cutoff over-darkened into a black rim).
 struct RawBounce
 {
     float px = 0.0f, py = 0.0f, pz = 0.0f;  // world-space bounce position
     float ix = 0.0f, iy = 0.0f, iz = 0.0f;  // incoming photon travel direction
+    float nx = 0.0f, ny = 0.0f, nz = 0.0f;  // surface normal at the deposit
     Color power{0.0f, 0.0f, 0.0f};          // photon's carried power at this bounce
 
     RawBounce() = default;
@@ -53,8 +61,24 @@ struct RawBounce
     {
     }
 
+    RawBounce(const Vector& position, const Vector& incoming, const Vector& surfaceNormal,
+              const Color& pow)
+        : px(static_cast<float>(position.x))
+        , py(static_cast<float>(position.y))
+        , pz(static_cast<float>(position.z))
+        , ix(static_cast<float>(incoming.x))
+        , iy(static_cast<float>(incoming.y))
+        , iz(static_cast<float>(incoming.z))
+        , nx(static_cast<float>(surfaceNormal.x))
+        , ny(static_cast<float>(surfaceNormal.y))
+        , nz(static_cast<float>(surfaceNormal.z))
+        , power(pow)
+    {
+    }
+
     Vector position() const noexcept { return Vector{px, py, pz}; }
     Vector incoming() const noexcept { return Vector{ix, iy, iz}; }
+    Vector normal() const noexcept { return Vector{nx, ny, nz}; }
 };
 
 class BounceStore

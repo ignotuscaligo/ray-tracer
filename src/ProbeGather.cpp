@@ -1,6 +1,7 @@
 #include "ProbeGather.h"
 
 #include "DielectricMaterial.h"
+#include "EmitterPatch.h"
 #include "Hit.h"
 #include "Material.h"
 #include "RandomGenerator.h"
@@ -26,17 +27,59 @@ constexpr double kSelfHitThreshold = std::numeric_limits<double>::epsilon();
 constexpr int kMaxSpecularDepth = 8;
 constexpr double kReflectionEpsilon = 1e-3;
 
+// Sentinel material index marking a Hit on an emitter (AreaLight) surface. The
+// emitter is not a scene Volume / has no MaterialLibrary entry, so a hit on its
+// patch carries this index instead. The gather treats an emitter hit as a
+// non-delta surface with an IDENTITY BRDF (f = 1): summing the emitter's own
+// radiance deposits over the footprint and dividing by area reproduces its
+// surface radiance L = M/pi, exactly like any other gathered surface — so the
+// fixture renders directly AND in mirrors with no special-case pass.
+constexpr std::size_t kEmitterMaterial = std::numeric_limits<std::size_t>::max();
+
+// Closest emitter patch the ray strikes (front face, within bounds). Fills `hit`
+// with the patch hit and returns its distance; +inf if no patch is struck. The
+// returned hit's material is kEmitterMaterial.
+double firstEmitterHit(const std::vector<EmitterPatch>& patches,
+                       const Ray& ray,
+                       Hit& hit)
+{
+    double bestT = std::numeric_limits<double>::infinity();
+    const EmitterPatch* best = nullptr;
+    for (const auto& patch : patches)
+    {
+        const std::optional<double> t = intersectEmitterPatch(patch, ray);
+        if (t && *t > kSelfHitThreshold && *t < bestT)
+        {
+            bestT = *t;
+            best = &patch;
+        }
+    }
+    if (!best)
+    {
+        return std::numeric_limits<double>::infinity();
+    }
+    hit.position = ray.origin + ray.direction * bestT;
+    hit.normal = best->normal;
+    hit.distance = bestT;
+    hit.material = kEmitterMaterial;
+    return bestT;
+}
+
 // Camera samples per pixel for STOCHASTIC delta surfaces (glass): each makes one
 // independent Fresnel reflect/refract pick; averaging removes the per-pixel noise
 // the stochastic choice introduces. Mirrors are deterministic (single sample).
 constexpr int kCameraSamplesPerPixel = 16;
 
-// Closest visible surface along a ray (mirrors the photon pass first-hit).
+// Closest visible surface along a ray (mirrors the photon pass first-hit). Emitter
+// patches (if supplied) are intersected alongside scene Volumes, so a camera or
+// specular ray that lands on a light fixture returns an emitter Hit and gathers
+// the fixture's radiance like any other surface.
 std::optional<Hit> firstHit(const std::vector<std::shared_ptr<Object>>& objects,
                             const Ray& ray,
                             std::vector<Hit>& castBuffer,
                             float time,
-                            const AnimationQuery* animation)
+                            const AnimationQuery* animation,
+                            const std::vector<EmitterPatch>* patches = nullptr)
 {
     std::optional<Hit> closest;
     for (const auto& object : objects)
@@ -51,6 +94,15 @@ std::optional<Hit> firstHit(const std::vector<std::shared_ptr<Object>>& objects,
             (!closest || hit->distance < closest->distance))
         {
             closest = hit;
+        }
+    }
+    if (patches && !patches->empty())
+    {
+        Hit emitterHit;
+        const double t = firstEmitterHit(*patches, ray, emitterHit);
+        if (std::isfinite(t) && (!closest || t < closest->distance))
+        {
+            closest = emitterHit;
         }
     }
     return closest;
@@ -72,15 +124,20 @@ std::optional<Hit> extendToNonDelta(const std::vector<std::shared_ptr<Object>>& 
                                     std::vector<Hit>& castBuffer,
                                     RandomGenerator& generator,
                                     Ray ray,
+                                    const std::vector<EmitterPatch>& patches,
                                     bool& outTraversedDelta)
 {
     outTraversedDelta = false;
     for (int depth = 0; depth < kMaxSpecularDepth; ++depth)
     {
-        std::optional<Hit> hit = firstHit(objects, ray, castBuffer, 0.0f, animation);
+        std::optional<Hit> hit = firstHit(objects, ray, castBuffer, 0.0f, animation, &patches);
         if (!hit)
         {
             return std::nullopt;
+        }
+        if (hit->material == kEmitterMaterial)
+        {
+            return hit;  // emitter surface: a non-delta gatherable surface
         }
         std::shared_ptr<Material> material = materials.fetchByIndex(hit->material);
         if (!material)
@@ -113,6 +170,7 @@ void collectProbeRows(size_t rowBegin,
                       const Camera& camera,
                       const MaterialLibrary& materials,
                       const AnimationQuery* animation,
+                      const std::vector<EmitterPatch>& patches,
                       size_t subSample,
                       ProbeResult& out)
 {
@@ -130,7 +188,8 @@ void collectProbeRows(size_t rowBegin,
 
             bool traversedDelta = false;
             std::optional<Hit> hit = extendToNonDelta(
-                objects, materials, animation, castBuffer, generator, ray, traversedDelta);
+                objects, materials, animation, castBuffer, generator, ray, patches,
+                traversedDelta);
             if (traversedDelta)
             {
                 ++out.deltaExtensions;
@@ -162,11 +221,104 @@ ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
     }
     const size_t stride = std::max<size_t>(1, subSample);
 
+    const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
+
     // The probe pass is camera-ray-scale and cheap; run it single-threaded so the
     // probe list (and its diagnostics) accumulate without cross-thread merging.
     // For very large frames this can be parallelized like the gather; not needed
     // at current resolutions.
-    collectProbeRows(0, height, objects, camera, materials, animation, stride, result);
+    collectProbeRows(0, height, objects, camera, materials, animation, patches, stride,
+                     result);
+    return result;
+}
+
+// ===== Emitter deposits =====
+
+EmitterDepositResult depositEmitters(const std::vector<std::shared_ptr<Object>>& objects,
+                                     const ProbeIndex& probeIndex,
+                                     double depositSpacing,
+                                     BounceStore& store)
+{
+    EmitterDepositResult result;
+    const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
+    result.patches = patches.size();
+    if (patches.empty())
+    {
+        return result;
+    }
+
+    const double spacing = std::max(depositSpacing, 1e-6);
+
+    for (const EmitterPatch& patch : patches)
+    {
+        // Tile the patch with a uniform grid of deposit points in its (u, v)
+        // in-plane parameterization. A square spans [-halfWidth, +halfWidth] ×
+        // [-halfHeight, +halfHeight]; a disc is bounded by its radius and points
+        // outside it are skipped.
+        double extentU = patch.isDisc ? patch.radius : patch.halfWidth;
+        double extentV = patch.isDisc ? patch.radius : patch.halfHeight;
+        if (extentU <= 0.0 || extentV <= 0.0)
+        {
+            continue;
+        }
+
+        // Cell-centered samples so each deposit represents an equal sub-area.
+        const int countU = std::max(1, static_cast<int>(std::ceil(2.0 * extentU / spacing)));
+        const int countV = std::max(1, static_cast<int>(std::ceil(2.0 * extentV / spacing)));
+        const double stepU = (2.0 * extentU) / countU;
+        const double stepV = (2.0 * extentV) / countV;
+
+        const double area = patch.isDisc
+                                ? (Utility::pi * patch.radius * patch.radius)
+                                : (2.0 * patch.halfWidth) * (2.0 * patch.halfHeight);
+
+        // Count the deposits that actually fall on the patch (a disc drops the
+        // corner cells), so per-deposit power = radiance * pi * area / (4 N) makes
+        // the density estimate reproduce L = M/pi regardless of N. (Derivation: the
+        // gather sums power over a disc of area pi r^2, multiplies by 4/pi, divides
+        // by pi r^2, with identity BRDF; a uniform areal power density rho yields
+        // L = (4/pi) rho, so rho = radiance * pi / 4, i.e. total patch power =
+        // radiance * pi * area / 4 spread over N deposits.)
+        std::vector<Vector> samples;
+        samples.reserve(static_cast<size_t>(countU) * static_cast<size_t>(countV));
+        for (int iu = 0; iu < countU; ++iu)
+        {
+            const double u = -extentU + (iu + 0.5) * stepU;
+            for (int iv = 0; iv < countV; ++iv)
+            {
+                const double v = -extentV + (iv + 0.5) * stepV;
+                if (patch.isDisc && (u * u + v * v) > (patch.radius * patch.radius))
+                {
+                    continue;
+                }
+                samples.push_back(patch.center + patch.right * u + patch.up * v);
+            }
+        }
+        if (samples.empty())
+        {
+            continue;
+        }
+        result.generated += samples.size();
+
+        const double perDepositScale =
+            (Utility::pi * area) / (4.0 * static_cast<double>(samples.size()));
+        const Color perDepositPower = patch.radiance * static_cast<float>(perDepositScale);
+
+        // incoming direction is irrelevant for an emitter (identity BRDF), but a
+        // valid unit vector keeps the record well-formed; store the patch normal.
+        for (const Vector& position : samples)
+        {
+            if (!probeIndex.anyWithinKeepRadius(position))
+            {
+                continue;  // no camera path lands here; the deposit can't be gathered
+            }
+            const RawBounce record{position, patch.normal, patch.normal, perDepositPower};
+            if (store.append(record))
+            {
+                ++result.kept;
+            }
+        }
+    }
     return result;
 }
 
@@ -181,6 +333,7 @@ struct Context
     const BounceStore& store;
     const MaterialLibrary& materials;
     const AnimationQuery* animation;
+    std::vector<EmitterPatch> patches;
     double pixelHalfAngle;
     double minGatherRadius;
 };
@@ -217,6 +370,11 @@ Color gatherRadiance(const Context& ctx,
 {
     outDeposits = 0;
 
+    // An emitter hit has no MaterialLibrary entry: it is gathered with an IDENTITY
+    // BRDF (f = 1) over its own radiance deposits, reproducing its view-independent
+    // surface radiance L = M/pi. Any other hit uses its material's BRDF.
+    const bool isEmitter = (hit.material == kEmitterMaterial);
+
     const Vector toViewer = viewer - hit.position;
     const double toViewerMag = toViewer.magnitude();
     if (toViewerMag <= kSelfHitThreshold)
@@ -242,26 +400,62 @@ Color gatherRadiance(const Context& ctx,
         return Color{0.0f, 0.0f, 0.0f};
     }
 
-    // Tangent-plane band: only gather deposits within a thin slab around the hit's
-    // tangent plane. The radius search returns every bounce inside a Euclidean
-    // SPHERE of radius r, which near a corner/edge also catches deposits on an
-    // ADJACENT perpendicular surface (a wall gather pulling in floor/ceiling
-    // deposits) — the classic photon-map boundary bias / light leak. Rejecting
-    // deposits whose perpendicular distance from the tangent plane exceeds a small
-    // fraction of r keeps only same-surface deposits, like the per-pixel splat
-    // (each photon binned to its own surface's pixel).
+    // Leak suppression by NORMAL AGREEMENT (not a hard tangent-plane distance cut).
+    // The radius search returns every deposit inside a Euclidean SPHERE of radius
+    // r, which near a corner/edge also catches deposits on an ADJACENT
+    // perpendicular surface (a wall gather pulling in floor/ceiling deposits) — the
+    // classic photon-map boundary bias / light leak. The old fix rejected any
+    // deposit whose perpendicular distance from the hit's tangent plane exceeded a
+    // small fraction of r; on a CURVED surface that over-rejected legitimate
+    // deposits near the silhouette (their positions bow off the local tangent
+    // plane), darkening the silhouette into a black rim.
+    //
+    // Instead, keep a deposit when its SURFACE NORMAL agrees with the gather
+    // point's normal: dot(depositNormal, hitNormal) >= kNormalAgree. A perpendicular
+    // adjacent wall has dot ~= 0 (rejected — leak still stopped); a smoothly curved
+    // same-surface neighborhood stays within a moderate cone of the hit normal
+    // (kept — no rim). A generous tangent-plane band (a multiple of r) is retained
+    // only as a coarse backstop against a far co-normal surface (e.g. a parallel
+    // facing wall across a thin gap) sneaking into the sphere; it is loose enough
+    // never to clip a curved same-surface neighborhood.
     const UnitVector hitNormal = UnitVector::alreadyNormalized(hit.normal);
-    const double planeBand = 0.25 * r;
+    constexpr double kNormalAgree = 0.5;   // cos 60°: same-surface vs perpendicular
+    const double planeBand = 2.0 * r;      // loose backstop only
     Color sum{0.0f, 0.0f, 0.0f};
     size_t kept = 0;
     for (const std::size_t index : neighbors)
     {
         const RawBounce& record = ctx.store[index];
+
+        if (isEmitter)
+        {
+            // Emitter deposits carry the patch normal; only gather deposits whose
+            // normal matches THIS emitter face (rejects a second fixture's deposits
+            // sneaking into the sphere). f = 1.
+            const Vector dn = record.normal();
+            if (Vector::dot(dn, hit.normal) < kNormalAgree)
+            {
+                continue;
+            }
+            sum += record.power;
+            ++kept;
+            continue;
+        }
+
+        const Vector dn = record.normal();
+        const double dnLen = dn.magnitude();
+        if (dnLen > kSelfHitThreshold)
+        {
+            if (Vector::dot(dn / dnLen, hit.normal) < kNormalAgree)
+            {
+                continue;  // deposit is on a differently-oriented (adjacent) surface
+            }
+        }
         const double planeDist =
             std::abs(Vector::dot(record.position() - hit.position, hit.normal));
         if (planeDist > planeBand)
         {
-            continue;  // deposit is on an adjacent surface, not this one
+            continue;  // far co-normal surface across a gap; coarse backstop
         }
         const Vector wi = -record.incoming();  // direction the bounce photon came from
         const Color f = material->evaluate(wi, wo, hitNormal);
@@ -362,21 +556,24 @@ Color shade(const Context& ctx,
     }
 
     const Ray ray{origin, direction};
-    std::optional<Hit> hit = firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation);
+    std::optional<Hit> hit =
+        firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation, &ctx.patches);
     if (!hit)
     {
         return Color{0.0f, 0.0f, 0.0f};
     }
 
-    std::shared_ptr<Material> material = ctx.materials.fetchByIndex(hit->material);
-    if (!material)
+    const bool isEmitter = (hit->material == kEmitterMaterial);
+    std::shared_ptr<Material> material =
+        isEmitter ? nullptr : ctx.materials.fetchByIndex(hit->material);
+    if (!isEmitter && !material)
     {
         return Color{0.0f, 0.0f, 0.0f};
     }
 
     const double segment = hit->distance;
 
-    if (material->isDelta())
+    if (!isEmitter && material->isDelta())
     {
         const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
         const BSDFSample s = material->sample(direction, hitNormal, generator);
@@ -393,12 +590,25 @@ Color shade(const Context& ctx,
 
     // Non-delta surface reached through a specular chain: gather the raw bounces.
     // The viewer for the BRDF is the last specular vertex (origin) — the correct
-    // outgoing direction to evaluate the reflected surface's BRDF toward. The
-    // footprint is the pixel's solid angle projected over the TOTAL path length,
-    // divided by cos(view) so the disc covers the foreshortened surface footprint.
-    // (A reflected pixel can't use the direct ray-differential against the camera;
-    // the path-length angular footprint is the tractable estimate, and the
-    // mirror==direct invariant validates it.)
+    // outgoing direction to evaluate the reflected surface's BRDF toward.
+    //
+    // Footprint: a mirror is an UNFOLDED straight path, so the perpendicular
+    // footprint at the reflected surface is the pixel half-angle projected over the
+    // TOTAL path length — exactly the direct-view perpendicular footprint at that
+    // unfolded depth. This is the same quantity the DIRECT path caps the gather
+    // radius at (pixelFootprintRadius's perpRadius = depth*tan(halfAngle)), so it
+    // keeps reflections as crisp as the direct view.
+    //
+    // The previous code then DIVIDED this by cos(view) (clamped to 0.15), inflating
+    // the disc up to ~6.7x at a grazing reflected surface — which is what made the
+    // reflected ceiling/floor blurrier than the direct view (Bug 3). The direct
+    // path applies NO such cos(view) inflation (it relies on the perpendicular /
+    // ray-differential footprint), and brightness parity does NOT depend on it: the
+    // density estimate divides by the SAME area it gathers over, so changing r only
+    // trades sharpness against noise, not energy. The foreshortening enlargement is
+    // therefore capped tightly (at most 2x, matching a moderate grazing angle)
+    // rather than the old 6.7x, keeping the reflected footprint near the direct
+    // perpendicular footprint.
     const Vector toViewer = origin - hit->position;
     const double toViewerMag = toViewer.magnitude();
     double footprint = (pathLength + segment) * std::tan(ctx.pixelHalfAngle);
@@ -408,7 +618,7 @@ Color shade(const Context& ctx,
             Vector::dot(toViewer / toViewerMag, hit->normal);
         if (cosView > 0.0)
         {
-            footprint /= std::min(1.0, std::max(0.15, cosView));
+            footprint /= std::min(1.0, std::max(0.5, cosView));
         }
     }
     return gatherRadiance(ctx, *hit, material, origin, footprint, outDeposits);
@@ -446,7 +656,8 @@ void gatherRows(size_t rowBegin,
                     ? camera.generatePrimaryRay(coord, &generator)
                     : camera.generatePrimaryRay(coord);
 
-                std::optional<Hit> hit = firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation);
+                std::optional<Hit> hit =
+                    firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation, &ctx.patches);
                 if (!hit)
                 {
                     ++stats.pixelsMiss;
@@ -454,13 +665,15 @@ void gatherRows(size_t rowBegin,
                 }
                 anyHit = true;
 
-                std::shared_ptr<Material> material = ctx.materials.fetchByIndex(hit->material);
-                if (!material)
+                const bool isEmitter = (hit->material == kEmitterMaterial);
+                std::shared_ptr<Material> material =
+                    isEmitter ? nullptr : ctx.materials.fetchByIndex(hit->material);
+                if (!isEmitter && !material)
                 {
                     continue;
                 }
 
-                if (!material->isDelta())
+                if (isEmitter || !material->isDelta())
                 {
                     // Direct non-delta pixel: gather at extension depth 0. The
                     // viewer is the camera eye (ray origin); the footprint is the
@@ -573,7 +786,8 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
     const double pixelHalfAngle =
         0.5 * Utility::radians(camera->verticalFieldOfView()) / static_cast<double>(height);
 
-    const Context ctx{objects, store, materials, animation, pixelHalfAngle, minGatherRadius};
+    const Context ctx{objects,        store,          materials,       animation,
+                      collectEmitterPatches(objects), pixelHalfAngle, minGatherRadius};
 
     const size_t threads = std::max<size_t>(1, workerCount);
     const size_t effectiveThreads = std::min(threads, height);

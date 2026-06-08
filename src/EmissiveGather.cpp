@@ -2,6 +2,7 @@
 
 #include "AreaLight.h"
 #include "Color.h"
+#include "EmitterPatch.h"
 #include "Hit.h"
 #include "Light.h"
 #include "Quaternion.h"
@@ -39,102 +40,6 @@ constexpr double kSelfHitThreshold = std::numeric_limits<double>::epsilon();
 // hundreds of times outside this margin), so real occlusion is unaffected.
 constexpr double kOcclusionCoincidenceMargin = 1e-3;
 
-// A planar emissive patch resolved from an emitter: its plane, in-plane extent,
-// and the constant outgoing radiance it shows toward any viewer.
-struct EmissivePatch
-{
-    Vector center;
-    Vector normal;  // emission axis (forward); the lit face
-    Vector right;   // in-plane +X (unit)
-    Vector up;      // in-plane +Y (unit)
-    double halfWidth = 0.0;   // square: half extent along right
-    double halfHeight = 0.0;  // square: half extent along up
-    double radius = 0.0;      // disc: radius
-    bool isDisc = false;
-    Color radiance{0.0f, 0.0f, 0.0f};
-};
-
-std::vector<EmissivePatch> collectPatches(
-    const std::vector<std::shared_ptr<Object>>& objects)
-{
-    std::vector<EmissivePatch> patches;
-    for (const auto& object : objects)
-    {
-        if (!object->hasType<AreaLight>())
-        {
-            continue;
-        }
-        auto light = std::static_pointer_cast<AreaLight>(object);
-        const Color radiance = light->surfaceRadiance();
-        if (radiance.red <= 0.0f && radiance.green <= 0.0f && radiance.blue <= 0.0f)
-        {
-            continue;
-        }
-
-        const Quaternion orientation = light->rotation();
-        EmissivePatch patch;
-        patch.center = light->position();
-        patch.right = (orientation * Vector::unitX).normalized();
-        patch.up = (orientation * Vector::unitY).normalized();
-        patch.normal = (orientation * Vector::unitZ).normalized();
-        patch.radiance = radiance;
-        if (light->shape() == AreaLight::Shape::Disc)
-        {
-            patch.isDisc = true;
-            patch.radius = light->radius();
-        }
-        else
-        {
-            patch.halfWidth = light->width() * 0.5;
-            patch.halfHeight = light->height() * 0.5;
-        }
-        patches.push_back(patch);
-    }
-    return patches;
-}
-
-// Intersect a ray with the emissive patch. Returns the hit distance along the
-// ray (t > 0) if it strikes the FRONT face (the lit hemisphere) within the
-// patch bounds, else nullopt. A Lambertian emitter only emits from its front
-// face, so a back-facing view of the fixture shows nothing.
-std::optional<double> intersectPatch(const EmissivePatch& patch, const Ray& ray)
-{
-    const double denom = Vector::dot(ray.direction, patch.normal);
-    // Front face only: the camera must look at the emitting side, i.e. the ray
-    // travels against the normal (denom < 0).
-    if (denom >= -kSelfHitThreshold)
-    {
-        return std::nullopt;
-    }
-
-    const double t = Vector::dot(patch.center - ray.origin, patch.normal) / denom;
-    if (t <= kSelfHitThreshold)
-    {
-        return std::nullopt;
-    }
-
-    const Vector hitPoint = ray.origin + (ray.direction * t);
-    const Vector local = hitPoint - patch.center;
-    const double u = Vector::dot(local, patch.right);
-    const double v = Vector::dot(local, patch.up);
-
-    if (patch.isDisc)
-    {
-        if ((u * u + v * v) > (patch.radius * patch.radius))
-        {
-            return std::nullopt;
-        }
-    }
-    else
-    {
-        if (std::abs(u) > patch.halfWidth || std::abs(v) > patch.halfHeight)
-        {
-            return std::nullopt;
-        }
-    }
-    return t;
-}
-
 // Distance to the nearest scene Volume along the ray (occlusion test). Mirrors
 // the photon-pass / gather first-hit. Returns +inf if nothing is hit.
 double nearestOccluder(const std::vector<std::shared_ptr<Object>>& objects,
@@ -167,7 +72,7 @@ double luminanceOf(const Color& c)
 void gatherRows(size_t rowBegin,
                 size_t rowEnd,
                 const std::vector<std::shared_ptr<Object>>& objects,
-                const std::vector<EmissivePatch>& patches,
+                const std::vector<EmitterPatch>& patches,
                 const AnimationQuery* animation,
                 const Camera& camera,
                 Buffer& buffer,
@@ -188,10 +93,10 @@ void gatherRows(size_t rowBegin,
 
             // Closest emissive patch the pixel ray hits.
             double bestT = std::numeric_limits<double>::infinity();
-            const EmissivePatch* bestPatch = nullptr;
+            const EmitterPatch* bestPatch = nullptr;
             for (const auto& patch : patches)
             {
-                std::optional<double> t = intersectPatch(patch, ray);
+                std::optional<double> t = intersectEmitterPatch(patch, ray);
                 if (t && *t < bestT)
                 {
                     bestT = *t;
@@ -257,7 +162,7 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
         return result;
     }
 
-    const std::vector<EmissivePatch> patches = collectPatches(objects);
+    const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
     if (patches.empty())
     {
         return result;

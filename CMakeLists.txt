@@ -325,6 +325,9 @@ target_sources(ray-tracer-lib
         include/EmissiveGather.h
         src/EmissiveGather.cpp
 
+        include/EmitterPatch.h
+        src/EmitterPatch.cpp
+
         include/ProbeIndex.h
         src/ProbeIndex.cpp
 

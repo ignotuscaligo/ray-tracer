@@ -87,6 +87,10 @@ struct RenderResult
     // gather). Memory is bounded by the probe keep-test (visible-surface-area),
     // not photon count. Null when the legacy density-grid path is used.
     std::shared_ptr<BounceStore> bounceStore;
+
+    // Phase 2a: emitter radiance deposits stored on light-fixture surfaces so the
+    // unified gather renders fixtures directly AND in mirrors (no special pass).
+    size_t emitterDepositsKept = 0;
 };
 
 namespace Renderer

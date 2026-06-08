@@ -6,6 +6,7 @@
 #include "Camera.h"
 #include "MaterialLibrary.h"
 #include "Object.h"
+#include "ProbeIndex.h"
 #include "Vector.h"
 
 #include <cstddef>
@@ -62,6 +63,32 @@ ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
                           const MaterialLibrary& materials,
                           const AnimationQuery* animation,
                           size_t subSample = 1);
+
+// ===== Emitter deposits (fixture visibility, unified) =====
+
+struct EmitterDepositResult
+{
+    size_t patches = 0;     // emissive patches found
+    size_t generated = 0;   // candidate deposits generated across all patches
+    size_t kept = 0;        // deposits that passed the probe keep-test and were stored
+};
+
+// Seed the BounceStore with an emitter's own SURFACE RADIANCE as raw deposits, so
+// the unified gather renders the light fixture exactly like any other lit surface
+// — visible DIRECTLY and in MIRRORS — with no special-case pass. Each emissive
+// patch is tiled with deposits spaced `depositSpacing` apart; each carries power
+//   power = radiance * (pi * patchArea / (4 * N))
+// so the density estimate over the patch (with the gather's identity BRDF for an
+// emitter and its 4/pi splat-parity factor) reproduces the patch's view-independent
+// radiance L = M/pi exactly — the same value the legacy EmissiveGather wrote.
+//
+// Deposits are kept only if a probe lies within keep range (the same keep-test that
+// bounds all bounce storage), so an off-camera fixture costs nothing. Call AFTER
+// the photon pass appends its bounces and BEFORE buildIndex().
+EmitterDepositResult depositEmitters(const std::vector<std::shared_ptr<Object>>& objects,
+                                     const ProbeIndex& probeIndex,
+                                     double depositSpacing,
+                                     BounceStore& store);
 
 // ===== Unified gather =====
 

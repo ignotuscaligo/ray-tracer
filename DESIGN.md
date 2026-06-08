@@ -292,11 +292,31 @@ default). Three pieces:
   bounce count.
 - **Unified gather** (`ProbeGather::run` / `gatherRadiance` / `shade`). Extend
   through delta to the first non-delta hit, then density-estimate the retained raw
-  bounces in the footprint: `L = (1/πr²)·Σ f(wi,wo)·Φ`, with a tangent-plane band
-  to suppress cross-surface leak. The footprint `r` is a RAY DIFFERENTIAL (min with
+  bounces in the footprint: `L = (1/πr²)·Σ f(wi,wo)·Φ`, with NORMAL-AGREEMENT leak
+  suppression (see below). The footprint `r` is a RAY DIFFERENTIAL (min with
   the perpendicular footprint) so it tracks rectilinear edge distortion without
   grazing blowup. A `4/π` parity factor reproduces the retired splat's energy-per-
   pixel (the splat binned a full pixel but normalized by a half-pixel-radius disc).
+
+**[INVARIANT] Leak suppression is by NORMAL AGREEMENT, not a tangent-plane distance
+cut.** The radius search returns deposits inside a Euclidean SPHERE; near a
+corner/edge that catches an ADJACENT perpendicular surface (light leak). A deposit
+is kept only if its stored surface NORMAL agrees with the gather point's normal
+(`dot >= cos 60°`); a loose tangent-plane band (`2r`) is a coarse backstop only.
+The earlier hard tangent-plane cutoff (`0.25r`) over-rejected legitimate deposits
+near a CURVED surface's silhouette (their positions bow off the local tangent
+plane), darkening it into a black RIM. Normal agreement still rejects a
+perpendicular wall (dot≈0) but keeps a smoothly-curved same-surface neighborhood
+(dot≈1). `RawBounce` stores the deposit normal for this test (48 B/record).
+
+**[INVARIANT] The reflected gather footprint is NOT inflated by 1/cos(view) at
+grazing.** A mirror is an unfolded straight path, so the reflected perpendicular
+footprint is `(pathLength)·tan(halfAngle)` — the same quantity the direct path caps
+its gather radius at. An earlier `/min(1, max(0.15, cosView))` inflated the disc up
+to ~6.7× at a grazing reflected surface, making reflected ceiling/floor blurrier
+than the direct view. The factor is capped at 2× (`max(0.5, cosView)`); brightness
+parity does NOT depend on it (the density estimate divides by the same area it
+gathers, so r trades sharpness for noise, not energy).
 
 **[INVARIANT] No cos(θ_view) term in the gather.** The density estimate divides by
 the on-surface gather AREA only; the deposited photons already carry incoming
@@ -352,21 +372,34 @@ Reasoning: architecture-vision "Camera-cost fix (exponential → linear)".
 stochastic glass looks noisy. The noise lever is `kCameraSamplesPerPixel` (raise it for
 cleaner glass at *linear* cost), not exponential branch tracing.
 
-### 6d. Area-light fixture visibility — emissive deposit, no special camera-vs-light path
+### 6d. Area-light fixture visibility — emitter deposits in the unified gather (probe mode)
 
-**[INVARIANT]** A light FIXTURE is made camera-visible by depositing its own surface radiance
-into the gather (`EmissiveGather`), exactly like any other lit surface — there is **no**
-special primary-ray-hits-light bypass path. `surfaceRadiance = luminousFlux / area / π` for a
-Lambertian emitter (`src/AreaLight.cpp`, written to the pixel in `EmissiveGather`). This
-generalizes to any emissive material. Reasoning: architecture-vision "Area light shipped +
-emissive-fixture visibility".
+**[INVARIANT] In probe mode a light FIXTURE is made camera-visible by depositing its own
+surface radiance as RAW BOUNCES on its surface**, which the unified gather collects exactly
+like any other surface's deposits — so the fixture renders DIRECTLY and in MIRRORS with **no**
+special-case pass. The emitter is also a first-class gatherable surface in the probe pass and
+the gather's `firstHit` (intersected as an `EmitterPatch`; an emitter Hit carries the
+`kEmitterMaterial` sentinel and is gathered with an IDENTITY BRDF, f = 1).
 
-**[INVARIANT] The `EmissiveGather` coplanar-occlusion epsilon (the z-fix) must not be
-removed.** An occluder is ignored only if it sits *past* `bestT * (1 − kOcclusionCoincidence-
-Margin)` with `kOcclusionCoincidenceMargin = 1e-3` (`src/EmissiveGather.cpp:40,217`). This
-relative margin lets a ceiling mesh coplanar with the emitter (hit at `t ≈ bestT`) NOT
-self-occlude, while genuine occluders (walls, blocker spheres) sit far inside `bestT` and
-still block. Removing it brings back salt-and-pepper occlusion noise on the light panel.
+- `surfaceRadiance = luminousFlux / area / π` for a Lambertian emitter (`src/AreaLight.cpp`).
+- `ProbeGather::depositEmitters` (called once after the photon pass, before `buildIndex`)
+  tiles each patch with deposits and gives each `power = radiance · π · area / (4·N)`. With
+  the identity BRDF and the `4/π` splat-parity factor, the density estimate over the patch
+  reproduces `L = M/π` regardless of `N` or footprint `r` (uniform areal density ρ gathers to
+  `L = (4/π)ρ`, so total patch power = `radiance·π·area/4`). The panel reads at the SAME
+  brightness as the legacy `EmissiveGather` wrote (verified: identical saturated panel).
+- Deposits pass the same probe keep-test as every other bounce, so an off-camera fixture
+  costs nothing.
+
+**[LEGACY] `EmissiveGather` is retained ONLY for the `$probeGather false` path.** It composites
+the fixture by intersecting each pixel ray against the emitter patch and writing
+`surfaceRadiance` (no primary-ray-vs-light bypass in the tracer). Its coplanar-occlusion
+epsilon (the z-fix) must not be removed on that path: an occluder is ignored only if it sits
+*past* `bestT · (1 − kOcclusionCoincidenceMargin)` with `kOcclusionCoincidenceMargin = 1e-3`
+(`src/EmissiveGather.cpp`). This relative margin lets a ceiling mesh coplanar with the emitter
+(hit at `t ≈ bestT`) NOT self-occlude, while genuine occluders sit far inside `bestT` and
+still block. The emitter-patch geometry/intersection is shared with the probe gather via
+`EmitterPatch` (`include/EmitterPatch.h`).
 
 **[DETAIL]** The area light is pulled a few mm off the ceiling plane as a physical fix for
 panel z-fighting; the `EmissiveGather` epsilon is kept anyway as general numerical hygiene

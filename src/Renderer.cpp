@@ -520,6 +520,23 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
             gatherCell = sceneDepthFootprint;
         }
         (void)primaryCam;
+
+        // Unified fixture visibility: deposit each area light's own surface
+        // radiance as raw bounces on its surface (kept-near-probe like every other
+        // bounce), so the probe gather renders the lit fixture exactly like any
+        // other surface — visible directly AND in mirrors — with no special-case
+        // pass. Done BEFORE buildIndex so the deposits enter the spatial index.
+        // Spacing is tied to the gather footprint so several deposits land in each
+        // gather disc.
+        if (probeIndex)
+        {
+            const double depositSpacing = std::max(gatherCell * 0.5, 1e-6);
+            const ProbeGather::EmitterDepositResult emit =
+                ProbeGather::depositEmitters(scene.objects, *probeIndex,
+                                             depositSpacing, *bounceStore);
+            result.emitterDepositsKept = emit.kept;
+        }
+
         bounceStore->buildIndex(gatherCell);
         result.bounceStore = bounceStore;
     }
@@ -571,17 +588,11 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                     probeGatherMinRadius,
                     *imageBuffer);
             }
-            // Emitter fixtures are still composited via the emissive gather (a
-            // light surface's own radiance, not a gathered bounce).
-            if (imageBuffer && !debugCamera)
-            {
-                cr.emissive = EmissiveGather::run(
-                    scene.objects,
-                    cam,
-                    animationQuery.get(),
-                    settings.workerCount,
-                    *imageBuffer);
-            }
+            // Light fixtures are NOT a separate pass in probe mode: each emitter
+            // deposited its own surface radiance as raw bounces (depositEmitters
+            // above), so ProbeGather::run renders the fixture — directly AND in
+            // mirrors — like any other gathered surface. The legacy EmissiveGather
+            // path is used only by the $probeGather false branch below.
         }
         else
         {
