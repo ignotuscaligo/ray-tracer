@@ -307,7 +307,9 @@ The earlier hard tangent-plane cutoff (`0.25r`) over-rejected legitimate deposit
 near a CURVED surface's silhouette (their positions bow off the local tangent
 plane), darkening it into a black RIM. Normal agreement still rejects a
 perpendicular wall (dot≈0) but keeps a smoothly-curved same-surface neighborhood
-(dot≈1). `RawBounce` stores the deposit normal for this test (48 B/record).
+(dot≈1). `RawBounce` stores the deposit normal for this test, and a per-deposit
+photon TIME so the gather is time-aware (motion blur on the default path — §9d;
+52 B/record).
 
 **[INVARIANT] The reflected gather footprint is NOT inflated by 1/cos(view) at
 grazing.** A mirror is an unfolded straight path, so the reflected perpendicular
@@ -599,12 +601,62 @@ Sub-ulp emission times round to the EXCLUSIVE window end and fail the
 This was a real, fixed bug — the zero-shutter window is half-infinite on purpose
 (`src/Renderer.cpp`, `src/Worker.cpp:438-461`). Do not reintroduce an ε-window.
 
-**Deferred (Phase 2): continuous-time specular reflections.** The density grid
-(§6a) compresses bounce energy over the whole frame, so a time-varying object's
-REFLECTION in a mirror is smeared across the frame, not crisply time-resolved. The
-fan deliverable keeps the fan DIFFUSE so it images via the direct per-photon-time
-splat. Crisp time-varying reflections are out of scope; do not change the reflection
-storage to chase them here.
+### 9d. The probe gather is TIME-AWARE — [INVARIANT] camera rays carry a time
+
+**[INVARIANT] Every camera-side ray in the probe gather is cast at a SCENE TIME,
+not a hardcoded 0.** The probe pass, the per-pixel first hit, the specular `shade()`
+extension recursion, and the emitter intersection all resolve animated geometry at
+the ray's time via the same `castRayAt(..., time, animationQuery)` the photon pass
+uses (`src/ProbeGather.cpp`). `collectProbes` and `ProbeGather::run` take the frame
+time + shutter; `Renderer::renderFrame` forwards `settings.frameTime` /
+`settings.shutterTime` to both, mirroring the photon side. This is what makes
+animation work in the DEFAULT (`$probeGather` true) path — the camera sees the scene
+at the time the photons lit it.
+
+History: the probe gather was originally time-blind (every camera ray cast at
+`time = 0`), so an animated scene rendered with the default gather showed frame-0
+geometry while only the lighting moved, and the §9 motion-blur deliverable imaged
+only through the now-retired splat path. That contradiction is fixed; the splat path
+is no longer the motion-blur carrier.
+
+**[INVARIANT] Motion blur on the camera side is per-sample RANDOM shutter time.**
+With a finite shutter each per-pixel camera sample draws a uniform time in
+`[frameTime, frameTime + shutterTime)` (`$cameraTimeSamples` samples averaged),
+matching the per-photon emission-time model. The directly-visible AND the reflected
+(through `shade()`) moving geometry therefore integrate over the shutter into object
+motion blur. A zero shutter is a single fixed-time sample at `frameTime` (the exact
+static baseline at `frameTime` 0).
+
+**[INVARIANT] Probe temporal coverage and the gather's continuity are DECOUPLED.**
+The camera sees a moving object at a CONTINUUM of poses across the shutter, but
+probes collected at a single instant would miss the later poses, so the photon-pass
+keep-test would cull the deposits the camera actually gathers (the object goes dark).
+So the probe pass samples `$probeTimeSlices` DISCRETE times across the shutter and
+UNIONS the probes (`src/ProbeGather.cpp` `collectProbes`). Probe count governs
+COVERAGE — was a bounce near ANY camera-reachable pose — NOT gather smoothness. The
+GATHER itself stays CONTINUOUS: it keeps a deposit only if its photon time is within
+a shutter-sized temporal window of the camera ray time (`RawBounce::time`, +4 B/
+record, 52 B total). A deposit is kept if it is near a probe in SPACE (the keep-test,
+conservative) AND within a covered time window of the camera ray (the gather);
+discrete probes in time, continuous weighting in the gather.
+
+**[INVARIANT] The temporal window preserves STATIC-scene parity.** The window is the
+full shutter span, so a static surface — whose deposits sit at one world position
+regardless of their shutter-spread photon times — keeps every one of them (the time
+filter is inert on static geometry; the pre-animation baseline is bit-for-bit
+unchanged modulo Monte-Carlo noise). A MOVING surface self-filters SPATIALLY: a
+deposit from a far-off time was laid where the object was THEN, a different position
+already excluded by the radius search; the temporal window is the backstop against
+two distinct poses that overlap within the gather radius. Emitter deposits carry a
+TIMELESS sentinel time (`RawBounce::kTimelessDeposit`) and pass at any camera time
+(the fixture is static).
+
+Verified: spinning-fan (`CornellBoxFan.json`) in the default probe path renders the
+fan at the correct per-frame orientation (not pinned at frame 0) AND motion-blurs on
+fast frames; a moving object's reflection in a mirror blurs on fast frames and is
+sharp on slow ones; static scenes (`CornellBoxArea`) match the pre-change mean
+luminance within run-to-run noise. Pinned by `tests/test_AnimatedGather.cpp`
+(intersection-at-time + gather-at-time render).
 
 ---
 
