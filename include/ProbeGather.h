@@ -58,10 +58,24 @@ struct ProbeResult
 // not read the bounce store. `subSample` >= 1 strides the pixel grid (1 = every
 // pixel) to reduce probe-pass cost on large frames; the probes still tile the
 // visible surface because adjacent pixels project to overlapping footprints.
+//
+// TEMPORAL COVERAGE: with a finite shutter the camera sees animated geometry at a
+// CONTINUUM of poses across [frameTime, frameTime+shutterTime). A probe set
+// collected at a single instant would miss a fast-moving object's later poses, so
+// the photon-pass keep-test would CULL the deposits the camera will actually gather
+// — the moving object would go dark. So the probe pass is run at several DISCRETE
+// time slices spanning the shutter (`timeSlices`), unioning the probes. Probe count
+// governs COVERAGE (was a bounce near ANY camera-reachable pose), not gather
+// smoothness — the gather itself stays continuous, weighting deposits by photon
+// time. A zero/absent shutter collapses to a single slice at `frameTime` (the exact
+// static baseline when frameTime is 0). `timeSlices` is clamped to >= 1.
 ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
                           const Camera& camera,
                           const MaterialLibrary& materials,
                           const AnimationQuery* animation,
+                          float frameTime = 0.0f,
+                          float shutterTime = 0.0f,
+                          int timeSlices = 1,
                           size_t subSample = 1);
 
 // ===== Emitter deposits (fixture visibility, unified) =====
@@ -107,6 +121,20 @@ struct Result
 // resolution; the gather OWNS the whole image — both direct and reflected
 // pixels). `store` must have had buildIndex() called. `workerCount` parallelizes
 // the pixel loop.
+//
+// TIME: every camera-side ray (the per-pixel first hit, the specular `shade`
+// extension chain, and the emitter intersection) is cast at a CAMERA RAY TIME so
+// the scene's animated geometry is resolved at the pose the camera sees — NOT a
+// hardcoded 0. With a finite shutter each camera sample draws a RANDOM time in
+// [frameTime, frameTime+shutterTime) (matching the per-photon time model), so
+// directly-visible AND reflected moving geometry integrates over the shutter into
+// motion blur. The gather then keeps a deposit only if its photon time is within a
+// temporal window of the camera ray time (`|deposit.time - rayTime| <= window`),
+// so a moving surface's lighting is gathered from the photons that lit its
+// time-correct pose, not from every photon across the frame. A zero/absent shutter
+// uses a single fixed time `frameTime` (the exact static baseline at frameTime 0).
+// `cameraSamples` per pixel are averaged so the shutter is integrated (1 = a single
+// fixed-time sample for the no-blur / static path).
 Result run(const std::vector<std::shared_ptr<Object>>& objects,
            const std::shared_ptr<Camera>& camera,
            const BounceStore& store,
@@ -114,6 +142,9 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
            const AnimationQuery* animation,
            size_t workerCount,
            double minGatherRadius,
-           Buffer& buffer);
+           Buffer& buffer,
+           float frameTime = 0.0f,
+           float shutterTime = 0.0f,
+           int cameraSamples = 1);
 
 }  // namespace ProbeGather

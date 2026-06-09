@@ -285,7 +285,11 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         {
             probeResult = ProbeGather::collectProbes(
                 scene.objects, *primaryCam, *scene.materialLibrary,
-                animationQuery.get(), settings.probeSubSample);
+                animationQuery.get(),
+                static_cast<float>(settings.frameTime),
+                static_cast<float>(settings.shutterTime),
+                settings.probeTimeSlices,
+                settings.probeSubSample);
         }
         // The probe-index cell size = keepRadius so a keep query touches a 3x3x3
         // neighborhood. The gather's own bounce-index cell size is set later.
@@ -586,7 +590,10 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                     animationQuery.get(),
                     settings.workerCount,
                     probeGatherMinRadius,
-                    *imageBuffer);
+                    *imageBuffer,
+                    static_cast<float>(settings.frameTime),
+                    static_cast<float>(settings.shutterTime),
+                    settings.cameraTimeSamples);
             }
             // Light fixtures are NOT a separate pass in probe mode: each emitter
             // deposited its own surface radiance as raw bounces (depositEmitters

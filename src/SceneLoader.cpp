@@ -272,6 +272,16 @@ KeyframedAnimationQuery::AnimatedObject parseAnimationBlock(
     animated.baseRotation = loadTransform.rotation;
     animated.scale = loadTransform.scale;
 
+    // Seed position from the scene-load transform as a CONSTANT Property so an
+    // object animated by $rotation ONLY (no $position curve) holds its load-time
+    // position instead of teleporting to the origin. transformAt reads
+    // `position.evaluate(t)` unconditionally; without this seed an absent $position
+    // left hasPosition false and the query returned {0,0,0}. A $position curve below
+    // overwrites this. (A constant Property is time-independent, so a static-position
+    // animated object is unchanged from its load pose.)
+    animated.position = Property<Vector>(loadTransform.position);
+    animated.hasPosition = true;
+
     if (animationJson.contains("$rotationAxis"))
     {
         animated.rotationAxis = parseVectorFromJson(animationJson["$rotationAxis"]).normalized();
@@ -836,6 +846,10 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.bounceStoreCapacity, renderConfiguration, "$bounceStoreCapacity", logToStdout);
         setFromJsonIfPresent(settings.probeKeepRadiusScale, renderConfiguration, "$probeKeepRadiusScale", logToStdout);
         setFromJsonIfPresent(settings.probeSubSample, renderConfiguration, "$probeSubSample", logToStdout);
+        // Animation temporal-coverage tunables (probe time slices + camera motion-
+        // blur samples). Ignored when shutterTime == 0 (static baseline).
+        setFromJsonIfPresent(settings.probeTimeSlices, renderConfiguration, "$probeTimeSlices", logToStdout);
+        setFromJsonIfPresent(settings.cameraTimeSamples, renderConfiguration, "$cameraTimeSamples", logToStdout);
 
         if (renderConfiguration.contains("$renderPath"))
         {

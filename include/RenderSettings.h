@@ -144,4 +144,21 @@ struct RenderSettings
     // overlapping footprints so a modest stride still tiles the visible surface.
     // Default 1.
     size_t probeSubSample = 1;
+
+    // PROBE TEMPORAL COVERAGE (animation). With a finite shutter the camera sees
+    // animated geometry across a continuum of poses; the probe pass samples this
+    // many DISCRETE time slices across [frameTime, frameTime+shutterTime) and unions
+    // the probes so a fast-moving object's later poses are covered and its deposits
+    // survive the keep-test. Ignored when shutterTime == 0 (a single slice at
+    // frameTime — the static baseline). Probe count governs COVERAGE, not gather
+    // smoothness (the gather stays continuous, weighting deposits by photon time);
+    // a handful of slices conservatively covers normal motion. Default 5.
+    int probeTimeSlices = 5;
+
+    // CAMERA MOTION-BLUR SAMPLES (animation). With a finite shutter each pixel takes
+    // this many primary samples, each at a RANDOM time within the shutter, so the
+    // directly-visible AND reflected moving geometry integrates over its poses into
+    // motion blur. Ignored when shutterTime == 0 (one fixed-time sample — the exact
+    // static baseline). Higher = smoother blur at linear cost. Default 16.
+    int cameraTimeSamples = 16;
 };

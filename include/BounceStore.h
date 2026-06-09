@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -30,8 +31,8 @@
 // lock-free, past capacity it drops and bumps an overflow counter. The buffer is
 // never reallocated, so reader access (the grid build + the gather) is valid once
 // the photon pass drains.
-// Compact deposit record (48 B, not 80). `position`/`incoming`/`normal` are stored
-// as 3 floats each rather than `Vector` (32 B, AVX-padded) because the store holds
+// Compact deposit record (52 B). `position`/`incoming`/`normal` are stored as 3
+// floats each rather than `Vector` (32 B, AVX-padded) because the store holds
 // MILLIONS of these and the gather only needs single-precision positions for the
 // radius search and BRDF evaluation. The accessors return `Vector` so call sites
 // stay typed. Trivially copyable for the lock-free append.
@@ -42,11 +43,25 @@
 // distance cutoff. Normal agreement still rejects an adjacent PERPENDICULAR surface
 // (corner light leak) but does NOT reject a smoothly-CURVED same surface near its
 // silhouette (which the distance cutoff over-darkened into a black rim).
+//
+// `time` is the DEPOSIT TIME — the emission timestamp the photon carried when it
+// landed here (the same time the scene's animated geometry was resolved at, so the
+// deposit position is the time-correct pose). The unified gather weights a deposit
+// by how close its time is to the CAMERA RAY's sampled shutter time, so a moving
+// object's lighting/silhouette integrates over the shutter into motion blur instead
+// of smearing every photon's time together. An emitter deposit uses
+// `kTimelessDeposit` (it is static and gathers at any camera time). (+4 B/record vs
+// the pre-animation 48 B store — the cost of time-correct gather.)
 struct RawBounce
 {
+    // Sentinel deposit time: this deposit is time-independent (e.g. an emitter
+    // patch) and passes the gather's temporal window at any camera ray time.
+    static constexpr float kTimelessDeposit = std::numeric_limits<float>::infinity();
+
     float px = 0.0f, py = 0.0f, pz = 0.0f;  // world-space bounce position
     float ix = 0.0f, iy = 0.0f, iz = 0.0f;  // incoming photon travel direction
     float nx = 0.0f, ny = 0.0f, nz = 0.0f;  // surface normal at the deposit
+    float time = kTimelessDeposit;          // photon emission time at this deposit
     Color power{0.0f, 0.0f, 0.0f};          // photon's carried power at this bounce
 
     RawBounce() = default;
@@ -72,6 +87,22 @@ struct RawBounce
         , nx(static_cast<float>(surfaceNormal.x))
         , ny(static_cast<float>(surfaceNormal.y))
         , nz(static_cast<float>(surfaceNormal.z))
+        , power(pow)
+    {
+    }
+
+    RawBounce(const Vector& position, const Vector& incoming, const Vector& surfaceNormal,
+              float depositTime, const Color& pow)
+        : px(static_cast<float>(position.x))
+        , py(static_cast<float>(position.y))
+        , pz(static_cast<float>(position.z))
+        , ix(static_cast<float>(incoming.x))
+        , iy(static_cast<float>(incoming.y))
+        , iz(static_cast<float>(incoming.z))
+        , nx(static_cast<float>(surfaceNormal.x))
+        , ny(static_cast<float>(surfaceNormal.y))
+        , nz(static_cast<float>(surfaceNormal.z))
+        , time(depositTime)
         , power(pow)
     {
     }

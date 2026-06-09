@@ -27,6 +27,24 @@ constexpr double kSelfHitThreshold = std::numeric_limits<double>::epsilon();
 constexpr int kMaxSpecularDepth = 8;
 constexpr double kReflectionEpsilon = 1e-3;
 
+// Gather temporal window: a deposit is gathered at a camera ray time `tCam` only if
+// |deposit.time - tCam| <= halfWindow. The window is sized to the SHUTTER SPAN so:
+//   - STATIC geometry keeps exact brightness parity: a static surface's deposits sit
+//     at one world position regardless of their (shutter-spread) photon times, and a
+//     camera ray at any time within the shutter is within `shutter` of every one of
+//     them, so none is rejected (the time filter is inert on static geometry — the
+//     pre-animation baseline is unchanged).
+//   - MOVING geometry self-filters SPATIALLY: a deposit from a photon at a time far
+//     from tCam was laid down where the object was THEN — a different world position
+//     — so the radius search already excludes it. The temporal window is the
+//     backstop against two distinct poses that happen to overlap within the gather
+//     radius bleeding together (it bounds how far apart in time co-located deposits
+//     may be gathered). A zero shutter collapses the window to ~0 (single instant).
+// Sizing it to the full shutter (not a tight fraction) is the conservative choice
+// that guarantees static parity; the blur itself comes from the per-camera-sample
+// random shutter time integrating poses, not from a tight temporal cut.
+constexpr float kEmitterTimeless = RawBounce::kTimelessDeposit;
+
 // Sentinel material index marking a Hit on an emitter (AreaLight) surface. The
 // emitter is not a scene Volume / has no MaterialLibrary entry, so a hit on its
 // patch carries this index instead. The gather treats an emitter hit as a
@@ -124,13 +142,14 @@ std::optional<Hit> extendToNonDelta(const std::vector<std::shared_ptr<Object>>& 
                                     std::vector<Hit>& castBuffer,
                                     RandomGenerator& generator,
                                     Ray ray,
+                                    float time,
                                     const std::vector<EmitterPatch>& patches,
                                     bool& outTraversedDelta)
 {
     outTraversedDelta = false;
     for (int depth = 0; depth < kMaxSpecularDepth; ++depth)
     {
-        std::optional<Hit> hit = firstHit(objects, ray, castBuffer, 0.0f, animation, &patches);
+        std::optional<Hit> hit = firstHit(objects, ray, castBuffer, time, animation, &patches);
         if (!hit)
         {
             return std::nullopt;
@@ -171,6 +190,7 @@ void collectProbeRows(size_t rowBegin,
                       const MaterialLibrary& materials,
                       const AnimationQuery* animation,
                       const std::vector<EmitterPatch>& patches,
+                      const std::vector<float>& times,
                       size_t subSample,
                       ProbeResult& out)
 {
@@ -184,22 +204,33 @@ void collectProbeRows(size_t rowBegin,
         {
             const PixelCoords coord{x, y};
             const Ray ray = camera.generatePrimaryRay(coord);
-            ++out.cameraRays;
 
-            bool traversedDelta = false;
-            std::optional<Hit> hit = extendToNonDelta(
-                objects, materials, animation, castBuffer, generator, ray, patches,
-                traversedDelta);
-            if (traversedDelta)
+            // Sample this pixel's probe ray at each discrete time slice spanning the
+            // shutter and union the resulting non-delta hit points. With moving
+            // geometry the hit point migrates across the slices, so the union COVERS
+            // every pose the camera sees during the shutter — exactly the surface
+            // regions the photon-pass keep-test must retain deposits for. A static
+            // scene's hit point is identical across slices, so this degenerates to
+            // the single-instant probe set (the deposits coincide; the index dedups
+            // by spatial cell). One slice => the original single-time behavior.
+            for (const float time : times)
             {
-                ++out.deltaExtensions;
+                ++out.cameraRays;
+                bool traversedDelta = false;
+                std::optional<Hit> hit = extendToNonDelta(
+                    objects, materials, animation, castBuffer, generator, ray, time,
+                    patches, traversedDelta);
+                if (traversedDelta)
+                {
+                    ++out.deltaExtensions;
+                }
+                if (!hit)
+                {
+                    ++out.misses;
+                    continue;
+                }
+                out.probes.push_back(hit->position);
             }
-            if (!hit)
-            {
-                ++out.misses;
-                continue;
-            }
-            out.probes.push_back(hit->position);
         }
     }
 }
@@ -210,6 +241,9 @@ ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
                           const Camera& camera,
                           const MaterialLibrary& materials,
                           const AnimationQuery* animation,
+                          float frameTime,
+                          float shutterTime,
+                          int timeSlices,
                           size_t subSample)
 {
     ProbeResult result;
@@ -221,14 +255,36 @@ ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
     }
     const size_t stride = std::max<size_t>(1, subSample);
 
+    // Discrete probe time slices spanning the shutter [frameTime, frameTime+shutter).
+    // A finite shutter samples `timeSlices` evenly across the half-open window (the
+    // endpoints t_open and t_open+shutter*(slices-1)/slices, so the last slice stays
+    // inside the window like the photon emission times); a zero/absent shutter is a
+    // single slice at frameTime (the static baseline). See collectProbeRows for why
+    // the union over slices is the temporal coverage the keep-test needs.
+    std::vector<float> times;
+    const int slices = (shutterTime > 0.0f) ? std::max(1, timeSlices) : 1;
+    times.reserve(static_cast<size_t>(slices));
+    if (slices <= 1)
+    {
+        times.push_back(frameTime);
+    }
+    else
+    {
+        for (int i = 0; i < slices; ++i)
+        {
+            const float frac = static_cast<float>(i) / static_cast<float>(slices);
+            times.push_back(frameTime + frac * shutterTime);
+        }
+    }
+
     const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
 
     // The probe pass is camera-ray-scale and cheap; run it single-threaded so the
     // probe list (and its diagnostics) accumulate without cross-thread merging.
     // For very large frames this can be parallelized like the gather; not needed
     // at current resolutions.
-    collectProbeRows(0, height, objects, camera, materials, animation, patches, stride,
-                     result);
+    collectProbeRows(0, height, objects, camera, materials, animation, patches, times,
+                     stride, result);
     return result;
 }
 
@@ -336,6 +392,10 @@ struct Context
     std::vector<EmitterPatch> patches;
     double pixelHalfAngle;
     double minGatherRadius;
+    float timeHalfWindow;  // gather temporal window half-width (shutter-sized)
+    float frameTime;       // shutter open instant
+    float shutterSpan;     // shutter duration (0 => static / single instant)
+    int cameraSamples;     // per-pixel shutter samples (1 => single fixed-time)
 };
 
 // Density estimate of the radiance leaving a non-delta surface point toward the
@@ -366,6 +426,7 @@ Color gatherRadiance(const Context& ctx,
                      const std::shared_ptr<Material>& material,
                      const Vector& viewer,
                      double footprintRadius,
+                     float rayTime,
                      size_t& outDeposits)
 {
     outDeposits = 0;
@@ -426,6 +487,20 @@ Color gatherRadiance(const Context& ctx,
     for (const std::size_t index : neighbors)
     {
         const RawBounce& record = ctx.store[index];
+
+        // TEMPORAL WINDOW. Keep a deposit only if its photon time is within the
+        // gather's half-window of this camera ray's time. A timeless deposit (an
+        // emitter patch, time == +inf) always passes. On a STATIC surface every
+        // co-located deposit is within the shutter-sized window of any camera ray
+        // time, so none is dropped (exact baseline). On a MOVING surface a deposit
+        // from a far-off time was laid down at a different position and is already
+        // outside the spatial radius — this is the backstop for two poses that
+        // overlap spatially within the gather radius.
+        if (record.time != kEmitterTimeless &&
+            std::abs(record.time - rayTime) > ctx.timeHalfWindow)
+        {
+            continue;
+        }
 
         if (isEmitter)
         {
@@ -546,6 +621,7 @@ Color shade(const Context& ctx,
             const Vector& direction,
             int depth,
             double pathLength,
+            float rayTime,
             std::vector<Hit>& castBuffer,
             RandomGenerator& generator,
             size_t& outDeposits)
@@ -557,7 +633,7 @@ Color shade(const Context& ctx,
 
     const Ray ray{origin, direction};
     std::optional<Hit> hit =
-        firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation, &ctx.patches);
+        firstHit(ctx.objects, ray, castBuffer, rayTime, ctx.animation, &ctx.patches);
     if (!hit)
     {
         return Color{0.0f, 0.0f, 0.0f};
@@ -584,7 +660,8 @@ Color shade(const Context& ctx,
         const Vector nextDir = Vector::normalized(s.direction);
         const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
         const Color child = shade(ctx, nextOrigin, nextDir, depth + 1,
-                                  pathLength + segment, castBuffer, generator, outDeposits);
+                                  pathLength + segment, rayTime, castBuffer, generator,
+                                  outDeposits);
         return s.weight * child;
     }
 
@@ -621,7 +698,7 @@ Color shade(const Context& ctx,
             footprint /= std::min(1.0, std::max(0.5, cosView));
         }
     }
-    return gatherRadiance(ctx, *hit, material, origin, footprint, outDeposits);
+    return gatherRadiance(ctx, *hit, material, origin, footprint, rayTime, outDeposits);
 }
 
 void gatherRows(size_t rowBegin,
@@ -642,7 +719,18 @@ void gatherRows(size_t rowBegin,
             const PixelCoords coord{x, y};
 
             const bool dofActive = (camera.projection() == Camera::Projection::RealLens);
-            const int primarySamples = dofActive ? kCameraSamplesPerPixel : 1;
+            // MOTION BLUR: with a finite shutter, take several primary samples per
+            // pixel, each at a RANDOM time within the shutter. The scene's animated
+            // geometry is resolved at that time, so the directly-visible (and, via
+            // shade(), reflected) moving surface integrates over its poses across the
+            // shutter — object motion blur. The per-sample random time mirrors the
+            // per-photon emission-time model so the camera side and the photon side
+            // agree on the time distribution. DOF already multisamples; reuse those
+            // samples for the time integral (take the max of the two sample counts).
+            const bool motionActive = (ctx.shutterSpan > 0.0f) && (ctx.cameraSamples > 1);
+            const int motionSamples = motionActive ? ctx.cameraSamples : 1;
+            const int dofSamples = dofActive ? kCameraSamplesPerPixel : 1;
+            const int primarySamples = std::max(dofSamples, motionSamples);
 
             Color pixelAccum{0.0f, 0.0f, 0.0f};
             int validSamples = 0;
@@ -652,12 +740,22 @@ void gatherRows(size_t rowBegin,
 
             for (int primary = 0; primary < primarySamples; ++primary)
             {
+                // Camera ray time for this sample: a uniform draw across the shutter
+                // (so poses integrate into blur) or the fixed frame instant for a
+                // zero shutter / static scene (the exact baseline at frameTime 0).
+                const float sampleTime =
+                    motionActive
+                        ? ctx.frameTime +
+                              static_cast<float>(generator.value(ctx.shutterSpan))
+                        : ctx.frameTime;
+
                 const Ray ray = dofActive
                     ? camera.generatePrimaryRay(coord, &generator)
                     : camera.generatePrimaryRay(coord);
 
                 std::optional<Hit> hit =
-                    firstHit(ctx.objects, ray, castBuffer, 0.0f, ctx.animation, &ctx.patches);
+                    firstHit(ctx.objects, ray, castBuffer, sampleTime, ctx.animation,
+                             &ctx.patches);
                 if (!hit)
                 {
                     ++stats.pixelsMiss;
@@ -683,7 +781,8 @@ void gatherRows(size_t rowBegin,
                         pixelFootprintRadius(ctx, camera, coord, *hit, hit->distance);
                     size_t deposits = 0;
                     const Color radiance =
-                        gatherRadiance(ctx, *hit, material, ray.origin, footprint, deposits);
+                        gatherRadiance(ctx, *hit, material, ray.origin, footprint,
+                                       sampleTime, deposits);
                     pixelAccum += radiance;
                     depositsThisPixel += deposits;
                     ++validSamples;
@@ -712,7 +811,7 @@ void gatherRows(size_t rowBegin,
                     const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
                     size_t deposits = 0;
                     accumulated += s.weight * shade(ctx, nextOrigin, nextDir, /*depth=*/1,
-                                                    /*pathLength=*/hit->distance,
+                                                    /*pathLength=*/hit->distance, sampleTime,
                                                     castBuffer, generator, deposits);
                     depositsThisPixel += deposits;
                     ++extValid;
@@ -769,7 +868,10 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
            const AnimationQuery* animation,
            size_t workerCount,
            double minGatherRadius,
-           Buffer& buffer)
+           Buffer& buffer,
+           float frameTime,
+           float shutterTime,
+           int cameraSamples)
 {
     Result result;
     if (!camera)
@@ -786,8 +888,25 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
     const double pixelHalfAngle =
         0.5 * Utility::radians(camera->verticalFieldOfView()) / static_cast<double>(height);
 
-    const Context ctx{objects,        store,          materials,       animation,
-                      collectEmitterPatches(objects), pixelHalfAngle, minGatherRadius};
+    // Gather temporal half-window = the full shutter span (see kEmitterTimeless note
+    // above): wide enough to never reject a static surface's shutter-spread deposits
+    // (exact brightness parity), with moving surfaces self-filtering spatially. A
+    // zero shutter => 0 window => only same-instant deposits, which on a static scene
+    // is every deposit (all stamped at frameTime).
+    const float shutterSpan = std::max(0.0f, shutterTime);
+    const int samples = std::max(1, cameraSamples);
+
+    const Context ctx{objects,
+                      store,
+                      materials,
+                      animation,
+                      collectEmitterPatches(objects),
+                      pixelHalfAngle,
+                      minGatherRadius,
+                      shutterSpan,
+                      frameTime,
+                      shutterSpan,
+                      samples};
 
     const size_t threads = std::max<size_t>(1, workerCount);
     const size_t effectiveThreads = std::min(threads, height);
