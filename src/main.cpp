@@ -129,7 +129,12 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& e)
     {
+        // A failed render must report failure to the shell so CI gates and
+        // scripts keyed on exit status don't treat a crash as a success. Print
+        // the error and return a nonzero code instead of falling through to the
+        // success path below.
         std::cout << "ERROR: " << e.what() << std::endl;
+        return 1;
     }
 
     std::cout << "Goodbye!" << std::endl;

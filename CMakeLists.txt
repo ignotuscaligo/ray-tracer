@@ -365,6 +365,27 @@ target_sources(ray-tracer
         src/main.cpp
 )
 
+# Regression gate: a failed render (e.g. an unloadable scene) must report a
+# NONZERO exit code so CI/scripts keyed on exit status see the failure. The
+# catch block in src/main.cpp used to print ERROR and fall through to return 0,
+# masking failures. These CTest cases pin the contract at the process boundary
+# (the only place the exit code is observable).
+include(CTest)
+add_test(
+    NAME ray-tracer-bad-scene-exits-nonzero
+    COMMAND ray-tracer "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/MalformedScene.json"
+)
+set_tests_properties(ray-tracer-bad-scene-exits-nonzero
+    PROPERTIES WILL_FAIL TRUE
+)
+add_test(
+    NAME ray-tracer-missing-file-exits-nonzero
+    COMMAND ray-tracer "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/does-not-exist.json"
+)
+set_tests_properties(ray-tracer-missing-file-exits-nonzero
+    PROPERTIES WILL_FAIL TRUE
+)
+
 # ===== GUI Editor
 
 # The Dear ImGui Conan package ships the platform/renderer backend sources under
