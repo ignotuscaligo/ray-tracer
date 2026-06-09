@@ -43,6 +43,7 @@ target_sources(tests
         test_Sphere.cpp
         test_Quad.cpp
         test_TriangleWatertight.cpp
+        test_SelfHitEpsilon.cpp
         test_CameraExposure.cpp
         test_CameraProjection.cpp
         test_BSDF.cpp

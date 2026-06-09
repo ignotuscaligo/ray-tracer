@@ -17,7 +17,23 @@
 namespace
 {
 
-constexpr double selfHitThreshold = std::numeric_limits<double>::epsilon();
+// SELF-HIT / SHADOW-ACNE epsilon (world units). A ray spawned EXACTLY on a
+// surface (the photon-pass continuation in Material::generateDaughters sets the
+// outgoing ray origin to the bare hit position, and the camera splat's occlusion
+// ray starts at the hit too) can re-intersect the SAME surface at a tiny positive
+// distance: the primitive intersectors have no positive t-floor of their own (the
+// watertight triangle test only rejects t <= 0; the sphere test uses a 1e-6
+// PARAMETRIC floor that shrinks with a long direction). At this renderer's scale
+// (Cornell box ~ hundreds of world units) a double-precision self re-hit lands
+// around 1e-13, which sails past the old DBL_EPSILON (~2.2e-16) threshold and
+// causes a double deposit / double attenuation (shadow acne, energy error).
+//
+// A small ABSOLUTE world-space floor rejects those re-hits while staying far below
+// any real feature size. It is the same order as the gather path's ray-spawn
+// offset (kReflectionEpsilon = 1e-3 in ProbeGather), keeping the photon side and
+// the camera side consistent. selfHitThreshold is compared against hit.distance
+// (a Euclidean world distance), so the unit is correct.
+constexpr double selfHitThreshold = 1e-4;
 
 // Firefly fix diagnostics. g_splatTotal counts every splat contribution that
 // reached the footprint-area stage; g_splatRadiusClamped counts those whose raw

@@ -194,6 +194,35 @@ deliberately reversed — architecture-vision "Termination switched to ABSOLUTE 
 legitimate improvement is to *derive* the default from mean emission magnitude — but that
 changes the [INVARIANT] semantics and must be recorded here first.
 
+### 2b. Self-hit / shadow-acne epsilon — [INVARIANT] keep an absolute world-space floor
+
+**[INVARIANT] A spawned ray must not re-intersect the surface it was spawned on.**
+The photon pass spawns each continuation ray EXACTLY at the bare hit position
+(`Material::generateDaughters` sets `out.ray = {position, direction}` with no
+offset, `src/Material.cpp`), and the camera splat's occlusion ray starts at the
+hit too. The geometric primitives have NO matching positive world-space t-floor of
+their own — the watertight triangle test only rejects `t <= 0` (`src/Ray.cpp`
+`rayIntersectsTriangle`) and the sphere test's `1e-6` floor is PARAMETRIC (it
+shrinks with a non-unit direction, `src/Ray.cpp` `rayIntersectsSphere`). So the
+only world-space backstop is `Worker.cpp`'s `selfHitThreshold`, compared against
+`hit.distance`.
+
+`selfHitThreshold` is an ABSOLUTE world-space `1e-4` (`src/Worker.cpp`), NOT
+`DBL_EPSILON`. A grazing continuation off a curved surface self-re-intersects at a
+tiny-but-positive distance (~`1e-4` at Cornell scale) that sails past `DBL_EPSILON`
+(~`2.2e-16`); admitting it double-deposits / double-attenuates that photon (shadow
+acne, energy error). The `1e-4` floor is the same order as the gather path's
+ray-spawn offset (`kReflectionEpsilon = 1e-3`, `src/ProbeGather.cpp`), so the
+photon side and the camera side are consistent. Pinned by
+`tests/test_SelfHitEpsilon.cpp` (a grazing self-re-hit lands in the
+`(DBL_EPSILON, 1e-4)` band the floor rejects; a legitimate far hit stays above
+`1e-4` and is kept).
+
+**Do not "fix" this by:** lowering `selfHitThreshold` back toward machine epsilon
+("the threshold looks too coarse"). At this renderer's scale `1e-4` is far below
+any real feature size and far above float self-intersection noise; a near-zero
+threshold reintroduces the acne.
+
 ---
 
 ## 3. Gather is additive — NO 1/N count-normalization — looks like a bug, it is not
