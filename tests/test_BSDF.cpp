@@ -212,6 +212,59 @@ TEST_CASE("Microfacet samples stay in the hemisphere with bounded throughput", "
     REQUIRE(valid > 0);
 }
 
+TEST_CASE("Microfacet VNDF weight stays <= 1 across grazing incidence angles", "[BSDF][VNDF]")
+{
+    // Review 2b: with plain-NDF sampling the reflection throughput
+    // F*G2*(wi.wh)/(cos_i*cos_h) can EXCEED 1 at grazing incidence with a
+    // half-vector tilted toward wi — a per-bounce energy gain (fireflies) that
+    // violates the monotonic-decay termination premise (DESIGN §2 / §2b). VNDF
+    // sampling (Heitz 2018) makes the weight F*G2/G1(wi) = F*G1(wo) <= 1 by
+    // construction. Sweep incidence from near-normal to extreme grazing across
+    // several roughnesses and MANY seeds; EVERY valid sample's per-channel weight
+    // must be <= 1. The existing bounded-throughput test only probed one
+    // near-normal incidence with one seed and would not have caught this.
+    const UnitVector normal = UnitVector::alreadyNormalized(Vector{0.0, 0.0, 1.0});
+
+    // White albedo: F0 = 1, so Fresnel is exactly 1 and the weight is the pure
+    // geometry term G2/G1 — the worst case for the <= 1 bound (no Fresnel headroom).
+    for (const double roughness : {0.05, 0.2, 0.5, 0.8, 1.0})
+    {
+        MicrofacetMaterial glossy{"g", Color{1.0f, 1.0f, 1.0f}, roughness};
+
+        // Incidence angle from ~5 deg off normal to ~89.4 deg (extreme grazing).
+        for (int deg = 5; deg <= 89; deg += 4)
+        {
+            const double theta = static_cast<double>(deg) * Utility::pi / 180.0;
+            // Incident travels INTO the surface: wi = -incident must have wi.n > 0.
+            const Vector incident =
+                Vector::normalized(Vector{std::sin(theta), 0.0, -std::cos(theta)});
+
+            RandomGenerator gen{static_cast<unsigned>(deg * 131 + 7)};
+            int valid = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                const BSDFSample s = glossy.sample(incident, normal, gen);
+                if (!s.valid)
+                {
+                    continue;
+                }
+                ++valid;
+                // The headline bound: no channel may gain energy on a bounce.
+                INFO("roughness=" << roughness << " incidence_deg=" << deg
+                                  << " weight=(" << s.weight.red << "," << s.weight.green
+                                  << "," << s.weight.blue << ")");
+                REQUIRE(s.weight.red <= 1.0f + 1e-5f);
+                REQUIRE(s.weight.green <= 1.0f + 1e-5f);
+                REQUIRE(s.weight.blue <= 1.0f + 1e-5f);
+                REQUIRE(s.weight.red >= 0.0f);
+                // Sampled direction stays in the upper hemisphere.
+                REQUIRE(Vector::dot(s.direction, normal) >= -1e-9);
+            }
+            REQUIRE(valid > 0);
+        }
+    }
+}
+
 TEST_CASE("Daughter counts reflect lobe width", "[BSDF]")
 {
     // The fan-out count is the material's expression of how many directional

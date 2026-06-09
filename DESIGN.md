@@ -143,7 +143,16 @@ first. There is NO Russian roulette and NO survivor reweight.**
 - Loop terminator: `if (!decayAlive || bounces >= bounceThreshold) break;`
   (`src/Worker.cpp:543-547`).
 - Magnitude is monotonic non-increasing: every BSDF weight is ≤ 1, so each bounce only
-  attenuates (`src/Worker.cpp:536-542` comment).
+  attenuates (`src/Worker.cpp:536-542` comment). **[INVARIANT] This bound must hold for
+  EVERY material**, including the glossy Microfacet/GGX lobe. Microfacet uses **VNDF
+  sampling** (Heitz 2018) precisely so its reflection throughput is `F·G2/G1(wi) =
+  F·G1(wo) ≤ 1` by construction (`src/MicrofacetMaterial.cpp`). The earlier plain-NDF
+  sampler's weight `F·G2·(wi·wh)/(cos_i·cos_h)` could EXCEED 1 at grazing incidence — a
+  per-bounce energy GAIN that breaks this premise (fireflies, photons that outlive the
+  decay model). A new glossy/specular material must likewise keep `weight ≤ 1`; if a
+  sampler cannot, this monotonicity claim (and the termination model built on it) does
+  not hold. Pinned by the grazing-incidence weight sweep `tests/test_BSDF.cpp`
+  (`[VNDF]`).
 - The bounce cap is the hard safety bound guaranteeing termination even for an
   albedo→1 material that never decays (`src/Worker.cpp:532-535`). Default `bounceThreshold
   = 1` (`include/RenderSettings.h:22`).

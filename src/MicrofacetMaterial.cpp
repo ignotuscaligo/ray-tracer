@@ -76,14 +76,50 @@ Color schlickFresnel(const Color& F0, double cosTheta)
     };
 }
 
-// Sample a half-vector from GGX's D distribution in local space (Walter 2007 eq. 35-36).
-Vector ggxSampleHalfLocal(double u1, double u2, double alpha)
+// Sample the GGX distribution of VISIBLE normals (Heitz 2018, "Sampling the GGX
+// Distribution of Visible Normals", JCGT 7(4)). `Ve` is the VIEW direction (wi)
+// expressed in the local frame (+Z = surface normal), pointing away from the
+// surface (Ve.z > 0). Returns the sampled microfacet normal (half-vector) in the
+// same local frame. Isotropic roughness, so alphaX == alphaY == alpha.
+//
+// Why VNDF instead of plain NDF (Walter 2007) sampling: the NDF sampler's
+// reflection throughput f*cos/pdf = F*G2*(wi.wh)/(cos_i*cos_h) is NOT bounded by 1
+// — at grazing incidence with a half-vector tilted toward wi it can exceed 1,
+// giving a per-bounce ENERGY GAIN (fireflies) and violating the renderer's
+// monotonic-decay termination premise (DESIGN §2 / §2b). Sampling from the
+// distribution of *visible* normals cancels the (wi.wh)/cos_i geometry in the
+// estimator, so the weight collapses to F*G2/G1(wi) = F*G1(wo) <= 1 by
+// construction. Heitz 2018 §3.2 (the "bounded, lower-variance" sampler).
+Vector ggxSampleVisibleNormalLocal(const Vector& Ve, double alpha, double u1, double u2)
 {
-    const double phi = Utility::pi2 * u1;
-    const double cosTheta2 = (1.0 - u2) / (1.0 + (alpha * alpha - 1.0) * u2);
-    const double cosTheta = std::sqrt(std::max(0.0, cosTheta2));
-    const double sinTheta = std::sqrt(std::max(0.0, 1.0 - cosTheta2));
-    return Vector{sinTheta * std::cos(phi), sinTheta * std::sin(phi), cosTheta};
+    // 1. Stretch the view direction to the hemisphere configuration (alpha -> 1).
+    Vector Vh = Vector::normalized(Vector{alpha * Ve.x, alpha * Ve.y, Ve.z});
+
+    // 2. Orthonormal basis (Heitz's tangent frame around Vh). Special-case the
+    //    grazing/degenerate case where Vh is along +Z.
+    const double lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    Vector T1 = (lensq > 0.0)
+                    ? Vector{-Vh.y, Vh.x, 0.0} * (1.0 / std::sqrt(lensq))
+                    : Vector{1.0, 0.0, 0.0};
+    Vector T2 = Vector::cross(Vh, T1);
+
+    // 3. Uniformly sample a point on the projected disk, then warp the lower half
+    //    to account for the projected hemisphere (Heitz eq. for the disk remap).
+    const double r = std::sqrt(u1);
+    const double phi = Utility::pi2 * u2;
+    const double t1 = r * std::cos(phi);
+    double t2 = r * std::sin(phi);
+    const double s = 0.5 * (1.0 + Vh.z);
+    t2 = (1.0 - s) * std::sqrt(std::max(0.0, 1.0 - t1 * t1)) + s * t2;
+
+    // 4. Reproject onto the hemisphere around Vh.
+    const double t3 = std::sqrt(std::max(0.0, 1.0 - t1 * t1 - t2 * t2));
+    Vector Nh = T1 * t1 + T2 * t2 + Vh * t3;
+
+    // 5. Unstretch back to the ellipsoid configuration -> the microfacet normal.
+    Vector Ne = Vector::normalized(
+        Vector{alpha * Nh.x, alpha * Nh.y, std::max(0.0, Nh.z)});
+    return Ne;
 }
 
 }
@@ -119,9 +155,16 @@ BSDFSample MicrofacetMaterial::sample(const Vector& incident, const UnitVector& 
     Vector tangent, bitangent;
     buildBasis(normal, tangent, bitangent);
 
+    // Express wi (the view direction) in the local frame (+Z = surface normal) for
+    // VNDF sampling. cosThetaI > 0 (checked above) so Ve.z > 0.
+    const Vector Ve{Vector::dot(wi, tangent), Vector::dot(wi, bitangent), cosThetaI};
+
     const double u1 = generator.value();
     const double u2 = generator.value();
-    const Vector hLocal = ggxSampleHalfLocal(u1, u2, m_alpha);
+
+    // VNDF SAMPLING (Heitz 2018). Sample the microfacet normal from the
+    // distribution of VISIBLE normals so the reflection throughput stays <= 1.
+    const Vector hLocal = ggxSampleVisibleNormalLocal(Ve, m_alpha, u1, u2);
 
     // Half-vector in world space.
     Vector wh = tangent * hLocal.x + bitangent * hLocal.y + normal * hLocal.z;
@@ -146,18 +189,21 @@ BSDFSample MicrofacetMaterial::sample(const Vector& incident, const UnitVector& 
         return s;
     }
 
-    // PDF for h sampled from D: p_h = D * cos(theta_h). Jacobian of the wh -> wo
-    // reflection map gives 1/(4 |wi . wh|), so p_wo = D * cos(theta_h) / (4 |wi . wh|).
+    // VNDF pdf of the sampled wo: p(wo) = D_vis(wh) / (4 |wi.wh|), where
+    // D_vis(wh) = G1(wi) * max(0, wi.wh) * D(wh) / cos_i. The |wi.wh| cancels, so
+    //   p(wo) = G1(wi) * D(wh) / (4 cos_i).
     const double D = ggxD(cosThetaH, m_alpha);
-    const double pdfWo = D * cosThetaH / (4.0 * wiDotWh);
+    const double G1i = smithG1(cosThetaI, m_alpha);
+    const double pdfWo = (G1i * D) / (4.0 * cosThetaI);
 
-    // BRDF f = F * D * G2 / (4 cos_i cos_o)
+    // VNDF throughput weight. With f = F * D * G2 / (4 cos_i cos_o) and the VNDF
+    // pdf above, the throughput f*cos_o/pdf SIMPLIFIES to:
+    //   weight = F * G2 / G1(wi) = F * G1(wo)   (separable Smith: G2 = G1i*G1o)
+    // which is <= 1 by construction (G1(wo) in [0,1], Fresnel F in [0,1]) — no
+    // grazing-incidence energy gain, restoring the monotonic-decay invariant.
     const double G2 = smithG2(cosThetaI, cosThetaO, m_alpha);
     const Color F = schlickFresnel(m_albedo, wiDotWh);
-
-    // Throughput weight = f * cos(theta_o) / pdf
-    //                   = F * G2 * |wi . wh| / (cos_i * cos_h)
-    const double weightScalar = (G2 * wiDotWh) / (cosThetaI * cosThetaH);
+    const double weightScalar = (G1i > 0.0) ? (G2 / G1i) : 0.0;
 
     s.direction = wo;
     s.weight = F * static_cast<float>(weightScalar);
@@ -277,6 +323,11 @@ double MicrofacetMaterial::pdf(const Vector& wi, const Vector& wo, const UnitVec
         return 0.0;
     }
 
+    // VNDF pdf (matches sample()): p(wo) = G1(wi) * D(wh) / (4 cos_i). This is the
+    // density of the visible-normal sampler, so it is the correct query pdf for any
+    // MIS that pairs with sample(). (The plain-NDF pdf D*cos_h/(4|wi.wh|) was the
+    // old NDF sampler's density and no longer matches the live sampler.)
     const double D = ggxD(cosThetaH, m_alpha);
-    return D * cosThetaH / (4.0 * wiDotWh);
+    const double G1i = smithG1(cosThetaI, m_alpha);
+    return (G1i * D) / (4.0 * cosThetaI);
 }
