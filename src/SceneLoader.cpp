@@ -12,6 +12,7 @@
 #include "ParallelLight.h"
 #include "PlaneVolume.h"
 #include "Quaternion.h"
+#include "QuadVolume.h"
 #include "SphereVolume.h"
 #include "SpotLight.h"
 #include "Utility.h"
@@ -498,6 +499,47 @@ public:
         object->radius(radius);
     }
 
+    void setParametersForQuadVolume(std::shared_ptr<QuadVolume> object, json jsonContainer)
+    {
+        setParametersForVolume(object, jsonContainer);
+
+        // Two authoring forms:
+        //   1. "$corners": [c0, c1, c2, c3] — four corners in order around the
+        //      quad. origin = c0, edgeU = c1 - c0, edgeV = c3 - c0.
+        //   2. "$origin" + "$edgeU" + "$edgeV" — origin corner and two edge
+        //      vectors spanning the (parallelogram) quad.
+        // $corners takes precedence when present.
+        if (jsonContainer.contains("$corners"))
+        {
+            json corners = jsonContainer["$corners"];
+
+            if (!corners.is_array() || corners.size() != 4)
+            {
+                throw std::runtime_error("Quad \"$corners\" must be an array of exactly 4 vectors");
+            }
+
+            const Vector c0 = parseVectorFromJson(corners[0]);
+            const Vector c1 = parseVectorFromJson(corners[1]);
+            const Vector c2 = parseVectorFromJson(corners[2]);
+            const Vector c3 = parseVectorFromJson(corners[3]);
+
+            object->quad(Quad::fromCorners(c0, c1, c2, c3));
+        }
+        else
+        {
+            Vector origin = object->origin();
+            setVectorFromJsonIfPresent(origin, jsonContainer, "$origin");
+
+            Vector edgeU = object->edgeU();
+            setVectorFromJsonIfPresent(edgeU, jsonContainer, "$edgeU");
+
+            Vector edgeV = object->edgeV();
+            setVectorFromJsonIfPresent(edgeV, jsonContainer, "$edgeV");
+
+            object->quad(Quad(origin, edgeU, edgeV));
+        }
+    }
+
     void setParametersForLight(std::shared_ptr<Light> object, json jsonContainer)
     {
         setParametersForObject(object, jsonContainer);
@@ -619,6 +661,12 @@ public:
         {
             std::shared_ptr<SphereVolume> object = std::make_shared<SphereVolume>();
             setParametersForSphereVolume(object, jsonContainer);
+            return object;
+        }
+        else if (type == "Quad" || type == "QuadVolume")
+        {
+            std::shared_ptr<QuadVolume> object = std::make_shared<QuadVolume>();
+            setParametersForQuadVolume(object, jsonContainer);
             return object;
         }
         else if (type == "OmniLight")

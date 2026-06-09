@@ -41,6 +41,7 @@ target_sources(tests
         test_Property.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
+        test_Quad.cpp
         test_TriangleWatertight.cpp
         test_CameraExposure.cpp
         test_CameraProjection.cpp

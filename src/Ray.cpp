@@ -325,3 +325,51 @@ std::optional<Hit> rayIntersectsSphere(const Ray& ray, const Sphere& sphere) noe
 
     return hit;
 }
+
+std::optional<Hit> rayIntersectsQuad(const Ray& ray, const Quad& quad) noexcept
+{
+    // Step 1: ray-plane. The quad's plane passes through `origin` with `normal`.
+    const double denom = Vector::dot(quad.normal, ray.direction);
+
+    if (std::abs(denom) <= std::numeric_limits<double>::epsilon())
+    {
+        // Ray parallel to the plane.
+        return std::nullopt;
+    }
+
+    const Vector toOrigin = quad.origin - ray.origin;
+    const double t = Vector::dot(toOrigin, quad.normal) / denom;
+
+    constexpr double epsilon = 1e-9;
+
+    if (t <= epsilon)
+    {
+        // Plane is behind the ray origin (or coincident).
+        return std::nullopt;
+    }
+
+    const Vector position = ray.origin + (t * ray.direction);
+
+    // Step 2: inside test in the quad's own 2D parameter basis. Recover (u, v)
+    // by projecting onto the precomputed dual basis; the point is inside iff
+    // both lie in [0, 1].
+    const Vector local = position - quad.origin;
+    const double u = Vector::dot(local, quad.invU);
+    const double v = Vector::dot(local, quad.invV);
+
+    if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0)
+    {
+        return std::nullopt;
+    }
+
+    Hit hit;
+    hit.position = position;
+    // Two-sided: orient the shading normal against the incoming ray so a quad
+    // is visible (and lit) from either face — the natural behaviour for walls
+    // authored without caring which way the geometric normal points.
+    hit.normal = denom > 0.0 ? -quad.normal : quad.normal;
+    hit.uv = Vector{u, v, 0.0};
+    hit.distance = (hit.position - ray.origin).magnitude();
+
+    return hit;
+}

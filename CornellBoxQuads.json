@@ -1,0 +1,105 @@
+{
+    "$materials": {
+        "LeftWall": {
+            "$type": "Diffuse",
+            "$color": [1.0, 0.0, 0.0]
+        },
+        "RightWall": {
+            "$type": "Diffuse",
+            "$color": [0.0, 1.0, 0.0]
+        },
+        "Wall": {
+            "$type": "Diffuse",
+            "$color": [1.0]
+        }
+    },
+    "$workerConfiguration": {
+        "$workerCount": 32,
+        "$fetchSize": 100000,
+        "$photonQueueSize": 20000000,
+        "$hitQueueSize":    5000000,
+        "$finalQueueSize":  200000
+    },
+    "$renderConfiguration": {
+        "$width": 256,
+        "$height": 256,
+        "$photonsPerLight": 4000000,
+        "$startFrame": 0,
+        "$endFrame": 0,
+        "$renderPath": "renders",
+        "$renderName": "CornellBoxQuads",
+        "$bounceThreshold": 2
+    },
+    "$scene": {
+        "Camera": {
+            "$type": "Camera",
+            "$verticalFieldOfView": 90.0,
+            "$position": [0.0, 150, -300],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [0.0, 0.0, 0.0]
+            }
+        },
+        "Light": {
+            "$type": "AreaLight",
+            "$shape": "Square",
+            "$size": 120,
+            "$position": [0, 298, 0],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [90, 0, 0]
+            },
+            "$color": [1.0, 1.0, 1.0],
+            "$luminousFlux": 125663706
+        },
+        "Blocker": {
+            "$type": "SphereVolume",
+            "$material": "Wall",
+            "$center": [0, 40, 40],
+            "$radius": 40
+        },
+        "CornellBox": {
+            "$type": "Object",
+            "RightWall": {
+                "$comment": "Single flat quad at x=-150 (green). No internal seam.",
+                "$type": "Quad",
+                "$material": "RightWall",
+                "$origin": [-150, -5, 155],
+                "$edgeU": [0, 310, 0],
+                "$edgeV": [0, 0, -310]
+            },
+            "LeftWall": {
+                "$comment": "Single flat quad at x=150 (red).",
+                "$type": "Quad",
+                "$material": "LeftWall",
+                "$origin": [150, -5, 155],
+                "$edgeU": [0, 310, 0],
+                "$edgeV": [0, 0, -310]
+            },
+            "Ceiling": {
+                "$comment": "Single flat quad at y=300.",
+                "$type": "Quad",
+                "$material": "Wall",
+                "$origin": [-155, 300, 155],
+                "$edgeU": [310, 0, 0],
+                "$edgeV": [0, 0, -310]
+            },
+            "Floor": {
+                "$comment": "Single flat quad at y=0.",
+                "$type": "Quad",
+                "$material": "Wall",
+                "$origin": [-155, 0, 155],
+                "$edgeU": [310, 0, 0],
+                "$edgeV": [0, 0, -310]
+            },
+            "Back": {
+                "$comment": "Single flat quad at z=150. One quad means no diagonal seam, so no back-wall line.",
+                "$type": "Quad",
+                "$material": "Wall",
+                "$origin": [-155, -5, 150],
+                "$edgeU": [310, 0, 0],
+                "$edgeV": [0, 310, 0]
+            }
+        }
+    }
+}

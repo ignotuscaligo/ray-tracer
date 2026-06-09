@@ -216,6 +216,12 @@ target_sources(ray-tracer-lib
         include/MeshVolume.h
         src/MeshVolume.cpp
 
+        include/Quad.h
+        src/Quad.cpp
+
+        include/QuadVolume.h
+        src/QuadVolume.cpp
+
         include/Color.h
         src/Color.cpp
 
