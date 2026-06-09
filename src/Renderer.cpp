@@ -283,15 +283,49 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                 ? settings.splatMinRadiusScale * sceneDepthFootprint
                 : 0.0;
 
-        if (primaryCam)
+        (void)primaryCam;
+        // MULTI-CAMERA probe union (review 1b). The photon-pass keep-test retains a
+        // non-delta bounce only if a probe is within the keep-radius; a bounce far
+        // from EVERY probe is discarded as un-gatherable. But the gather later runs
+        // for EVERY camera, so probes from the primary camera alone would cull
+        // bounces that a SECONDARY camera can see (e.g. geometry, or a specular
+        // reflection, visible only from camera 1) — that camera's image would gather
+        // from a store whose deposits there were dropped, going dark/black with no
+        // warning. So collect probes from ALL non-debug cameras and UNION them: the
+        // keep-test then retains any bounce reachable from ANY camera, exactly the
+        // set every camera's gather will query. (Debug cameras with a bounce/light
+        // filter isolate direct deposits and run no gather — DESIGN §6f / the gather
+        // loop's `debugCamera` test — so they contribute no probes.)
+        //
+        // Per-camera time threading is preserved: each collectProbes call still
+        // receives frameTime/shutterTime/probeTimeSlices, so each camera's probes
+        // span the shutter at that camera's viewpoint (§9d).
+        for (const auto& cam : cameras)
         {
-            probeResult = ProbeGather::collectProbes(
-                scene.objects, *primaryCam, *scene.materialLibrary,
+            if (!cam)
+            {
+                continue;
+            }
+            const bool debugCamera =
+                (cam->bounceFilter() >= 0) || (cam->lightFilter() >= 0);
+            if (debugCamera)
+            {
+                continue;
+            }
+            ProbeGather::ProbeResult camProbes = ProbeGather::collectProbes(
+                scene.objects, *cam, *scene.materialLibrary,
                 animationQuery.get(),
                 static_cast<float>(settings.frameTime),
                 static_cast<float>(settings.shutterTime),
                 settings.probeTimeSlices,
                 settings.probeSubSample);
+            // Union the probe points; aggregate the diagnostic counters.
+            probeResult.probes.insert(probeResult.probes.end(),
+                                      camProbes.probes.begin(),
+                                      camProbes.probes.end());
+            probeResult.cameraRays += camProbes.cameraRays;
+            probeResult.deltaExtensions += camProbes.deltaExtensions;
+            probeResult.misses += camProbes.misses;
         }
         // The probe-index cell size = keepRadius so a keep query touches a 3x3x3
         // neighborhood. The gather's own bounce-index cell size is set later.

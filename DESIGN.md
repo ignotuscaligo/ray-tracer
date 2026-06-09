@@ -311,6 +311,15 @@ default). Three pieces:
 - **Probe pass + index** (`ProbeGather::collectProbes`, `ProbeIndex`). Camera rays
   extended through delta surfaces to the first non-delta hit → probe points →
   uniform-grid index. `anyWithinKeepRadius()` is the photon-pass keep-test.
+  **[INVARIANT] In a MULTI-CAMERA scene the probes are the UNION over ALL non-debug
+  cameras** (`Renderer::renderFrame` collects probes from every camera and unions
+  them before building the index). The single shared `BounceStore` is gathered once
+  per camera, so the keep-test must retain every bounce reachable from ANY camera —
+  otherwise a secondary camera viewing geometry (or a specular reflection) the
+  primary cannot see would gather from a store whose deposits there were culled, and
+  render black with no warning. The "dropping is exact, not lossy" claim below holds
+  for the UNION of cameras, not the primary alone. (Debug cameras with a
+  bounce/light filter run no gather and contribute no probes.)
 - **Guided raw storage** (`Worker::processPhotons` + `BounceStore`). A non-delta
   bounce is stored RAW (position, incoming dir, power) iff a probe is within the
   keep-radius; else DISCARDED. **[INVARIANT] the keep-test is what bounds memory by
