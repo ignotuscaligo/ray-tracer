@@ -631,6 +631,14 @@ private:
     std::atomic<bool> m_renderTextureDirty{false};
     std::string m_renderError;
     std::string m_renderStatus = "No render yet.";
+    // Final render buffer. The render thread WRITES these (off the main thread)
+    // when a render completes; the main thread READS them (GL upload, screenshot,
+    // automation status, saveState) and the preview-upload path WRITES the dims.
+    // Guarded by m_renderMutex — the same mutex discipline m_previewRgba already
+    // has — because the RGBA vector and the dims are plain (non-atomic) members
+    // shared across threads. Without it the render thread's write at completion
+    // races the UI's unguarded reads (data race, TSan-detectable).
+    std::mutex m_renderMutex;
     std::vector<uint8_t> m_renderRgba;  // populated by render thread, uploaded on main thread
     int m_renderWidth = 0;
     int m_renderHeight = 0;

@@ -3669,9 +3669,14 @@ void EditorApp::startRender()
                 }
             }
 
-            m_renderRgba = std::move(rgba);
-            m_renderWidth = w;
-            m_renderHeight = h;
+            {
+                // Guard the shared final-render buffer + dims (read on the main
+                // thread by the GL upload, screenshot, automation, and saveState).
+                std::lock_guard<std::mutex> lock(m_renderMutex);
+                m_renderRgba = std::move(rgba);
+                m_renderWidth = w;
+                m_renderHeight = h;
+            }
             m_renderTextureDirty.store(true);
             m_renderState.store(RenderState::Done);
         }
@@ -3871,8 +3876,15 @@ void EditorApp::pollRender()
         if (m_renderTextureDirty.exchange(false))
         {
             uploadRenderTexture();
-            m_renderStatus = "Render complete (" + std::to_string(m_renderWidth) + "x" +
-                             std::to_string(m_renderHeight) + ").";
+            int w = 0;
+            int h = 0;
+            {
+                std::lock_guard<std::mutex> lock(m_renderMutex);
+                w = m_renderWidth;
+                h = m_renderHeight;
+            }
+            m_renderStatus = "Render complete (" + std::to_string(w) + "x" +
+                             std::to_string(h) + ").";
         }
     }
     else if (state == RenderState::Failed)
@@ -3883,6 +3895,9 @@ void EditorApp::pollRender()
 
 void EditorApp::uploadRenderTexture()
 {
+    // Guard the shared final-render buffer + dims against the render thread's
+    // completion write (mirrors uploadPreviewTexture's m_previewMutex).
+    std::lock_guard<std::mutex> lock(m_renderMutex);
     if (m_renderRgba.empty() || m_renderWidth <= 0 || m_renderHeight <= 0)
     {
         return;
@@ -3996,8 +4011,16 @@ void EditorApp::uploadPreviewTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
-    m_renderWidth = m_previewWidth;
-    m_renderHeight = m_previewHeight;
+    // The preview-upload path advances the displayed render dims as the progressive
+    // image sharpens. These are the SAME shared members the render thread writes at
+    // completion, so guard them with m_renderMutex. (Lock ordering is always
+    // m_previewMutex -> m_renderMutex here; the render thread takes only
+    // m_renderMutex, so there is no inverse ordering and no deadlock.)
+    {
+        std::lock_guard<std::mutex> lock(m_renderMutex);
+        m_renderWidth = m_previewWidth;
+        m_renderHeight = m_previewHeight;
+    }
 }
 
 // ===== Automation command handlers (main/GL thread) =======================
@@ -4132,8 +4155,12 @@ nlohmann::json EditorApp::cmdGetState(const nlohmann::json&)
     };
     j["render_status"] = renderStateName(m_renderState.load());
     j["render_message"] = m_renderStatus;
-    j["render_width"] = m_renderWidth;
-    j["render_height"] = m_renderHeight;
+    {
+        // Final-render dims are written by the render thread at completion; guard.
+        std::lock_guard<std::mutex> lock(m_renderMutex);
+        j["render_width"] = m_renderWidth;
+        j["render_height"] = m_renderHeight;
+    }
     // Phase 4: whether the render result/preview is currently drawn over the
     // viewport (true between Render and the next view/selection interaction).
     j["render_overlay_shown"] = m_overlayShown;
@@ -4428,12 +4455,20 @@ nlohmann::json EditorApp::cmdRender(const nlohmann::json& req)
     {
         return json{{"ok", false}, {"error", m_renderError}, {"status", "failed"}};
     }
+    int rw = 0;
+    int rh = 0;
+    {
+        // Final-render dims are written by the render thread at completion; guard.
+        std::lock_guard<std::mutex> lock(m_renderMutex);
+        rw = m_renderWidth;
+        rh = m_renderHeight;
+    }
     return json{{"ok", true},
                 {"status", "done"},
                 {"waited", true},
                 {"render_scene_path", m_lastRenderScenePath},
-                {"render_width", m_renderWidth},
-                {"render_height", m_renderHeight}};
+                {"render_width", rw},
+                {"render_height", rh}};
 }
 
 nlohmann::json EditorApp::cmdRenderAll(const nlohmann::json& /*req*/)
@@ -5144,7 +5179,9 @@ std::string EditorApp::captureScreenshot(const std::string& path, const std::str
     else if (target == "render")
     {
         // The path-traced result lives in m_renderRgba (already in display
-        // orientation, top-left origin) — no GL read or flip needed.
+        // orientation, top-left origin) — no GL read or flip needed. Guard the
+        // shared buffer + dims against the render thread's completion write.
+        std::lock_guard<std::mutex> lock(m_renderMutex);
         if (m_renderRgba.empty() || m_renderWidth <= 0)
             return "no render available (run 'render' first)";
         width = m_renderWidth;
