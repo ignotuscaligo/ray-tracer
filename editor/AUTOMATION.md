@@ -81,7 +81,10 @@ handler and returns the response. This keeps all GL/ImGui access single-threaded
 `get_state` additionally reports `selected_detail` — the full transform + material
 of the selected object — so an edit can be verified without a screenshot. `render`
 reports `render_scene_path`, the temp scene file it emitted from the CURRENT model
-(so inserts/edits are in the render, not just the originally-loaded JSON).
+(so inserts/edits are in the render, not just the originally-loaded JSON). The
+temp file (`.editor_view_*` / `.editor_render_*`) is CLEANED UP after the renderer
+loads it, so `render_scene_path` is a record of what was rendered, not a file that
+persists on disk.
 
 ### Object insertion + the properties panel (2b-2)
 

@@ -3560,6 +3560,14 @@ void EditorApp::startRender()
         try
         {
             LoadedScene scene = SceneLoader::loadFromFile(renderScenePath, /*logToStdout=*/false);
+            // The temp scene file has been fully parsed into `scene`; remove it now
+            // so the editor doesn't leave .editor_view_* turds next to the source
+            // scene (or in the system temp dir) after every viewport render.
+            // Best-effort: a failure to remove is non-fatal.
+            {
+                std::error_code ec;
+                std::filesystem::remove(renderScenePath, ec);
+            }
             // Override resolution + photon budget for an interactive-speed render.
             // The resolution is the viewport (or letterbox-region) pixel size so
             // the preview is 1:1 with what it fills on screen — never stretched.
@@ -3770,6 +3778,20 @@ void EditorApp::startFullRender()
         }
         out << sceneJson.dump(2);
     }
+
+    // RAII cleanup: remove the temp .editor_render_* scene file on EVERY exit path
+    // from here on (success, load failure, write failure, or an exception from the
+    // render). The file's only purpose is to hand the serialized scene to
+    // SceneLoader; once loaded it is dead weight. Best-effort remove (non-fatal).
+    struct TempSceneCleanup
+    {
+        std::filesystem::path path;
+        ~TempSceneCleanup()
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } tempSceneCleanup{tempPath};
 
     // The output paths are resolved relative to the SOURCE scene's directory (so a
     // relative pattern like "renders/foo.png" lands next to the scene), falling
