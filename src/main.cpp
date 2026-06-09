@@ -112,6 +112,17 @@ int main(int argc, char** argv)
                           << (render.bounceStore->memoryBytes() / (1024 * 1024))
                           << (render.bounceStore->budgetHit() ? " [BUDGET HIT]" : "")
                           << std::endl;
+
+                // Overflow is also reported as a loud stderr warning from the
+                // Renderer; surface the dropped-deposit counter here too so the
+                // CLI summary shows it. Nonzero = image is missing energy.
+                if (render.bounceStoreDropped > 0)
+                {
+                    std::cout << "Probe gather: DROPPED " << render.bounceStoreDropped
+                              << " deposits (BounceStore overflow — image is missing "
+                                 "energy; raise $bounceStoreCapacity)"
+                              << std::endl;
+                }
             }
 
             std::string fileName = scene.renderName + "." + std::to_string(frame) + ".png";

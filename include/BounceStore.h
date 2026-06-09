@@ -136,6 +136,17 @@ public:
     std::uint64_t attemptedCount() const noexcept { return m_writeCursor.load(); }
     bool budgetHit() const noexcept { return m_writeCursor.load() > m_capacity; }
 
+    // Number of deposits DROPPED because the store was full (attempts past
+    // capacity). Nonzero means the rendered image is quietly missing energy —
+    // the gather had fewer deposits to sum than the photon pass produced. This
+    // must be surfaced (logged warning + end-of-render counter), never silently
+    // swallowed on the happy path.
+    std::uint64_t droppedCount() const noexcept
+    {
+        const std::uint64_t attempts = m_writeCursor.load();
+        return attempts > m_capacity ? attempts - m_capacity : 0;
+    }
+
     std::size_t memoryBytes() const noexcept;
 
     const RawBounce& operator[](std::size_t index) const noexcept { return m_records[index]; }

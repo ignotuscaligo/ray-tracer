@@ -9,6 +9,7 @@
 #include "ProbeGather.h"
 #include "SceneLoader.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -91,6 +92,14 @@ struct RenderResult
     // Phase 2a: emitter radiance deposits stored on light-fixture surfaces so the
     // unified gather renders fixtures directly AND in mirrors (no special pass).
     size_t emitterDepositsKept = 0;
+
+    // Phase 2a: deposits DROPPED because the BounceStore hit its capacity ceiling
+    // during the photon pass. Nonzero means the image is quietly missing energy
+    // (the gather summed fewer deposits than the photon pass produced). Surfaced
+    // at end-of-render (loud warning + this counter) so an overflow is never
+    // silently swallowed; raise $bounceStoreCapacity (or lower photon budget) to
+    // clear it.
+    std::uint64_t bounceStoreDropped = 0;
 };
 
 namespace Renderer

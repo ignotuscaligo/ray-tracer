@@ -17,8 +17,10 @@
 #include "WorkQueue.h"
 #include "Worker.h"
 
+#include <cassert>
 #include <chrono>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <thread>
@@ -543,6 +545,31 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
 
         bounceStore->buildIndex(gatherCell);
         result.bounceStore = bounceStore;
+
+        // OVERFLOW SIGNALING. The BounceStore drops deposits past its capacity
+        // ceiling (lock-free on the hot path, counted via the write cursor). A
+        // drop means the gathered image is QUIETLY MISSING ENERGY — the gather
+        // sums fewer deposits than the photon pass produced. Surface it loudly
+        // here (end of the photon pass, where the count is final) instead of
+        // letting it vanish: a stderr warning that every caller (CLI and editor)
+        // sees, plus a counter on RenderResult, plus a debug assert. Do NOT make
+        // this conditional on a stdout-logging flag — a wrong image must warn
+        // unconditionally.
+        result.bounceStoreDropped = bounceStore->droppedCount();
+        if (result.bounceStoreDropped > 0)
+        {
+            std::cerr << "WARNING: BounceStore overflow — dropped "
+                      << result.bounceStoreDropped << " of "
+                      << bounceStore->attemptedCount()
+                      << " deposits (capacity " << bounceStore->capacity()
+                      << "). The rendered image is missing energy; raise "
+                         "$bounceStoreCapacity or lower the photon budget."
+                      << std::endl;
+            // In debug builds, make an overflow a hard stop so it cannot be
+            // ignored during development. Release builds warn + continue so a
+            // long render still produces a (flagged-as-wrong) image.
+            assert(false && "BounceStore overflow: deposits dropped, image is missing energy");
+        }
     }
 
     // MULTI-CAMERA: the photon pass / splat / grid above are a SINGLE shared solve.
