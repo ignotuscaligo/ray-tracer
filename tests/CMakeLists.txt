@@ -58,6 +58,7 @@ target_sources(tests
         test_MirrorGather.cpp
         test_ProbeGather.cpp
         test_MultiCameraProbe.cpp
+        test_MinorityFresnelGather.cpp
         test_AnimatedGather.cpp
         test_CameraMotionBlur.cpp
         test_DecayTermination.cpp
