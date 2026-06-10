@@ -38,12 +38,14 @@ Single-machine forward (light-side) photon tracer with a camera-side
 **probe-guided unified gather** (Phase 2a). The shape is **probe → emit →
 trace-each-photon-to-completion (keep raw bounces near probes) → unified gather**:
 
-0. **Probe pass (Phase 2a).** Before the photon pass, cast camera rays and EXTEND
-   each through delta surfaces (mirror/glass) to its FIRST NON-DELTA hit; collect
-   those points as PROBES and index them (`ProbeGather::collectProbes` +
-   `ProbeIndex`, `src/ProbeGather.cpp`, `src/ProbeIndex.cpp`). The probes are
-   exactly the diffuse/glossy surface points the camera can see directly OR via any
-   specular path.
+0. **Probe pass (Phase 2a) = the single camera-side specular tracer.** Before the
+   photon pass, cast camera rays and EXTEND each through delta surfaces (mirror/glass)
+   to its FIRST NON-DELTA hit, emitting a `GatherPoint` record per surviving sample;
+   the record positions are the PROBES and are indexed
+   (`ProbeGather::collectGatherPoints` + `ProbeIndex`, `src/ProbeGather.cpp`,
+   `src/ProbeIndex.cpp`). The probes are exactly the diffuse/glossy surface points the
+   camera can see directly OR via any specular path; the gather later just collects
+   over the records (§6f).
 1. **Emit.** Each `Light` produces photons into the one bounded `photonQueue`. The
    per-photon magnitude `Phi/N` is baked at emission (`LightQueue::registerLight`,
    `src/LightQueue.cpp:16`).
@@ -54,11 +56,12 @@ trace-each-photon-to-completion (keep raw bounces near probes) → unified gathe
    continuation photon → repeat. The continuation lives in a local stack slot; it
    **never re-enters the queue**. The source batch's queue slots are released only
    after the whole batch finishes.
-3. **Unified gather (post-pass, per camera).** `ProbeGather::run` traces camera
-   rays, extends through delta surfaces to the first non-delta hit, and density-
-   estimates the retained RAW bounces near that hit. The SAME path renders both
-   directly-visible diffuse (extension depth 0) AND reflected/refracted diffuse
-   (extension depth > 0). `EmissiveGather` makes light fixtures camera-visible.
+3. **Unified gather (post-pass, per camera) = pure collection.** `ProbeGather::run`
+   loops over this camera's `GatherPoint` records (from the probe pass, step 0) and
+   density-estimates the retained RAW bounces near each record's position — NO ray
+   casting, NO delta extension (that happened once in the probe pass). The SAME path
+   renders both directly-visible diffuse (extension depth 0) AND reflected/refracted
+   diffuse (extension depth > 0). Emitter deposits make light fixtures camera-visible.
 
 **[INVARIANT] Mirror == direct (Phase 2a headline).** A reflection in a mirror is
 the scene gathered the SAME way as the direct view: a reflected diffuse point is
@@ -315,20 +318,31 @@ candidates; their presence is not a behavioral statement.
 ### 6f. Probe-guided unified gather — [INVARIANT] the default gather (Phase 2a)
 
 The renderer's gather is the probe-guided raw-bounce gather (`$probeGather` true by
-default). Three pieces:
+default). **[INVARIANT] The camera-side specular trace lives in EXACTLY ONE place —
+the probe pass — and the gather is PURE COLLECTION.** Three pieces:
 
-- **Probe pass + index** (`ProbeGather::collectProbes`, `ProbeIndex`). Camera rays
-  extended through delta surfaces to the first non-delta hit → probe points →
-  uniform-grid index. `anyWithinKeepRadius()` is the photon-pass keep-test.
+- **Probe pass = THE SINGLE CAMERA-SIDE SPECULAR TRACER**
+  (`ProbeGather::collectGatherPoints`, `ProbeIndex`). For every pixel sample (all DOF
+  aperture samples for a RealLens camera, all `$cameraTimeSamples` random
+  shutter-time samples for a finite shutter, and — for a dielectric first hit — all
+  `kCameraSamplesPerPixel` stochastic Fresnel branches) a camera ray is EXTENDED
+  through delta surfaces (mirror reflect / glass refract) to its first non-delta hit,
+  ACCUMULATING the product of the delta BSDF weights. Each surviving sample emits one
+  **`GatherPoint` record** carrying everything the gather needs with no further
+  tracing: `{pixel, position, normal, viewDir (wo), materialIndex,
+  specularThroughput, unfoldedPathLength, footprintRadius, sampleTime, sampleWeight}`.
+  The record POSITIONS are the probe points → uniform-grid index; `anyWithinKeepRadius()`
+  is the photon-pass keep-test.
   **[INVARIANT] In a MULTI-CAMERA scene the probes are the UNION over ALL non-debug
-  cameras** (`Renderer::renderFrame` collects probes from every camera and unions
-  them before building the index). The single shared `BounceStore` is gathered once
-  per camera, so the keep-test must retain every bounce reachable from ANY camera —
-  otherwise a secondary camera viewing geometry (or a specular reflection) the
-  primary cannot see would gather from a store whose deposits there were culled, and
-  render black with no warning. The "dropping is exact, not lossy" claim below holds
-  for the UNION of cameras, not the primary alone. (Debug cameras with a
-  bounce/light filter run no gather and contribute no probes.)
+  cameras** (`Renderer::renderFrame` collects records from every camera and unions
+  their POSITIONS before building the index; the full records are kept PER-CAMERA, so
+  a camera's gather reads only its own records — cameras never cross-contaminate). The
+  single shared `BounceStore` is gathered once per camera, so the keep-test must
+  retain every bounce reachable from ANY camera — otherwise a secondary camera viewing
+  geometry (or a specular reflection) the primary cannot see would gather from a store
+  whose deposits there were culled, and render black with no warning. The "dropping is
+  exact, not lossy" claim below holds for the UNION of cameras, not the primary alone.
+  (Debug cameras with a bounce/light filter run no gather and contribute no probes.)
 - **Guided raw storage** (`Worker::processPhotons` + `BounceStore`). A non-delta
   bounce is stored RAW (position, incoming dir, power) iff a probe is within the
   keep-radius; else DISCARDED. **[INVARIANT] the keep-test is what bounds memory by
@@ -337,13 +351,23 @@ default). Three pieces:
   ≫ `bounceKept` on a scene with off-camera geometry (`WorkerDebug::bounceKept/
   bounceCulled`); the store size tracks visible area, not the (much larger) total
   bounce count.
-- **Unified gather** (`ProbeGather::run` / `gatherRadiance` / `shade`). Extend
-  through delta to the first non-delta hit, then density-estimate the retained raw
-  bounces in the footprint: `L = (1/πr²)·Σ f(wi,wo)·Φ`, with NORMAL-AGREEMENT leak
-  suppression (see below). The footprint `r` is a RAY DIFFERENTIAL (min with
-  the perpendicular footprint) so it tracks rectilinear edge distortion without
-  grazing blowup. A `4/π` parity factor reproduces the retired splat's energy-per-
-  pixel (the splat binned a full pixel but normalized by a half-pixel-radius disc).
+- **Unified gather = PURE COLLECTION** (`ProbeGather::run` / `gatherRadiance`). A flat
+  thread-partitioned loop over a camera's `GatherPoint` records — **no ray casting, no
+  specular recursion, no delta extension** (all of that happened in the probe pass).
+  For each record: density-estimate the retained raw bounces at its `position` over
+  its precomputed `footprintRadius`, multiply by its `specularThroughput`, weight by
+  `sampleWeight` (1/N over the pixel's samples), and add into its `pixel` via the
+  atomic buffer: `L = throughput·(1/πr²)·Σ f(wi,wo)·Φ`, with NORMAL-AGREEMENT leak
+  suppression (see below). The footprint `r` is a RAY DIFFERENTIAL (min with the
+  perpendicular footprint) for a direct hit and the unfolded-path perpendicular
+  footprint for a reflected one — both computed in the probe pass and stored on the
+  record. A `4/π` parity factor reproduces the retired splat's energy-per-pixel (the
+  splat binned a full pixel but normalized by a half-pixel-radius disc).
+  **[INVARIANT] Every gather point IS a probe by construction**, so a surface reached
+  only through the MINORITY Fresnel branch of a small glass object is probed AND
+  gathered with the SAME sampling — the old split (1 probe Fresnel sample vs 16 gather
+  samples) could leave such a surface unprobed, its deposits culled, and it read dark;
+  that mismatch class is now impossible. Pinned by `tests/test_MinorityFresnelGather.cpp`.
 
 **[INVARIANT] Leak suppression is by NORMAL AGREEMENT, not a tangent-plane distance
 cut.** The radius search returns deposits inside a Euclidean SPHERE; near a
@@ -388,14 +412,25 @@ primitives covered. Historical model (unchanged in the legacy path): energy
 accumulated into spatial cells, bounded by occupied cells; **density-of-deposits**
 brightness; per-shard locking. Do not build new behavior on this path.
 
-### 6b. Specular gather — EXTEND, do not gather, at a delta vertex
+### 6b. Specular gather — EXTEND, do not gather, at a delta vertex (the extension runs ONCE, in the probe pass)
 
 **[INVARIANT]** At a delta hit the camera path follows the single reflection/refraction ray
-and recurses; it gathers only when the chain lands on a non-delta surface. A perfect mirror
-is a path-extension problem, NOT a too-narrow-cone gather. This holds for BOTH the probe
-gather (`ProbeGather::shade`, `src/ProbeGather.cpp`) and the legacy `MirrorGather`. Recursion
-depth is capped at `kMaxSpecularDepth = 8` — a hall of mirrors returns black at the cap, it
-does not infinite-loop.
+and extends; it gathers only when the chain lands on a non-delta surface. A perfect mirror
+is a path-extension problem, NOT a too-narrow-cone gather. The measure-zero rationale is
+load-bearing: a delta BSDF against a POINT camera is a measure-zero event — no stochastically
+deposited photon lands in the pixel-footprint reflection cone, so a mirror cannot be GATHERED,
+it must be TRACED.
+
+In the DEFAULT probe gather this extension happens in EXACTLY ONE place: the probe pass
+(`ProbeGather::collectGatherPoints` → `extendAndRecord`, `src/ProbeGather.cpp`), which walks
+each pixel's delta chain ONCE, accumulates the specular throughput, and emits a `GatherPoint`
+record at the first non-delta hit (§6f). The gather then does NO extension — it is pure
+collection over those records. (Historically the chain-walk was written TWICE — a throughput-
+discarding probe walk and a separate `shade()` recursion at gather time — with drifted
+sampling that caused the minority-Fresnel cull bug; both were collapsed into the one probe-pass
+walk. The legacy `MirrorGather` keeps its own walk on the deprecated `$probeGather false`
+path.) Recursion depth is capped at `kMaxSpecularDepth = 8` — a hall of mirrors returns black
+at the cap, it does not infinite-loop.
 
 ### 6c. Glass camera path — STOCHASTIC Fresnel, single ray — looks like a bug, it is not
 
@@ -655,12 +690,15 @@ This was a real, fixed bug — the zero-shutter window is half-infinite on purpo
 ### 9d. The probe gather is TIME-AWARE — [INVARIANT] camera rays carry a time
 
 **[INVARIANT] Every camera-side ray in the probe gather is cast at a SCENE TIME,
-not a hardcoded 0.** The probe pass, the per-pixel first hit, the specular `shade()`
-extension recursion, and the emitter intersection all resolve animated geometry at
-the ray's time via the same `castRayAt(..., time, animationQuery)` the photon pass
-uses (`src/ProbeGather.cpp`). `collectProbes` and `ProbeGather::run` take the frame
+not a hardcoded 0.** The probe pass — the single camera-side specular tracer — casts
+the per-pixel first hit, the specular extension chain (`extendAndRecord`), and the
+emitter intersection at the sample's time via the same `castRayAt(..., time,
+animationQuery)` the photon pass uses (`src/ProbeGather.cpp`), stamping each
+`GatherPoint` record with its `sampleTime`. `collectGatherPoints` takes the frame
 time + shutter; `Renderer::renderFrame` forwards `settings.frameTime` /
-`settings.shutterTime` to both, mirroring the photon side. This is what makes
+`settings.shutterTime` to it, mirroring the photon side. The gather is pure
+collection over the records, so it needs no rays of its own — it just uses each
+record's stamped `sampleTime` as the temporal-window reference. This is what makes
 animation work in the DEFAULT (`$probeGather` true) path — the camera sees the scene
 at the time the photons lit it.
 
@@ -671,25 +709,32 @@ only through the now-retired splat path. That contradiction is fixed; the splat 
 is no longer the motion-blur carrier.
 
 **[INVARIANT] Motion blur on the camera side is per-sample RANDOM shutter time.**
-With a finite shutter each per-pixel camera sample draws a uniform time in
-`[frameTime, frameTime + shutterTime)` (`$cameraTimeSamples` samples averaged),
-matching the per-photon emission-time model. The directly-visible AND the reflected
-(through `shade()`) moving geometry therefore integrate over the shutter into object
-motion blur. A zero shutter is a single fixed-time sample at `frameTime` (the exact
-static baseline at `frameTime` 0).
+With a finite shutter each per-pixel camera sample (in the probe pass) draws a
+uniform time in `[frameTime, frameTime + shutterTime)` (`$cameraTimeSamples` samples,
+averaged at gather time via each record's `sampleWeight`), matching the per-photon
+emission-time model. The directly-visible AND the reflected (specularly-extended)
+moving geometry therefore integrate over the shutter into object motion blur — a
+reflected gather point carries its own `sampleTime`, so a moving object's reflection
+in a mirror blurs exactly like the direct view. A zero shutter is a single fixed-time
+sample at `frameTime` (the exact static baseline at `frameTime` 0).
 
 **[INVARIANT] Probe temporal coverage and the gather's continuity are DECOUPLED.**
 The camera sees a moving object at a CONTINUUM of poses across the shutter, but
 probes collected at a single instant would miss the later poses, so the photon-pass
 keep-test would cull the deposits the camera actually gathers (the object goes dark).
-So the probe pass samples `$probeTimeSlices` DISCRETE times across the shutter and
-UNIONS the probes (`src/ProbeGather.cpp` `collectProbes`). Probe count governs
-COVERAGE — was a bounce near ANY camera-reachable pose — NOT gather smoothness. The
-GATHER itself stays CONTINUOUS: it keeps a deposit only if its photon time is within
-a shutter-sized temporal window of the camera ray time (`RawBounce::time`, +4 B/
-record, 52 B total). A deposit is kept if it is near a probe in SPACE (the keep-test,
-conservative) AND within a covered time window of the camera ray (the gather);
-discrete probes in time, continuous weighting in the gather.
+Because the probe pass IS the camera sampler, this is automatic: each of the
+`$cameraTimeSamples` per-pixel samples carries its own random shutter time, so the
+union of record positions COVERS every pose the camera sees during the shutter — the
+same samples that probe are the ones that gather, so coverage and gather sampling can
+never drift apart (the source of the old minority-Fresnel cull bug, §6f). (The
+earlier split design needed a SEPARATE `$probeTimeSlices` discrete-time probe sweep to
+approximate this coverage; that knob is retired — every sample carries a continuous
+time.) Probe count governs COVERAGE — was a bounce near ANY camera-reachable pose —
+NOT gather smoothness. The GATHER itself stays CONTINUOUS: it keeps a deposit only if
+its photon time is within a shutter-sized temporal window of the record's sampleTime
+(`RawBounce::time`, +4 B/record, 52 B total). A deposit is kept if it is near a probe
+in SPACE (the keep-test, conservative) AND within a covered time window of the camera
+sample (the gather); discrete samples in time, continuous weighting in the gather.
 
 **[INVARIANT] The temporal window preserves STATIC-scene parity.** The window is the
 full shutter span, so a static surface — whose deposits sit at one world position
