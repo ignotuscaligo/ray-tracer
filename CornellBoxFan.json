@@ -4,10 +4,36 @@
         "meshes/Fan.obj"
     ],
     "$materials": {
-        "LeftWall":  { "$type": "Diffuse", "$color": [1.0, 0.0, 0.0] },
-        "RightWall": { "$type": "Diffuse", "$color": [0.0, 1.0, 0.0] },
-        "Wall":      { "$type": "Diffuse", "$color": [1.0] },
-        "FanMat":    { "$type": "Diffuse", "$color": [0.95, 0.85, 0.2] }
+        "LeftWall": {
+            "$type": "Diffuse",
+            "$color": [
+                1.0,
+                0.0,
+                0.0
+            ]
+        },
+        "RightWall": {
+            "$type": "Diffuse",
+            "$color": [
+                0.0,
+                1.0,
+                0.0
+            ]
+        },
+        "Wall": {
+            "$type": "Diffuse",
+            "$color": [
+                1.0
+            ]
+        },
+        "FanMat": {
+            "$type": "Diffuse",
+            "$color": [
+                0.95,
+                0.85,
+                0.2
+            ]
+        }
     },
     "$workerConfiguration": {
         "$workerCount": 32,
@@ -15,58 +41,241 @@
         "$photonQueueSize": 20000000
     },
     "$renderConfiguration": {
-        "$width": 256,
-        "$height": 256,
-        "$photonsPerLight": 6000000,
+        "$width": 420,
+        "$height": 420,
+        "$photonsPerLight": 4000000,
         "$startFrame": 0,
-        "$endFrame": 16,
-        "$frameRate": 8.0,
-        "$shutterTime": 0.11,
-        "$renderPath": "/tmp/anim",
+        "$endFrame": 59,
+        "$frameRate": 30.0,
+        "$shutterTime": 0.033333,
+        "$renderPath": "/tmp/fan-frames",
         "$renderName": "fan",
-        "$bounceThreshold": 2
+        "$bounceThreshold": 2,
+        "$cameraTimeSamples": 24,
+        "$probeTimeSlices": 8
     },
     "$scene": {
         "Camera": {
             "$type": "Camera",
             "$verticalFieldOfView": 90.0,
-            "$position": [0.0, 150, -300],
-            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0.0, 0.0, 0.0] }
+            "$position": [
+                0.0,
+                150,
+                -300
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            }
         },
         "Light": {
             "$type": "AreaLight",
             "$shape": "Square",
             "$size": 120,
-            "$position": [0, 298, 0],
-            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [90, 0, 0] },
-            "$color": [1.0, 1.0, 1.0],
+            "$position": [
+                0,
+                298,
+                0
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    90,
+                    0,
+                    0
+                ]
+            },
+            "$color": [
+                1.0,
+                1.0,
+                1.0
+            ],
             "$luminousFlux": 125663706
         },
         "Fan": {
             "$type": "MeshVolume",
             "$material": "FanMat",
             "$mesh": "Fan",
-            "$position": [0, 150, 60],
-            "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0, 0, 0] },
+            "$position": [
+                0,
+                150,
+                60
+            ],
+            "$rotation": {
+                "$type": "PitchYawRollDegrees",
+                "$value": [
+                    0,
+                    0,
+                    0
+                ]
+            },
             "$animation": {
-                "$rotationAxis": [0, 0, 1],
+                "$rotationAxis": [
+                    0,
+                    0,
+                    1
+                ],
                 "$rotation": [
-                    { "t": 0.0, "value": 0.0 },
-                    { "t": 0.5, "value": 1.2 },
-                    { "t": 1.0, "value": 9.0 },
-                    { "t": 1.5, "value": 9.6, "inTangent": 0.0, "outTangent": 0.0 },
-                    { "t": 2.0, "value": 2.0 },
-                    { "t": 2.5, "value": 0.0 }
+                    {
+                        "t": 0.0,
+                        "value": 0.0,
+                        "inTangent": 0.0,
+                        "outTangent": 0.0
+                    },
+                    {
+                        "t": 0.1,
+                        "value": 0.036384,
+                        "inTangent": 1.063233,
+                        "outTangent": 1.063233
+                    },
+                    {
+                        "t": 0.2,
+                        "value": 0.26892,
+                        "inTangent": 3.817035,
+                        "outTangent": 3.817035
+                    },
+                    {
+                        "t": 0.3,
+                        "value": 0.836037,
+                        "inTangent": 7.660577,
+                        "outTangent": 7.660577
+                    },
+                    {
+                        "t": 0.4,
+                        "value": 1.81961,
+                        "inTangent": 12.063716,
+                        "outTangent": 12.063716
+                    },
+                    {
+                        "t": 0.5,
+                        "value": 3.252039,
+                        "inTangent": 16.566993,
+                        "outTangent": 16.566993
+                    },
+                    {
+                        "t": 0.6,
+                        "value": 5.123309,
+                        "inTangent": 20.781635,
+                        "outTangent": 20.781635
+                    },
+                    {
+                        "t": 0.7,
+                        "value": 7.388064,
+                        "inTangent": 24.389558,
+                        "outTangent": 24.389558
+                    },
+                    {
+                        "t": 0.8,
+                        "value": 9.972672,
+                        "inTangent": 27.143361,
+                        "outTangent": 27.143361
+                    },
+                    {
+                        "t": 0.9,
+                        "value": 12.782296,
+                        "inTangent": 28.866328,
+                        "outTangent": 28.866328
+                    },
+                    {
+                        "t": 1.0,
+                        "value": 15.707963,
+                        "inTangent": 29.452431,
+                        "outTangent": 29.452431
+                    },
+                    {
+                        "t": 1.1,
+                        "value": 18.63363,
+                        "inTangent": 28.866328,
+                        "outTangent": 28.866328
+                    },
+                    {
+                        "t": 1.2,
+                        "value": 21.443255,
+                        "inTangent": 27.143361,
+                        "outTangent": 27.143361
+                    },
+                    {
+                        "t": 1.3,
+                        "value": 24.027863,
+                        "inTangent": 24.389558,
+                        "outTangent": 24.389558
+                    },
+                    {
+                        "t": 1.4,
+                        "value": 26.292617,
+                        "inTangent": 20.781635,
+                        "outTangent": 20.781635
+                    },
+                    {
+                        "t": 1.5,
+                        "value": 28.163887,
+                        "inTangent": 16.566993,
+                        "outTangent": 16.566993
+                    },
+                    {
+                        "t": 1.6,
+                        "value": 29.596316,
+                        "inTangent": 12.063716,
+                        "outTangent": 12.063716
+                    },
+                    {
+                        "t": 1.7,
+                        "value": 30.57989,
+                        "inTangent": 7.660577,
+                        "outTangent": 7.660577
+                    },
+                    {
+                        "t": 1.8,
+                        "value": 31.147006,
+                        "inTangent": 3.817035,
+                        "outTangent": 3.817035
+                    },
+                    {
+                        "t": 1.9,
+                        "value": 31.379543,
+                        "inTangent": 1.063233,
+                        "outTangent": 1.063233
+                    },
+                    {
+                        "t": 2.0,
+                        "value": 31.415927,
+                        "inTangent": 0.0,
+                        "outTangent": 0.0
+                    }
                 ]
             }
         },
         "CornellBox": {
             "$type": "Object",
-            "Ceiling":   { "$type": "MeshVolume", "$material": "Wall",      "$mesh": "Ceiling" },
-            "LeftWall":  { "$type": "MeshVolume", "$material": "LeftWall",  "$mesh": "Left" },
-            "RightWall": { "$type": "MeshVolume", "$material": "RightWall", "$mesh": "Right" },
-            "Floor":     { "$type": "MeshVolume", "$material": "Wall",      "$mesh": "Floor" },
-            "Back":      { "$type": "MeshVolume", "$material": "Wall",      "$mesh": "Back" }
+            "Ceiling": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Ceiling"
+            },
+            "LeftWall": {
+                "$type": "MeshVolume",
+                "$material": "LeftWall",
+                "$mesh": "Left"
+            },
+            "RightWall": {
+                "$type": "MeshVolume",
+                "$material": "RightWall",
+                "$mesh": "Right"
+            },
+            "Floor": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Floor"
+            },
+            "Back": {
+                "$type": "MeshVolume",
+                "$material": "Wall",
+                "$mesh": "Back"
+            }
         }
     }
 }
