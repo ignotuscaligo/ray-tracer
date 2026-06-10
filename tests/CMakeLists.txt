@@ -60,6 +60,7 @@ target_sources(tests
         test_MultiCameraProbe.cpp
         test_MinorityFresnelGather.cpp
         test_AnimatedGather.cpp
+        test_DepthOfField.cpp
         test_CameraMotionBlur.cpp
         test_DecayTermination.cpp
         test_SinglePhotonScatter.cpp
