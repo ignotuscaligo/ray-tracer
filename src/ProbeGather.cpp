@@ -128,130 +128,115 @@ std::optional<Hit> firstHit(const std::vector<std::shared_ptr<Object>>& objects,
 
 }  // namespace
 
-// ===== Probe pass =====
+// ===== Probe pass = single camera-side specular tracer =====
 
 namespace
 {
 
-// Extend a ray through delta surfaces to the first non-delta hit. Returns that
-// hit (and reports whether any delta surface was traversed). nullopt if the chain
-// escapes the scene or exceeds the specular depth cap.
-std::optional<Hit> extendToNonDelta(const std::vector<std::shared_ptr<Object>>& objects,
-                                    const MaterialLibrary& materials,
-                                    const AnimationQuery* animation,
-                                    std::vector<Hit>& castBuffer,
-                                    RandomGenerator& generator,
-                                    Ray ray,
-                                    float time,
-                                    const std::vector<EmitterPatch>& patches,
-                                    bool& outTraversedDelta)
+// Result of walking a camera ray through the delta chain to its first non-delta
+// hit, accumulating throughput and path length along the way.
+struct ExtendResult
 {
-    outTraversedDelta = false;
+    Hit hit;                       // the first non-delta (or emitter) surface reached
+    Color throughput{1.0f, 1.0f, 1.0f};  // product of delta BSDF weights to reach it
+    double unfoldedPathLength = 0.0;     // total camera-to-hit distance along the chain
+    Vector finalDirection{};       // direction of the last segment (the ray that hit the
+                                   //   non-delta surface); wo = -finalDirection
+    bool traversedDelta = false;   // passed through at least one delta surface
+    bool valid = false;            // false => chain escaped or exceeded the depth cap
+};
+
+// Extend a ray through delta surfaces to the first non-delta hit, ACCUMULATING the
+// product of the delta BSDF weights (the specular throughput) and the unfolded path
+// length. This is the irreducible camera-side specular trace (a delta vs a point
+// camera is measure-zero — a mirror must be TRACED, not gathered; DESIGN §6b). It
+// runs ONCE here in the probe pass; the gather does no extension.
+ExtendResult extendAndRecord(const std::vector<std::shared_ptr<Object>>& objects,
+                             const MaterialLibrary& materials,
+                             const AnimationQuery* animation,
+                             std::vector<Hit>& castBuffer,
+                             RandomGenerator& generator,
+                             Ray ray,
+                             float time,
+                             const std::vector<EmitterPatch>& patches)
+{
+    ExtendResult out;
     for (int depth = 0; depth < kMaxSpecularDepth; ++depth)
     {
         std::optional<Hit> hit = firstHit(objects, ray, castBuffer, time, animation, &patches);
         if (!hit)
         {
-            return std::nullopt;
+            return out;  // escaped: invalid
         }
+        out.unfoldedPathLength += hit->distance;
+
         if (hit->material == kEmitterMaterial)
         {
-            return hit;  // emitter surface: a non-delta gatherable surface
+            out.hit = *hit;  // emitter surface: a non-delta gatherable surface
+            out.finalDirection = ray.direction;
+            out.valid = true;
+            return out;
         }
         std::shared_ptr<Material> material = materials.fetchByIndex(hit->material);
         if (!material)
         {
-            return std::nullopt;
+            return out;
         }
         if (!material->isDelta())
         {
-            return hit;  // reached the first non-delta surface
+            out.hit = *hit;  // reached the first non-delta surface
+            out.finalDirection = ray.direction;
+            out.valid = true;
+            return out;
         }
 
         // Delta surface: follow the (deterministic for mirror, stochastic for
-        // glass) outgoing direction and continue.
-        outTraversedDelta = true;
+        // glass) outgoing direction, fold its BSDF weight into the throughput, and
+        // continue. Folding the weight here is the fix for the old probe pass, which
+        // DISCARDED s.weight and kept only the endpoint — the gather had to re-walk
+        // the chain to recover it. Now the throughput rides the record.
+        out.traversedDelta = true;
         const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
         const BSDFSample s = material->sample(ray.direction, hitNormal, generator);
         if (!s.valid)
         {
-            return std::nullopt;
+            return out;
         }
+        out.throughput = out.throughput * s.weight;
         const Vector nextDir = Vector::normalized(s.direction);
         ray = Ray{hit->position + nextDir * kReflectionEpsilon, nextDir};
     }
-    return std::nullopt;  // exceeded specular depth
-}
-
-void collectProbeRows(size_t rowBegin,
-                      size_t rowEnd,
-                      const std::vector<std::shared_ptr<Object>>& objects,
-                      const Camera& camera,
-                      const MaterialLibrary& materials,
-                      const AnimationQuery* animation,
-                      const std::vector<EmitterPatch>& patches,
-                      const std::vector<float>& times,
-                      size_t subSample,
-                      ProbeResult& out)
-{
-    const size_t width = camera.width();
-    std::vector<Hit> castBuffer;
-    RandomGenerator generator;
-
-    for (size_t y = rowBegin; y < rowEnd; y += subSample)
-    {
-        for (size_t x = 0; x < width; x += subSample)
-        {
-            const PixelCoords coord{x, y};
-
-            // Sample this pixel's probe ray at each discrete time slice spanning the
-            // shutter and union the resulting non-delta hit points. With moving
-            // geometry the hit point migrates across the slices, so the union COVERS
-            // every pose the camera sees during the shutter — exactly the surface
-            // regions the photon-pass keep-test must retain deposits for. A static
-            // scene's hit point is identical across slices, so this degenerates to
-            // the single-instant probe set (the deposits coincide; the index dedups
-            // by spatial cell). One slice => the original single-time behavior.
-            //
-            // CAMERA MOTION BLUR: the primary ray is generated at the slice TIME via
-            // generatePrimaryRayAt, so an animated camera's probe rays originate from
-            // its pose at each slice. The union of hit points then covers the surface
-            // regions the camera sees as it moves across the shutter — without this
-            // the keep-test would only retain deposits for the camera's frame-0 pose
-            // and a fast camera move would cull (black out) the rest of the view.
-            for (const float time : times)
-            {
-                const Ray ray = camera.generatePrimaryRayAt(coord, time, animation);
-                ++out.cameraRays;
-                bool traversedDelta = false;
-                std::optional<Hit> hit = extendToNonDelta(
-                    objects, materials, animation, castBuffer, generator, ray, time,
-                    patches, traversedDelta);
-                if (traversedDelta)
-                {
-                    ++out.deltaExtensions;
-                }
-                if (!hit)
-                {
-                    ++out.misses;
-                    continue;
-                }
-                out.probes.push_back(hit->position);
-            }
-        }
-    }
+    return out;  // exceeded specular depth: invalid (hall of mirrors -> black)
 }
 
 }  // namespace
 
-ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
-                          const Camera& camera,
-                          const MaterialLibrary& materials,
-                          const AnimationQuery* animation,
-                          float frameTime,
-                          float shutterTime,
-                          int timeSlices,
-                          size_t subSample)
+// Forward declarations of the gather-geometry helpers defined with the gather (they
+// size the footprint a record carries; reused unchanged from the direct/reflected
+// footprint logic).
+namespace
+{
+double pixelFootprintRadius(const Camera& camera,
+                            const AnimationQuery* animation,
+                            double pixelHalfAngle,
+                            const PixelCoords& coord,
+                            const Hit& hit,
+                            double fallbackDistance,
+                            float rayTime);
+double reflectedFootprintRadius(double pixelHalfAngle,
+                                double unfoldedPathLength,
+                                const Vector& viewer,
+                                const Hit& hit);
+}  // namespace
+
+ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& objects,
+                                const Camera& camera,
+                                const MaterialLibrary& materials,
+                                const AnimationQuery* animation,
+                                float frameTime,
+                                float shutterTime,
+                                int cameraSamples,
+                                size_t subSample)
 {
     ProbeResult result;
     const size_t width = camera.width();
@@ -262,36 +247,151 @@ ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
     }
     const size_t stride = std::max<size_t>(1, subSample);
 
-    // Discrete probe time slices spanning the shutter [frameTime, frameTime+shutter).
-    // A finite shutter samples `timeSlices` evenly across the half-open window (the
-    // endpoints t_open and t_open+shutter*(slices-1)/slices, so the last slice stays
-    // inside the window like the photon emission times); a zero/absent shutter is a
-    // single slice at frameTime (the static baseline). See collectProbeRows for why
-    // the union over slices is the temporal coverage the keep-test needs.
-    std::vector<float> times;
-    const int slices = (shutterTime > 0.0f) ? std::max(1, timeSlices) : 1;
-    times.reserve(static_cast<size_t>(slices));
-    if (slices <= 1)
-    {
-        times.push_back(frameTime);
-    }
-    else
-    {
-        for (int i = 0; i < slices; ++i)
-        {
-            const float frac = static_cast<float>(i) / static_cast<float>(slices);
-            times.push_back(frameTime + frac * shutterTime);
-        }
-    }
-
     const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
 
-    // The probe pass is camera-ray-scale and cheap; run it single-threaded so the
-    // probe list (and its diagnostics) accumulate without cross-thread merging.
-    // For very large frames this can be parallelized like the gather; not needed
-    // at current resolutions.
-    collectProbeRows(0, height, objects, camera, materials, animation, patches, times,
-                     stride, result);
+    const double pixelHalfAngle =
+        0.5 * Utility::radians(camera.verticalFieldOfView()) / static_cast<double>(height);
+
+    const float shutterSpan = std::max(0.0f, shutterTime);
+    const bool motionActive = (shutterSpan > 0.0f) && (cameraSamples > 1);
+    const bool dofActive = (camera.projection() == Camera::Projection::RealLens);
+
+    // The camera-side specular trace is camera-ray-scale and cheap; run it
+    // single-threaded so the record list (and its diagnostics) accumulate without
+    // cross-thread merging. For very large frames this could be parallelized like
+    // the gather; not needed at current resolutions.
+    std::vector<Hit> castBuffer;
+    RandomGenerator generator;
+
+    for (size_t y = 0; y < height; y += stride)
+    {
+        for (size_t x = 0; x < width; x += stride)
+        {
+            const PixelCoords coord{x, y};
+
+            // This pixel's camera samples mirror the former gather loop exactly so the
+            // records are an unbiased camera-side estimate: DOF aperture samples
+            // (RealLens) and/or random shutter-time samples (finite shutter); each
+            // draws a sample time and generates its ray at that time (camera pose
+            // resolved at the time — §9e). A dielectric first hit then fans into
+            // kCameraSamplesPerPixel stochastic Fresnel picks (unless DOF already
+            // multisamples); a mirror is one deterministic extension.
+            const int motionSamples = motionActive ? cameraSamples : 1;
+            const int dofSamples = dofActive ? kCameraSamplesPerPixel : 1;
+            const int primarySamples = std::max(dofSamples, motionSamples);
+
+            // Stage the surviving records for THIS pixel so the sampleWeight (1/N
+            // over the pixel's surviving samples) can be filled once N is known.
+            const size_t pixelRecordBegin = result.points.size();
+
+            for (int primary = 0; primary < primarySamples; ++primary)
+            {
+                const float sampleTime =
+                    motionActive
+                        ? frameTime + static_cast<float>(generator.value(shutterSpan))
+                        : frameTime;
+
+                const Ray ray = dofActive
+                    ? camera.generatePrimaryRayAt(coord, sampleTime, animation, &generator)
+                    : camera.generatePrimaryRayAt(coord, sampleTime, animation);
+                ++result.cameraRays;
+
+                std::optional<Hit> firstSurface =
+                    firstHit(objects, ray, castBuffer, sampleTime, animation, &patches);
+                if (!firstSurface)
+                {
+                    ++result.misses;
+                    continue;
+                }
+
+                const bool firstIsEmitter = (firstSurface->material == kEmitterMaterial);
+                std::shared_ptr<Material> firstMat =
+                    firstIsEmitter ? nullptr
+                                   : materials.fetchByIndex(firstSurface->material);
+                if (!firstIsEmitter && !firstMat)
+                {
+                    continue;
+                }
+
+                // DIRECT non-delta first hit: emit a depth-0 record with identity
+                // throughput and the ray-differential footprint (distortion- and
+                // foreshortening-correct).
+                if (firstIsEmitter || !firstMat->isDelta())
+                {
+                    GatherPoint gp;
+                    gp.pixel = coord;
+                    gp.position = firstSurface->position;
+                    gp.normal = firstSurface->normal;
+                    gp.viewDir = Vector::normalized(ray.origin - firstSurface->position);
+                    gp.materialIndex = firstSurface->material;
+                    gp.specularThroughput = Color{1.0f, 1.0f, 1.0f};
+                    gp.unfoldedPathLength = firstSurface->distance;
+                    gp.footprintRadius = pixelFootprintRadius(
+                        camera, animation, pixelHalfAngle, coord, *firstSurface,
+                        firstSurface->distance, sampleTime);
+                    gp.sampleTime = sampleTime;
+                    gp.sampleWeight = 1.0f;  // filled below
+                    result.points.push_back(gp);
+                    continue;
+                }
+
+                // DELTA first hit: extend through the specular chain. Glass is
+                // stochastic so fan into extra Fresnel picks; a mirror is
+                // deterministic (single pick).
+                const bool stochasticDelta =
+                    (dynamic_cast<DielectricMaterial*>(firstMat.get()) != nullptr);
+                const int extensionSamples =
+                    (stochasticDelta && !dofActive) ? kCameraSamplesPerPixel : 1;
+
+                for (int ext = 0; ext < extensionSamples; ++ext)
+                {
+                    const ExtendResult chain = extendAndRecord(
+                        objects, materials, animation, castBuffer, generator, ray,
+                        sampleTime, patches);
+                    if (chain.traversedDelta)
+                    {
+                        ++result.deltaExtensions;
+                    }
+                    if (!chain.valid)
+                    {
+                        ++result.misses;
+                        continue;
+                    }
+                    // wo at a reflected surface is back along the final segment
+                    // toward the last specular vertex (= -finalDirection): the same
+                    // viewer the old shade() evaluated the reflected BRDF toward.
+                    const Vector reflectedView = -chain.finalDirection;
+                    GatherPoint gp;
+                    gp.pixel = coord;
+                    gp.position = chain.hit.position;
+                    gp.normal = chain.hit.normal;
+                    gp.viewDir = Vector::normalized(reflectedView);
+                    gp.materialIndex = chain.hit.material;
+                    gp.specularThroughput = chain.throughput;
+                    gp.unfoldedPathLength = chain.unfoldedPathLength;
+                    gp.footprintRadius = reflectedFootprintRadius(
+                        pixelHalfAngle, chain.unfoldedPathLength, reflectedView,
+                        chain.hit);
+                    gp.sampleTime = sampleTime;
+                    gp.sampleWeight = 1.0f;  // filled below
+                    result.points.push_back(gp);
+                }
+            }
+
+            // sampleWeight = 1 / (surviving samples for this pixel): the average over
+            // the pixel's DOF/shutter/Fresnel samples. A pixel whose every sample
+            // missed contributes no records (and no weight).
+            const size_t survived = result.points.size() - pixelRecordBegin;
+            if (survived > 0)
+            {
+                const float w = 1.0f / static_cast<float>(survived);
+                for (size_t i = pixelRecordBegin; i < result.points.size(); ++i)
+                {
+                    result.points[i].sampleWeight = w;
+                }
+            }
+        }
+    }
     return result;
 }
 
@@ -385,24 +485,20 @@ EmitterDepositResult depositEmitters(const std::vector<std::shared_ptr<Object>>&
     return result;
 }
 
-// ===== Unified gather =====
+// ===== Unified gather = PURE COLLECTION =====
 
 namespace
 {
 
+// Everything the pure-collection gather needs that is NOT carried per-record: the
+// store to density-estimate, the materials for the BRDF, the radius floor, and the
+// temporal window. No objects, no camera, no animation — the gather casts no rays.
 struct Context
 {
-    const std::vector<std::shared_ptr<Object>>& objects;
     const BounceStore& store;
     const MaterialLibrary& materials;
-    const AnimationQuery* animation;
-    std::vector<EmitterPatch> patches;
-    double pixelHalfAngle;
     double minGatherRadius;
     float timeHalfWindow;  // gather temporal window half-width (shutter-sized)
-    float frameTime;       // shutter open instant
-    float shutterSpan;     // shutter duration (0 => static / single instant)
-    int cameraSamples;     // per-pixel shutter samples (1 => single fixed-time)
 };
 
 // Density estimate of the radiance leaving a non-delta surface point toward the
@@ -413,25 +509,28 @@ struct Context
 // (cos_theta_i folded into the deposit), the BRDF f handles the view direction,
 // and ΔA is the surface area the gather covers.
 //
-// `footprintRadius` is the world-space radius of the gather disc ON the surface.
-// It is supplied by the caller as a RAY DIFFERENTIAL: the spacing on the surface
-// between this pixel's hit and an adjacent pixel's hit. Using the real per-pixel
-// surface footprint (rather than a constant angular footprint) is load-bearing
-// for brightness parity with the retired splat AND for matching it across the
-// frame: a rectilinear camera's pixels subtend different solid angles toward the
-// edges and project onto tilted surfaces with foreshortening, so a CONSTANT
-// half-angle footprint over/under-counts at frame edges and on grazing surfaces
-// (measured: side walls +20%, corners +40% vs the splat). The differential
-// footprint is exactly the surface area one pixel covers, so gathering over it
-// and dividing by it reproduces the splat's "energy per pixel" by construction —
-// the cos(theta)/projection/edge factors all fall out automatically. The disc is
-// gathered with a radius covering the pixel footprint (so adjacent discs tile the
-// surface, losing no energy) and the normalization divides by that SAME area, so
-// the estimate stays unbiased.
+// `wo` is the unit direction from the hit toward the viewer (precomputed by the
+// probe pass and carried on the record): the camera eye for a direct hit, the last
+// specular vertex for a reflected one. `footprintRadius` is the world-space radius
+// of the gather disc ON the surface — a RAY DIFFERENTIAL (the spacing on the
+// surface between this pixel's hit and an adjacent pixel's hit) for a direct hit,
+// the unfolded-path perpendicular footprint for a reflected hit, also precomputed
+// by the probe pass. Using the real per-pixel surface footprint (rather than a
+// constant angular footprint) is load-bearing for brightness parity with the
+// retired splat AND for matching it across the frame: a rectilinear camera's pixels
+// subtend different solid angles toward the edges and project onto tilted surfaces
+// with foreshortening, so a CONSTANT half-angle footprint over/under-counts at frame
+// edges and on grazing surfaces (measured: side walls +20%, corners +40% vs the
+// splat). The differential footprint is exactly the surface area one pixel covers,
+// so gathering over it and dividing by it reproduces the splat's "energy per pixel"
+// by construction — the cos(theta)/projection/edge factors all fall out
+// automatically. The disc is gathered with a radius covering the pixel footprint (so
+// adjacent discs tile the surface, losing no energy) and the normalization divides
+// by that SAME area, so the estimate stays unbiased.
 Color gatherRadiance(const Context& ctx,
                      const Hit& hit,
                      const std::shared_ptr<Material>& material,
-                     const Vector& viewer,
+                     const Vector& wo,
                      double footprintRadius,
                      float rayTime,
                      size_t& outDeposits)
@@ -442,14 +541,6 @@ Color gatherRadiance(const Context& ctx,
     // BRDF (f = 1) over its own radiance deposits, reproducing its view-independent
     // surface radiance L = M/pi. Any other hit uses its material's BRDF.
     const bool isEmitter = (hit.material == kEmitterMaterial);
-
-    const Vector toViewer = viewer - hit.position;
-    const double toViewerMag = toViewer.magnitude();
-    if (toViewerMag <= kSelfHitThreshold)
-    {
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-    const Vector wo = toViewer / toViewerMag;
 
     if (Vector::dot(wo, hit.normal) <= 0.0)
     {
@@ -570,26 +661,35 @@ Color gatherRadiance(const Context& ctx,
 // the ray for an adjacent pixel, intersect the SAME surface plane (the hit's
 // tangent plane), and return half the on-surface distance between the two hits.
 // This is the exact per-pixel footprint — distortion- and foreshortening-correct
-// — used as the gather radius. Falls back to the constant-angle estimate if the
-// differential ray is degenerate (parallel to the plane / behind the camera).
-double pixelFootprintRadius(const Context& ctx,
-                            const Camera& camera,
+// — used as the gather radius for a DIRECT (depth-0) hit. Falls back to the
+// constant-angle estimate if the differential ray is degenerate (parallel to the
+// plane / behind the camera). Computed in the PROBE PASS (the adjacent-pixel ray it
+// needs is a camera ray, available there), then stored on the record so the gather
+// does no geometry. The only ray here is the adjacent-pixel CAMERA ray; it is
+// intersected analytically against the hit's tangent PLANE, not cast into the scene.
+double pixelFootprintRadius(const Camera& camera,
+                            const AnimationQuery* animation,
+                            double pixelHalfAngle,
                             const PixelCoords& coord,
                             const Hit& hit,
                             double fallbackDistance,
                             float rayTime)
 {
     const Vector n = hit.normal;
-    // Adjacent pixel: +1 in x where possible, else -1 (frame's right edge).
-    const size_t nx = (coord.x + 1 < camera.width()) ? coord.x + 1 : (coord.x - 1);
+    // Adjacent pixel: +1 in x where possible, else -1 (frame's right edge). When the
+    // frame is 1px wide both branches would underflow, so clamp to the same pixel
+    // (degenerate differential -> perpendicular fallback below).
+    const size_t nx = (coord.x + 1 < camera.width()) ? coord.x + 1
+                      : (coord.x > 0)                 ? coord.x - 1
+                                                      : coord.x;
     const PixelCoords adj{nx, coord.y};
     // Generate the differential ray at the SAME sample time as the primary ray, so
     // an animated camera's footprint is measured from its pose at `rayTime` (matches
     // the primary ray's origin/orientation). Static camera => same pose as before.
-    const Ray adjRay = camera.generatePrimaryRayAt(adj, rayTime, ctx.animation);
+    const Ray adjRay = camera.generatePrimaryRayAt(adj, rayTime, animation);
 
     // Perpendicular (constant-angle) footprint at this depth.
-    const double perpRadius = fallbackDistance * std::tan(ctx.pixelHalfAngle);
+    const double perpRadius = fallbackDistance * std::tan(pixelHalfAngle);
 
     const double denom = Vector::dot(adjRay.direction, n);
     if (std::abs(denom) > kSelfHitThreshold)
@@ -622,274 +722,107 @@ double pixelFootprintRadius(const Context& ctx,
     return perpRadius;
 }
 
-// Follow an already-extended (reflected/refracted) ray: at a delta surface extend
-// and recurse; at a non-delta surface gather the raw bounces. `depth` bounds
-// specular recursion; `pathLength` is the accumulated camera-to-here distance
-// along the specular chain, used to size the reflected gather footprint. Returns
-// the radiance the ray brings back toward the original camera.
-Color shade(const Context& ctx,
-            const Vector& origin,
-            const Vector& direction,
-            int depth,
-            double pathLength,
-            float rayTime,
-            std::vector<Hit>& castBuffer,
-            RandomGenerator& generator,
-            size_t& outDeposits)
+// World-space footprint radius for a REFLECTED (specularly-extended) hit. A mirror
+// is an UNFOLDED straight path, so the perpendicular footprint at the reflected
+// surface is the pixel half-angle projected over the TOTAL unfolded path length —
+// the same quantity the direct path caps its gather radius at, keeping reflections
+// as crisp as the direct view. [INVARIANT, §6f] It is NOT inflated by 1/cos(view):
+// an earlier `/min(1, max(0.15, cosView))` blew the disc up to ~6.7x at a grazing
+// reflected surface (reflected ceiling/floor blurrier than direct); the
+// foreshortening enlargement is capped at 2x (`max(0.5, cosView)`). Brightness
+// parity does NOT depend on this (the density estimate divides by the same area it
+// gathers, so r trades sharpness for noise, not energy). `viewer` is the unit
+// direction from the hit toward the last specular vertex (= the record's viewDir).
+double reflectedFootprintRadius(double pixelHalfAngle,
+                                double unfoldedPathLength,
+                                const Vector& viewer,
+                                const Hit& hit)
 {
-    if (depth >= kMaxSpecularDepth)
+    const double viewerMag = viewer.magnitude();
+    double footprint = unfoldedPathLength * std::tan(pixelHalfAngle);
+    if (viewerMag > kSelfHitThreshold)
     {
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-
-    const Ray ray{origin, direction};
-    std::optional<Hit> hit =
-        firstHit(ctx.objects, ray, castBuffer, rayTime, ctx.animation, &ctx.patches);
-    if (!hit)
-    {
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-
-    const bool isEmitter = (hit->material == kEmitterMaterial);
-    std::shared_ptr<Material> material =
-        isEmitter ? nullptr : ctx.materials.fetchByIndex(hit->material);
-    if (!isEmitter && !material)
-    {
-        return Color{0.0f, 0.0f, 0.0f};
-    }
-
-    const double segment = hit->distance;
-
-    if (!isEmitter && material->isDelta())
-    {
-        const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
-        const BSDFSample s = material->sample(direction, hitNormal, generator);
-        if (!s.valid)
-        {
-            return Color{0.0f, 0.0f, 0.0f};
-        }
-        const Vector nextDir = Vector::normalized(s.direction);
-        const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
-        const Color child = shade(ctx, nextOrigin, nextDir, depth + 1,
-                                  pathLength + segment, rayTime, castBuffer, generator,
-                                  outDeposits);
-        return s.weight * child;
-    }
-
-    // Non-delta surface reached through a specular chain: gather the raw bounces.
-    // The viewer for the BRDF is the last specular vertex (origin) — the correct
-    // outgoing direction to evaluate the reflected surface's BRDF toward.
-    //
-    // Footprint: a mirror is an UNFOLDED straight path, so the perpendicular
-    // footprint at the reflected surface is the pixel half-angle projected over the
-    // TOTAL path length — exactly the direct-view perpendicular footprint at that
-    // unfolded depth. This is the same quantity the DIRECT path caps the gather
-    // radius at (pixelFootprintRadius's perpRadius = depth*tan(halfAngle)), so it
-    // keeps reflections as crisp as the direct view.
-    //
-    // The previous code then DIVIDED this by cos(view) (clamped to 0.15), inflating
-    // the disc up to ~6.7x at a grazing reflected surface — which is what made the
-    // reflected ceiling/floor blurrier than the direct view (Bug 3). The direct
-    // path applies NO such cos(view) inflation (it relies on the perpendicular /
-    // ray-differential footprint), and brightness parity does NOT depend on it: the
-    // density estimate divides by the SAME area it gathers over, so changing r only
-    // trades sharpness against noise, not energy. The foreshortening enlargement is
-    // therefore capped tightly (at most 2x, matching a moderate grazing angle)
-    // rather than the old 6.7x, keeping the reflected footprint near the direct
-    // perpendicular footprint.
-    const Vector toViewer = origin - hit->position;
-    const double toViewerMag = toViewer.magnitude();
-    double footprint = (pathLength + segment) * std::tan(ctx.pixelHalfAngle);
-    if (toViewerMag > kSelfHitThreshold)
-    {
-        const double cosView =
-            Vector::dot(toViewer / toViewerMag, hit->normal);
+        const double cosView = Vector::dot(viewer / viewerMag, hit.normal);
         if (cosView > 0.0)
         {
             footprint /= std::min(1.0, std::max(0.5, cosView));
         }
     }
-    return gatherRadiance(ctx, *hit, material, origin, footprint, rayTime, outDeposits);
+    return footprint;
 }
 
-void gatherRows(size_t rowBegin,
-                size_t rowEnd,
-                const Context& ctx,
-                const Camera& camera,
-                Buffer& buffer,
-                Result& stats)
+// PURE COLLECTION over a contiguous slice of this camera's GatherPoint records. For
+// each record: rebuild its Hit, fetch its material, density-estimate the retained
+// raw bounces at its position over its precomputed footprint, multiply by its
+// specular throughput and 1/N sample weight, and ADD into its pixel. `buffer`
+// accumulation (atomic) does the per-pixel averaging, so records sharing a pixel may
+// be split across threads. No ray casting, no extension — the trace already happened
+// in the probe pass.
+void gatherRecords(const std::vector<GatherPoint>& points,
+                   size_t begin,
+                   size_t end,
+                   const Context& ctx,
+                   Buffer& buffer,
+                   Result& stats)
 {
-    const size_t width = camera.width();
-    std::vector<Hit> castBuffer;
-    RandomGenerator generator;
-
-    for (size_t y = rowBegin; y < rowEnd; ++y)
+    for (size_t i = begin; i < end; ++i)
     {
-        for (size_t x = 0; x < width; ++x)
+        const GatherPoint& gp = points[i];
+
+        Hit hit;
+        hit.position = gp.position;
+        hit.normal = gp.normal;
+        hit.material = gp.materialIndex;
+        hit.distance = gp.unfoldedPathLength;
+
+        const bool isEmitter = (gp.materialIndex == kEmitterMaterial);
+        std::shared_ptr<Material> material =
+            isEmitter ? nullptr : ctx.materials.fetchByIndex(gp.materialIndex);
+        if (!isEmitter && !material)
         {
-            const PixelCoords coord{x, y};
-
-            const bool dofActive = (camera.projection() == Camera::Projection::RealLens);
-            // MOTION BLUR: with a finite shutter, take several primary samples per
-            // pixel, each at a RANDOM time within the shutter. The scene's animated
-            // geometry is resolved at that time, so the directly-visible (and, via
-            // shade(), reflected) moving surface integrates over its poses across the
-            // shutter — object motion blur. The per-sample random time mirrors the
-            // per-photon emission-time model so the camera side and the photon side
-            // agree on the time distribution. DOF already multisamples; reuse those
-            // samples for the time integral (take the max of the two sample counts).
-            const bool motionActive = (ctx.shutterSpan > 0.0f) && (ctx.cameraSamples > 1);
-            const int motionSamples = motionActive ? ctx.cameraSamples : 1;
-            const int dofSamples = dofActive ? kCameraSamplesPerPixel : 1;
-            const int primarySamples = std::max(dofSamples, motionSamples);
-
-            Color pixelAccum{0.0f, 0.0f, 0.0f};
-            int validSamples = 0;
-            bool anyHit = false;
-            bool firstSurfaceDelta = false;
-            size_t depositsThisPixel = 0;
-
-            for (int primary = 0; primary < primarySamples; ++primary)
-            {
-                // Camera ray time for this sample: a uniform draw across the shutter
-                // (so poses integrate into blur) or the fixed frame instant for a
-                // zero shutter / static scene (the exact baseline at frameTime 0).
-                const float sampleTime =
-                    motionActive
-                        ? ctx.frameTime +
-                              static_cast<float>(generator.value(ctx.shutterSpan))
-                        : ctx.frameTime;
-
-                // CAMERA MOTION BLUR: generate the primary ray at this sample's
-                // shutter time so an animated camera's eye/orientation is evaluated
-                // at `sampleTime`. Combined with the per-sample random time, a
-                // fast-moving/panning camera integrates its poses across the shutter
-                // into directional motion blur of the (even static) geometry. A
-                // static camera resolves the same pose for every time (parity).
-                const Ray ray = dofActive
-                    ? camera.generatePrimaryRayAt(coord, sampleTime, ctx.animation, &generator)
-                    : camera.generatePrimaryRayAt(coord, sampleTime, ctx.animation);
-
-                std::optional<Hit> hit =
-                    firstHit(ctx.objects, ray, castBuffer, sampleTime, ctx.animation,
-                             &ctx.patches);
-                if (!hit)
-                {
-                    ++stats.pixelsMiss;
-                    continue;
-                }
-                anyHit = true;
-
-                const bool isEmitter = (hit->material == kEmitterMaterial);
-                std::shared_ptr<Material> material =
-                    isEmitter ? nullptr : ctx.materials.fetchByIndex(hit->material);
-                if (!isEmitter && !material)
-                {
-                    continue;
-                }
-
-                if (isEmitter || !material->isDelta())
-                {
-                    // Direct non-delta pixel: gather at extension depth 0. The
-                    // viewer is the camera eye (ray origin); the footprint is the
-                    // exact per-pixel surface area via a ray differential against
-                    // the adjacent pixel (distortion- and foreshortening-correct).
-                    const double footprint =
-                        pixelFootprintRadius(ctx, camera, coord, *hit, hit->distance,
-                                             sampleTime);
-                    size_t deposits = 0;
-                    const Color radiance =
-                        gatherRadiance(ctx, *hit, material, ray.origin, footprint,
-                                       sampleTime, deposits);
-                    pixelAccum += radiance;
-                    depositsThisPixel += deposits;
-                    ++validSamples;
-                    continue;
-                }
-
-                // Delta first surface: glass is stochastic so average extra
-                // extension samples; a mirror is deterministic (single sample).
-                firstSurfaceDelta = true;
-                const bool stochasticDelta =
-                    (dynamic_cast<DielectricMaterial*>(material.get()) != nullptr);
-                const int extensionSamples =
-                    (stochasticDelta && !dofActive) ? kCameraSamplesPerPixel : 1;
-
-                const UnitVector hitNormal = UnitVector::alreadyNormalized(hit->normal);
-                Color accumulated{0.0f, 0.0f, 0.0f};
-                int extValid = 0;
-                for (int sample = 0; sample < extensionSamples; ++sample)
-                {
-                    const BSDFSample s = material->sample(ray.direction, hitNormal, generator);
-                    if (!s.valid)
-                    {
-                        continue;
-                    }
-                    const Vector nextDir = Vector::normalized(s.direction);
-                    const Vector nextOrigin = hit->position + nextDir * kReflectionEpsilon;
-                    size_t deposits = 0;
-                    accumulated += s.weight * shade(ctx, nextOrigin, nextDir, /*depth=*/1,
-                                                    /*pathLength=*/hit->distance, sampleTime,
-                                                    castBuffer, generator, deposits);
-                    depositsThisPixel += deposits;
-                    ++extValid;
-                }
-                if (extValid > 0)
-                {
-                    pixelAccum += accumulated * (1.0f / static_cast<float>(extValid));
-                    ++validSamples;
-                }
-            }
-
-            if (anyHit)
-            {
-                ++stats.pixelsHit;
-                if (firstSurfaceDelta)
-                {
-                    ++stats.pixelsDelta;
-                }
-            }
-
-            if (validSamples == 0)
-            {
-                continue;
-            }
-
-            const Color pixel = pixelAccum * (1.0f / static_cast<float>(validSamples));
-            if (pixel.red == 0.0f && pixel.green == 0.0f && pixel.blue == 0.0f)
-            {
-                continue;
-            }
-
-            buffer.addColor(coord, pixel);
-            ++stats.pixelsGathered;
-            stats.depositsAccum += depositsThisPixel;
-            const double peak = std::max({static_cast<double>(pixel.red),
-                                          static_cast<double>(pixel.green),
-                                          static_cast<double>(pixel.blue)});
-            if (peak > stats.maxRadiance)
-            {
-                stats.maxRadiance = peak;
-            }
-            stats.sumRadiance +=
-                0.2126 * pixel.red + 0.7152 * pixel.green + 0.0722 * pixel.blue;
+            continue;
         }
+
+        size_t deposits = 0;
+        const Color radiance = gatherRadiance(ctx, hit, material, gp.viewDir,
+                                              gp.footprintRadius, gp.sampleTime, deposits);
+        const Color contribution =
+            gp.specularThroughput * radiance * gp.sampleWeight;
+
+        stats.depositsAccum += deposits;
+        if (contribution.red == 0.0f && contribution.green == 0.0f &&
+            contribution.blue == 0.0f)
+        {
+            continue;
+        }
+        buffer.addColor(gp.pixel, contribution);
+
+        // Diagnostics (the per-pixel notions are approximated at record granularity:
+        // each surviving record is a gathered sample; peak/sum track the per-record
+        // contribution, which sums to the per-pixel value via the buffer).
+        ++stats.pixelsGathered;
+        const double peak = std::max({static_cast<double>(contribution.red),
+                                      static_cast<double>(contribution.green),
+                                      static_cast<double>(contribution.blue)});
+        if (peak > stats.maxRadiance)
+        {
+            stats.maxRadiance = peak;
+        }
+        stats.sumRadiance += 0.2126 * contribution.red + 0.7152 * contribution.green +
+                             0.0722 * contribution.blue;
     }
 }
 
 }  // namespace
 
-Result run(const std::vector<std::shared_ptr<Object>>& objects,
-           const std::shared_ptr<Camera>& camera,
+Result run(const std::shared_ptr<Camera>& camera,
+           const std::vector<GatherPoint>& points,
            const BounceStore& store,
            const MaterialLibrary& materials,
-           const AnimationQuery* animation,
            size_t workerCount,
            double minGatherRadius,
            Buffer& buffer,
-           float frameTime,
-           float shutterTime,
-           int cameraSamples)
+           float shutterTime)
 {
     Result result;
     if (!camera)
@@ -903,48 +836,41 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
         return result;
     }
 
-    const double pixelHalfAngle =
-        0.5 * Utility::radians(camera->verticalFieldOfView()) / static_cast<double>(height);
-
     // Gather temporal half-window = the full shutter span (see kEmitterTimeless note
     // above): wide enough to never reject a static surface's shutter-spread deposits
     // (exact brightness parity), with moving surfaces self-filtering spatially. A
     // zero shutter => 0 window => only same-instant deposits, which on a static scene
     // is every deposit (all stamped at frameTime).
     const float shutterSpan = std::max(0.0f, shutterTime);
-    const int samples = std::max(1, cameraSamples);
 
-    const Context ctx{objects,
-                      store,
-                      materials,
-                      animation,
-                      collectEmitterPatches(objects),
-                      pixelHalfAngle,
-                      minGatherRadius,
-                      shutterSpan,
-                      frameTime,
-                      shutterSpan,
-                      samples};
+    const Context ctx{store, materials, minGatherRadius, shutterSpan};
+
+    result.pixelsHit = points.size();  // every record reached a non-delta surface
+
+    if (points.empty())
+    {
+        return result;
+    }
 
     const size_t threads = std::max<size_t>(1, workerCount);
-    const size_t effectiveThreads = std::min(threads, height);
+    const size_t effectiveThreads = std::min(threads, points.size());
 
     std::vector<Result> perThread(effectiveThreads);
     std::vector<std::thread> pool;
     pool.reserve(effectiveThreads);
 
-    const size_t rowsPerThread = (height + effectiveThreads - 1) / effectiveThreads;
+    const size_t perThreadCount = (points.size() + effectiveThreads - 1) / effectiveThreads;
 
     for (size_t t = 0; t < effectiveThreads; ++t)
     {
-        const size_t rowBegin = t * rowsPerThread;
-        const size_t rowEnd = std::min(height, rowBegin + rowsPerThread);
-        if (rowBegin >= rowEnd)
+        const size_t begin = t * perThreadCount;
+        const size_t end = std::min(points.size(), begin + perThreadCount);
+        if (begin >= end)
         {
             break;
         }
-        pool.emplace_back([&, rowBegin, rowEnd, t]() {
-            gatherRows(rowBegin, rowEnd, ctx, *camera, buffer, perThread[t]);
+        pool.emplace_back([&, begin, end, t]() {
+            gatherRecords(points, begin, end, ctx, buffer, perThread[t]);
         });
     }
     for (auto& thread : pool)
@@ -954,10 +880,7 @@ Result run(const std::vector<std::shared_ptr<Object>>& objects,
 
     for (const auto& s : perThread)
     {
-        result.pixelsHit += s.pixelsHit;
         result.pixelsGathered += s.pixelsGathered;
-        result.pixelsDelta += s.pixelsDelta;
-        result.pixelsMiss += s.pixelsMiss;
         result.maxRadiance = std::max(result.maxRadiance, s.maxRadiance);
         result.sumRadiance += s.sumRadiance;
         result.depositsAccum += s.depositsAccum;

@@ -12,8 +12,9 @@
 // A probe is a world-space point the camera can see directly OR through any chain
 // of delta (mirror/glass) surfaces — i.e. the FIRST NON-DELTA surface a camera
 // ray reaches after being extended through every specular bounce. The probe pass
-// (see ProbeGather::collectProbes) casts camera rays, extends each through delta
-// surfaces, and records the diffuse/glossy point it lands on.
+// (see ProbeGather::collectGatherPoints — the single camera-side specular tracer)
+// casts camera rays, extends each through delta surfaces, and records the
+// diffuse/glossy point it lands on. The probe positions are the record positions.
 //
 // The set of probe points is EXACTLY the set of surface locations whose deposited
 // radiance can ever reach the camera. During the photon pass a non-delta bounce

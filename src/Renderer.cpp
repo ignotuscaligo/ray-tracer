@@ -266,7 +266,14 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
     // the same scene-depth pixel footprint that sizes everything else.
     std::shared_ptr<ProbeIndex> probeIndex;
     std::shared_ptr<BounceStore> bounceStore;
-    ProbeGather::ProbeResult probeResult;
+    ProbeGather::ProbeResult probeResult;       // diagnostic counters (aggregated)
+    std::vector<Vector> probePositions;         // UNION of record positions: the keep-test
+    // Per-camera gather-point records (the probe pass is the single camera-side
+    // specular tracer; each camera's gather consumes ONLY its own records so cameras
+    // never cross-contaminate). Keyed by camera pointer to survive the null/debug
+    // skips below. The keep-test ProbeIndex is built from the UNION of all positions.
+    std::unordered_map<const Camera*, std::vector<ProbeGather::GatherPoint>>
+        cameraGatherPoints;
     double probeGatherMinRadius = 0.0;
     if (settings.useProbeGather)
     {
@@ -297,9 +304,10 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         // filter isolate direct deposits and run no gather — DESIGN §6f / the gather
         // loop's `debugCamera` test — so they contribute no probes.)
         //
-        // Per-camera time threading is preserved: each collectProbes call still
-        // receives frameTime/shutterTime/probeTimeSlices, so each camera's probes
-        // span the shutter at that camera's viewpoint (§9d).
+        // Per-camera time threading is preserved: each collectGatherPoints call
+        // receives frameTime/shutterTime/cameraTimeSamples, so each camera's records
+        // (and thus probe positions) span the shutter at that camera's viewpoint
+        // (§9d) — every sample carries its own random shutter time.
         for (const auto& cam : cameras)
         {
             if (!cam)
@@ -312,25 +320,35 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
             {
                 continue;
             }
-            ProbeGather::ProbeResult camProbes = ProbeGather::collectProbes(
+            // THE SINGLE CAMERA-SIDE SPECULAR TRACER: walk each pixel's delta chain
+            // ONCE, producing one gather-point record per surviving sample (all DOF /
+            // shutter / Fresnel-branch samples). The record positions are the probes;
+            // the per-camera gather later consumes the full records with no tracing.
+            // (cameraTimeSamples drives both the shutter integral here and the gather;
+            // probeTimeSlices is retired — every sample carries its own random time.)
+            ProbeGather::ProbeResult camProbes = ProbeGather::collectGatherPoints(
                 scene.objects, *cam, *scene.materialLibrary,
                 animationQuery.get(),
                 static_cast<float>(settings.frameTime),
                 static_cast<float>(settings.shutterTime),
-                settings.probeTimeSlices,
+                settings.cameraTimeSamples,
                 settings.probeSubSample);
-            // Union the probe points; aggregate the diagnostic counters.
-            probeResult.probes.insert(probeResult.probes.end(),
-                                      camProbes.probes.begin(),
-                                      camProbes.probes.end());
+            // Union the probe POSITIONS for the shared keep-test index; aggregate the
+            // diagnostic counters; keep the full records per-camera for its gather.
+            probePositions.reserve(probePositions.size() + camProbes.points.size());
+            for (const ProbeGather::GatherPoint& gp : camProbes.points)
+            {
+                probePositions.push_back(gp.position);
+            }
             probeResult.cameraRays += camProbes.cameraRays;
             probeResult.deltaExtensions += camProbes.deltaExtensions;
             probeResult.misses += camProbes.misses;
+            cameraGatherPoints.emplace(cam.get(), std::move(camProbes.points));
         }
         // The probe-index cell size = keepRadius so a keep query touches a 3x3x3
         // neighborhood. The gather's own bounce-index cell size is set later.
         probeIndex = std::make_shared<ProbeIndex>(
-            probeResult.probes, keepRadius, keepRadius);
+            probePositions, keepRadius, keepRadius);
 
         // Size the raw-bounce store from the VISIBLE-SURFACE-AREA proxy (the probe
         // count) rather than always reserving the full configured capacity: the
@@ -343,9 +361,9 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         // smaller used-prefix. (At 36 B/slot the default ceiling is ~1.3 GiB.)
         constexpr std::size_t kSlotsPerProbe = 256;
         const std::size_t probeSized =
-            probeResult.probes.empty()
+            probePositions.empty()
                 ? settings.bounceStoreCapacity
-                : probeResult.probes.size() * kSlotsPerProbe;
+                : probePositions.size() * kSlotsPerProbe;
         const std::size_t capacity =
             std::min(settings.bounceStoreCapacity,
                      std::max<std::size_t>(1, probeSized));
@@ -643,18 +661,22 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
             // OWNS the whole image, so it writes into the (cleared) buffer.
             if (imageBuffer && !debugCamera)
             {
+                // PURE COLLECTION: gather over THIS camera's own records (produced by
+                // the probe pass = the single specular tracer). No ray casting here.
+                const auto recordsIt = cameraGatherPoints.find(cam.get());
+                static const std::vector<ProbeGather::GatherPoint> kNoRecords;
+                const std::vector<ProbeGather::GatherPoint>& camRecords =
+                    (recordsIt != cameraGatherPoints.end()) ? recordsIt->second
+                                                            : kNoRecords;
                 cr.probe = ProbeGather::run(
-                    scene.objects,
                     cam,
+                    camRecords,
                     *bounceStore,
                     *scene.materialLibrary,
-                    animationQuery.get(),
                     settings.workerCount,
                     probeGatherMinRadius,
                     *imageBuffer,
-                    static_cast<float>(settings.frameTime),
-                    static_cast<float>(settings.shutterTime),
-                    settings.cameraTimeSamples);
+                    static_cast<float>(settings.shutterTime));
             }
             // Light fixtures are NOT a separate pass in probe mode: each emitter
             // deposited its own surface radiance as raw bounces (depositEmitters

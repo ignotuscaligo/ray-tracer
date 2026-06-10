@@ -181,7 +181,15 @@ std::string writeScene(bool moving)
     {
         scene = substitute(scene, "{MOVING}", kCameraAnimation);
         scene = substitute(scene, "{SHUTTER}", "1.0");
-        scene = substitute(scene, "{SAMPLES}", "32");
+        // 64 shutter samples: enough that the seam-steepness metric (a coarse
+        // row-averaged max-step) is reproducible run-to-run. The unified probe gather
+        // (single camera-side tracer) probes every gather sample, so each of the 64
+        // camera poses lands on COVERED surface — the seam integrates cleanly. (Under
+        // the old split probe/gather, half the sweep fell in probe-coverage HOLES that
+        // read black, exaggerating the apparent blur; the corrected gather is sharper,
+        // so the moving/static ratio is higher than the pre-refactor ~0.43 — still far
+        // below the 1.0 a time-blind regression would give.)
+        scene = substitute(scene, "{SAMPLES}", "64");
         scene = substitute(scene, "{OFFSET}", "0.0");
     }
     else
@@ -276,10 +284,17 @@ TEST_CASE("A fast-translating camera motion-blurs static geometry",
 
     // The static seam is a steep one/two-column red falloff; the moving camera
     // spreads it across many columns, dropping the max step. Require the moving
-    // render's seam to be at least 30% shallower than the static one — a margin far
-    // above run-to-run Monte-Carlo noise yet failing decisively if the camera
-    // ray-gen ever regresses to a static (time-blind) pose (the two seams would then
-    // be the identical sharp profile, ratio ~1.0).
+    // render's seam to be measurably shallower than the static one (ratio < 0.9) —
+    // failing decisively if the camera ray-gen ever regresses to a static
+    // (time-blind) pose (the two seams would then be the identical sharp profile,
+    // ratio ~1.0). The margin is deliberately loose: the seam-steepness metric is a
+    // coarse row-averaged max-step over two UNSEEDED renders, so the observed ratio
+    // swings ~0.6-0.8 run-to-run. The unified probe gather (single camera-side
+    // tracer) raised this ratio from the pre-refactor ~0.43: it now probes EVERY
+    // gather sample, so all 64 camera poses land on covered surface and the seam
+    // integrates cleanly, where the old split probe/gather left half the sweep in
+    // coverage HOLES that read black and exaggerated the apparent blur. 0.9 keeps a
+    // comfortable margin over the noisy upper tail while still being far below 1.0.
     REQUIRE(sharpSeam > 0.0);
-    REQUIRE(blurredSeam < 0.7 * sharpSeam);
+    REQUIRE(blurredSeam < 0.9 * sharpSeam);
 }

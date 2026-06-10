@@ -4,8 +4,10 @@
 #include "BounceStore.h"
 #include "Buffer.h"
 #include "Camera.h"
+#include "Color.h"
 #include "MaterialLibrary.h"
 #include "Object.h"
+#include "PixelCoords.h"
 #include "ProbeIndex.h"
 #include "Vector.h"
 
@@ -17,25 +19,41 @@
 //
 // Replaces BOTH camera-side mechanisms — the direct-diffuse SPLAT and the
 // quantized DENSITY GRID specular reflections — with ONE probe-guided raw-bounce
-// gather:
+// gather. The camera-side specular trace lives in EXACTLY ONE place — the probe
+// pass — and the gather is PURE COLLECTION.
 //
-//   1. PROBE PASS (collectProbes): cast camera rays and EXTEND each through delta
-//      surfaces (mirror reflect / glass refract) to its FIRST NON-DELTA hit.
-//      Those hit points are the PROBES — exactly the diffuse/glossy surface
-//      points the camera can see directly or via any specular path. A spatial
-//      index over them (ProbeIndex) drives the photon-pass keep-test.
+//   1. PROBE PASS = THE SINGLE CAMERA-SIDE SPECULAR TRACER (collectGatherPoints).
+//      For every pixel sample (DOF aperture / random shutter time / per-Fresnel-
+//      branch for glass) cast a camera ray and EXTEND it through delta surfaces
+//      (mirror reflect / glass refract) to its FIRST NON-DELTA hit, ACCUMULATING
+//      the BSDF throughput along the chain. Emit ONE GatherPoint record per
+//      surviving sample: the non-delta hit it landed on, the product of the delta
+//      BSDF weights to reach it, the unfolded path length (for the reflected
+//      footprint), the sample's shutter time, and its 1/N pixel weight. The record
+//      POSITIONS are the PROBES — exactly the diffuse/glossy surface points the
+//      camera sees directly or via any specular path — and drive the photon-pass
+//      keep-test (ProbeIndex).
+//
+//      WHY here and not the gather: a delta BSDF against a POINT camera is a
+//      measure-zero event — a mirror cannot be GATHERED (no stored photon lands in
+//      the pixel-footprint reflection cone), it must be TRACED. That irreducible
+//      trace is this pass. (DESIGN §6b: EXTEND, do not gather, at a delta vertex —
+//      the extension happens ONCE, here.)
 //
 //   2. GUIDED STORAGE (in the Worker): a non-delta photon bounce is stored raw in
 //      a BounceStore only if it lies within gather range of some probe; otherwise
 //      it is discarded (it can never reach the camera). Memory is bounded by
 //      visible-surface-area, which makes raw storage affordable.
 //
-//   3. UNIFIED GATHER (run): for each camera ray, extend through delta surfaces to
-//      the first non-delta hit, then gather the retained raw bounces near that hit:
-//        L = (cos / footprintArea) * sum over bounces in radius of
-//              BRDF(incoming, toCamera) * power
-//      This SINGLE path renders both directly-visible diffuse (extension depth 0)
-//      AND reflected/refracted diffuse (extension depth > 0) at identical fidelity.
+//   3. UNIFIED GATHER (run) = PURE COLLECTION. A flat loop over this camera's
+//      GatherPoint records: for each, density-estimate the retained raw bounces at
+//      its position over a footprint sized from the unfolded path length, multiply
+//      by the record's specular throughput, and accumulate (weighted by the
+//      sample weight) into its pixel. NO ray casting, NO specular recursion, NO
+//      delta extension in the gather — those all happened in the probe pass. Every
+//      gather point IS a probe by construction, so a surface reached only through a
+//      minority Fresnel branch of a small glass object is probed AND gathered with
+//      the same sampling — no 1-vs-N mismatch can cull its deposits.
 //
 // The mirror==direct invariant: a reflection in a mirror is the scene gathered
 // the SAME way as the direct view, so reflections match the direct view (reversed)
@@ -43,40 +61,88 @@
 namespace ProbeGather
 {
 
-// ===== Probe pass =====
+// ===== Probe pass = single camera-side specular tracer =====
+
+// One per-pixel camera-side specular trace result: the non-delta surface a camera
+// sample reached (directly at extension depth 0, or through a delta chain), plus
+// everything the PURE-COLLECTION gather needs to turn it into pixel radiance with
+// no further ray casting. Its `position` is ALSO the probe point for the keep-test
+// (every gather point is a probe by construction). ~72 B.
+struct GatherPoint
+{
+    PixelCoords pixel{0, 0};       // the camera pixel this sample contributes to
+    Vector position{};             // first-non-delta world hit (the probe point)
+    Vector normal{};               // surface normal at the hit
+    Vector viewDir{};              // unit direction from the hit toward the viewer (the
+                                   //   camera eye for a direct hit, the last specular
+                                   //   vertex for a reflected one): the BRDF's wo. Stored
+                                   //   so the gather needs no ray to recover it.
+    std::size_t materialIndex = 0; // hit material (kEmitterMaterial for an emitter face)
+    Color specularThroughput{1.0f, 1.0f, 1.0f};  // product of delta BSDF weights to reach
+                                                  //   the hit (identity for a direct hit)
+    double unfoldedPathLength = 0.0;  // total camera-to-hit distance along the (unfolded)
+                                      //   specular chain; sizes the reflected footprint
+    double footprintRadius = 0.0;     // the gather disc radius for this record, computed in
+                                      //   the probe pass: a RAY DIFFERENTIAL (min perp) for a
+                                      //   direct hit, the unfolded-path perpendicular
+                                      //   footprint (capped) for a reflected hit. Stored so
+                                      //   the gather does NO geometry — pure collection.
+    float sampleTime = 0.0f;          // the shutter time this camera sample was cast at
+                                      //   (the gather's temporal-window reference)
+    float sampleWeight = 1.0f;        // 1/N over this pixel's surviving samples (the
+                                      //   DOF/shutter/Fresnel average)
+};
 
 struct ProbeResult
 {
-    std::vector<Vector> probes;  // first-non-delta hit points reachable from the camera
+    // One record per surviving per-pixel camera sample (direct or specularly
+    // extended). The record positions are the probe points; the gather consumes the
+    // full records. Records for ONE camera only — the Renderer keeps per-camera
+    // record sets and unions only the POSITIONS for the shared keep-test index, so a
+    // camera's gather never reads another camera's records.
+    std::vector<GatherPoint> points;
     size_t cameraRays = 0;       // primary rays cast
-    size_t deltaExtensions = 0;  // rays that passed through at least one delta surface
-    size_t misses = 0;           // rays that escaped without reaching a non-delta surface
+    size_t deltaExtensions = 0;  // samples that passed through at least one delta surface
+    size_t misses = 0;           // samples that escaped without reaching a non-delta surface
 };
 
-// Cast camera rays (every pixel) and extend each through delta surfaces to the
-// first non-delta hit, collecting those points as probes. Pure geometry — does
-// not read the bounce store. `subSample` >= 1 strides the pixel grid (1 = every
-// pixel) to reduce probe-pass cost on large frames; the probes still tile the
-// visible surface because adjacent pixels project to overlapping footprints.
+// THE SINGLE CAMERA-SIDE SPECULAR TRACER. For every pixel (strided by `subSample`)
+// take this pixel's camera samples — all DOF aperture samples for a RealLens camera,
+// all `cameraSamples` random shutter-time samples for a finite shutter, and (for a
+// dielectric first hit) all `kCameraSamplesPerPixel` stochastic Fresnel branches —
+// extend each through delta surfaces to its first non-delta hit accumulating the BSDF
+// throughput, and emit one GatherPoint per surviving sample. The pure-collection
+// gather later consumes these records with no further tracing. Does not read the
+// bounce store.
 //
-// TEMPORAL COVERAGE: with a finite shutter the camera sees animated geometry at a
-// CONTINUUM of poses across [frameTime, frameTime+shutterTime). A probe set
-// collected at a single instant would miss a fast-moving object's later poses, so
-// the photon-pass keep-test would CULL the deposits the camera will actually gather
-// — the moving object would go dark. So the probe pass is run at several DISCRETE
-// time slices spanning the shutter (`timeSlices`), unioning the probes. Probe count
-// governs COVERAGE (was a bounce near ANY camera-reachable pose), not gather
-// smoothness — the gather itself stays continuous, weighting deposits by photon
-// time. A zero/absent shutter collapses to a single slice at `frameTime` (the exact
-// static baseline when frameTime is 0). `timeSlices` is clamped to >= 1.
-ProbeResult collectProbes(const std::vector<std::shared_ptr<Object>>& objects,
-                          const Camera& camera,
-                          const MaterialLibrary& materials,
-                          const AnimationQuery* animation,
-                          float frameTime = 0.0f,
-                          float shutterTime = 0.0f,
-                          int timeSlices = 1,
-                          size_t subSample = 1);
+// SAMPLING MIRRORS THE FORMER GATHER LOOP exactly, so the records are an unbiased
+// camera-side estimate:
+//   - primarySamples = max(DOF samples, shutter samples); each draws a random shutter
+//     time (or the fixed frameTime for a zero shutter) and generates its ray at that
+//     time via generatePrimaryRayAt (the camera pose is resolved at the sample time —
+//     §9e camera motion blur). DOF samples pass the generator for aperture jitter.
+//   - a dielectric first hit fans into `kCameraSamplesPerPixel` Fresnel picks (unless
+//     DOF already multisamples), each its own surviving record; a mirror is a single
+//     deterministic extension. sampleWeight = 1 / (surviving sample count) per pixel.
+//
+// TEMPORAL COVERAGE: each record carries its own `sampleTime`, drawn across the
+// shutter, so the union of record positions COVERS every pose the camera sees during
+// the shutter — exactly the surface regions the photon-pass keep-test must retain
+// deposits for. The gather then keeps a deposit only if its photon time is within a
+// shutter-sized window of the record's sampleTime (continuous weighting over discrete
+// samples). A zero/absent shutter => one sample at `frameTime` (the static baseline).
+//
+// CAMERA MOTION BLUR (§9e): every ray is generated at its sample time, so an animated
+// camera's probe rays (and thus the keep-test coverage and the gather) originate from
+// its pose at each sample time.
+ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& objects,
+                                const Camera& camera,
+                                const MaterialLibrary& materials,
+                                const AnimationQuery* animation,
+                                float frameTime = 0.0f,
+                                float shutterTime = 0.0f,
+                                int cameraSamples = 1,
+                                size_t subSample = 1);
 
 // ===== Emitter deposits (fixture visibility, unified) =====
 
@@ -117,34 +183,36 @@ struct Result
     size_t depositsAccum = 0;    // total raw bounces summed across gathered pixels
 };
 
-// Run the unified gather, writing radiance into `buffer` (sized to the camera
-// resolution; the gather OWNS the whole image — both direct and reflected
-// pixels). `store` must have had buildIndex() called. `workerCount` parallelizes
-// the pixel loop.
+// Run the unified gather = PURE COLLECTION. A flat loop over this camera's
+// GatherPoint `points` (produced by collectGatherPoints — the single camera-side
+// specular tracer): for each record, density-estimate the retained raw bounces at
+// its `position` over its `footprintRadius`, multiply by its `specularThroughput`,
+// and accumulate (weighted by `sampleWeight`) into its `pixel`. Writes radiance
+// into `buffer` (sized to the camera resolution; the gather OWNS the whole image —
+// direct and reflected pixels). `store` must have had buildIndex() called.
+// `workerCount` parallelizes the record loop.
 //
-// TIME: every camera-side ray (the per-pixel first hit, the specular `shade`
-// extension chain, and the emitter intersection) is cast at a CAMERA RAY TIME so
-// the scene's animated geometry is resolved at the pose the camera sees — NOT a
-// hardcoded 0. With a finite shutter each camera sample draws a RANDOM time in
-// [frameTime, frameTime+shutterTime) (matching the per-photon time model), so
-// directly-visible AND reflected moving geometry integrates over the shutter into
-// motion blur. The gather then keeps a deposit only if its photon time is within a
-// temporal window of the camera ray time (`|deposit.time - rayTime| <= window`),
-// so a moving surface's lighting is gathered from the photons that lit its
-// time-correct pose, not from every photon across the frame. A zero/absent shutter
-// uses a single fixed time `frameTime` (the exact static baseline at frameTime 0).
-// `cameraSamples` per pixel are averaged so the shutter is integrated (1 = a single
-// fixed-time sample for the no-blur / static path).
-Result run(const std::vector<std::shared_ptr<Object>>& objects,
-           const std::shared_ptr<Camera>& camera,
+// NO RAY CASTING, NO specular recursion, NO delta extension here — all of that
+// happened in the probe pass, whose records this consumes. The gather only does the
+// density estimate (BRDF evaluate over deposits in the footprint), exactly as for a
+// directly-visible surface; a reflected gather point is identical to a direct one
+// modulo its precomputed throughput/footprint. Because every record IS a probe, a
+// surface reached only through a minority Fresnel branch is gathered with the same
+// sampling that probed it — no 1-vs-N cull.
+//
+// TIME: each record carries the shutter `sampleTime` of the camera sample that
+// produced it; the gather keeps a deposit only if its photon time is within a
+// shutter-sized window of that sampleTime (a timeless emitter deposit always
+// passes). A moving surface's lighting is thus gathered from the photons that lit
+// its time-correct pose. `shutterTime` sizes the temporal half-window (0 => only
+// same-instant deposits, which on a static scene is every deposit).
+Result run(const std::shared_ptr<Camera>& camera,
+           const std::vector<GatherPoint>& points,
            const BounceStore& store,
            const MaterialLibrary& materials,
-           const AnimationQuery* animation,
            size_t workerCount,
            double minGatherRadius,
            Buffer& buffer,
-           float frameTime = 0.0f,
-           float shutterTime = 0.0f,
-           int cameraSamples = 1);
+           float shutterTime = 0.0f);
 
 }  // namespace ProbeGather
