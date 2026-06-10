@@ -539,19 +539,58 @@ the f-theta→perspective correction above).
   FOCUS POINT where the pinhole ray crosses the focus plane at `$focusDistance`. Result:
   sharp at `$focusDistance`, blurred elsewhere; moving `$focusDistance` moves the focus.
   Params: `$apertureRadius` (explicit lens-disk radius; if `<= 0`, derived as
-  `$focalLength / (2 · $fNumber)`), `$focusDistance`, `$focalLength`.
+  `$focalLength / (2 · $fNumber)`), `$focusDistance`, `$focalLength`. The radius actually used
+  is `Camera::effectiveApertureRadius()` (the explicit `$apertureRadius` if `> 0`, else the
+  derived value). All params default to a 0 effective aperture absent the scene keys, i.e. a
+  pinhole (no DOF) — see the invariants below.
 
-**DOF sampling hook + its boundary.** `generatePrimaryRay(coord, generator)` takes an
-optional RNG: with it, each call jitters the sub-pixel film position AND (for reallens) the
-aperture-disk sample, so DOF integrates over a samples-per-pixel loop. The focus point is
-fixed by the FILM sample (pinhole direction), independent of the aperture sample — all
-aperture samples for one film point converge on the focus plane (PBRT thin-lens model).
-`MirrorGather` multi-samples the primary ray (`kCameraSamplesPerPixel`) when the camera is
-reallens, so MIRROR/GLASS (delta) and emissive pixels — the ones imaged by a *cast camera
-ray* — show DOF. **[DETAIL] DIFFUSE surfaces do NOT show DOF**: they are imaged by the
-forward photon SPLAT (`coordForPoint`), which has no aperture model. Full diffuse DOF would
-require circle-of-confusion splatting keyed on each photon hit's depth vs. the focus plane —
-deliberately out of scope; the splat stays a sharp pinhole projection.
+### Thin-lens DOF model (probe-pass aperture sampling)
+
+DOF is **sampled noise, never a post-process or a stepped approximation** — it integrates over
+the camera samples exactly like motion blur integrates over shutter time. The implementation
+lives entirely in the **probe pass** (`ProbeGather::collectGatherPoints`), the single
+camera-side tracer: for a reallens camera with non-zero aperture, each pixel shoots
+`kCameraSamplesPerPixel` PRIMARY samples, each originating from a fresh aperture-disk point and
+aimed at that pixel's focus point. Every surviving sample emits a `GatherPoint` record at its
+first non-delta hit; the per-pixel `sampleWeight = 1/N` averages them. The blur is the SPREAD
+of where those converging rays land on off-focus geometry — many records per pixel scattered
+across nearby surface points, each gathered over a tight (sharp-image-scale) footprint. More
+samples ⇒ less noise, zero bias. Because the probe pass now images EVERY pixel (diffuse,
+glass, mirror, emissive) — not just delta/emissive ones via a cast ray — **DOF applies to all
+surface types, diffuse included.** (This supersedes the pre-probe-restructure note that diffuse
+surfaces showed no DOF because they were imaged by the forward photon splat; the splat path is
+retired behind `$probeGather true` — §6f.)
+
+**The sampling hook.** `Camera::generatePrimaryRay(coord, generator)` /
+`generatePrimaryRayAt(coord, time, animation, generator)` take an optional RNG: with it each
+call jitters the sub-pixel film position AND (for reallens) the aperture-disk sample (uniform
+disk via `r = R·√ξ₁`, `θ = 2πξ₂`). The focus point is fixed by the FILM sample (the pinhole
+direction), independent of the aperture sample — all aperture samples for one film point
+converge on the focus plane (PBRT thin-lens model). The probe pass passes a generator on the
+reallens path and none otherwise, so the matched probe/gather projection pair stays consistent:
+whatever ray the probe casts is what the footprint + gather assume. The direct-hit footprint
+(`pixelFootprintRadius`) differences the hit against the pinhole-CENTER adjacent-pixel ray (no
+generator), giving each aperture sample a sharp-image-scale gather disc — correct, since the
+blur must come from the inter-sample spread, not from inflating each sample's disc.
+
+**Circle of confusion.** To first order CoC ∝ `effectiveApertureRadius · |depthHit −
+focusDistance| / depthHit`: zero at the focus plane, growing ~linearly with defocus and with
+aperture. Numerically verified (silhouette transition-width oracle) in `test_DepthOfField.cpp`.
+
+**[INVARIANT] DOF off == pinhole, byte-for-byte.** `dofActive` in the probe pass gates on
+`projection == RealLens` **AND** `effectiveApertureRadius() > 0`. A perspective camera, OR a
+reallens camera whose effective aperture is 0, takes the SAME single-sample, pixel-center,
+no-generator path — so the no-DOF image is identical to the legacy renderer. The reallens ray
+with a 0 effective aperture also reduces geometrically to the pinhole ray (every aperture
+sample collapses to the eye), so the two are consistent. `test_DepthOfField.cpp` pins both: a
+zero-effective-aperture reallens ray equals the perspective ray for every pixel, and a
+zero-aperture reallens RENDER matches a pinhole render within the Monte-Carlo noise floor.
+
+**[INVARIANT] Focus plane stays sharp under aperture change; off-focus blur grows with
+aperture.** Increasing `$apertureRadius` widens the off-focus circle of confusion but leaves
+the focus-plane silhouette unchanged (within noise) — the regression test asserts the
+focus-distance object's edge width is flat across apertures while the near/far objects' edge
+widths grow monotonically.
 
 ---
 
@@ -653,8 +692,9 @@ scene-load transform (static object → unchanged).
   (`src/Worker.cpp:248-252`) admits the photon. **[DETAIL] camera-at-photon-time on
   the LEGACY splat:** the LEGACY (`$probeGather false`) diffuse splat projects
   through the camera's STATIC transform (`Worker::splatToCamera` →
-  `coordForPoint`, a static pinhole, consistent with the no-DOF-on-diffuse boundary
-  in §6e), so the legacy path does NOT carry camera motion blur. The DEFAULT
+  `coordForPoint`, a static pinhole with no aperture model, so the legacy splat path
+  carries neither DOF nor camera motion blur — it is a sharp pinhole projection). The
+  DEFAULT
   (`$probeGather true`) path DOES — its camera rays are generated at the ray's
   shutter time and so resolve an animated camera's pose at that time (§9e). Camera
   motion blur is therefore a guaranteed behavior of the default gather, not the

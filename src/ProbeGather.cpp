@@ -254,7 +254,15 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
 
     const float shutterSpan = std::max(0.0f, shutterTime);
     const bool motionActive = (shutterSpan > 0.0f) && (cameraSamples > 1);
-    const bool dofActive = (camera.projection() == Camera::Projection::RealLens);
+    // DOF is active only for a RealLens camera with a NON-ZERO effective aperture.
+    // A RealLens camera whose effective aperture is 0 is geometrically a pinhole
+    // (every aperture sample collapses to the eye, the ray reduces to the perspective
+    // pinhole ray), so it MUST take the same single-sample, pixel-center, no-generator
+    // path as a perspective camera — that is the "DOF off == pinhole, byte-for-byte"
+    // invariant. Gating on the effective aperture (not just the projection enum) is
+    // what makes a zero-aperture reallens camera a true pinhole control.
+    const bool dofActive = (camera.projection() == Camera::Projection::RealLens) &&
+                           (camera.effectiveApertureRadius() > 0.0);
 
     // The camera-side specular trace is camera-ray-scale and cheap; run it
     // single-threaded so the record list (and its diagnostics) accumulate without
