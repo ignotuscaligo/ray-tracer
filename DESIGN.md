@@ -615,11 +615,15 @@ scene-load transform (static object → unchanged).
   random walk (and the splat's occlusion ray) all cast at the photon's time
   (`src/Worker.cpp:496,286`).
 - **Splat** projects through the camera; the per-pixel exposure-window gate
-  (`src/Worker.cpp:248-252`) admits the photon. **[DETAIL] camera-at-photon-time:**
-  the per-photon-time path is wired end-to-end; the diffuse splat currently projects
-  through the camera's static transform (camera animation → camera motion blur is
-  the same per-photon-time mechanism but the splat's `coordForPoint` is a static
-  pinhole, consistent with the no-DOF-on-diffuse boundary in §6e).
+  (`src/Worker.cpp:248-252`) admits the photon. **[DETAIL] camera-at-photon-time on
+  the LEGACY splat:** the LEGACY (`$probeGather false`) diffuse splat projects
+  through the camera's STATIC transform (`Worker::splatToCamera` →
+  `coordForPoint`, a static pinhole, consistent with the no-DOF-on-diffuse boundary
+  in §6e), so the legacy path does NOT carry camera motion blur. The DEFAULT
+  (`$probeGather true`) path DOES — its camera rays are generated at the ray's
+  shutter time and so resolve an animated camera's pose at that time (§9e). Camera
+  motion blur is therefore a guaranteed behavior of the default gather, not the
+  retired splat.
 
 ### 9c. Shutter + photometric normalization — [INVARIANT], do not "fix"
 
@@ -704,6 +708,58 @@ fast frames; a moving object's reflection in a mirror blurs on fast frames and i
 sharp on slow ones; static scenes (`CornellBoxArea`) match the pre-change mean
 luminance within run-to-run noise. Pinned by `tests/test_AnimatedGather.cpp`
 (intersection-at-time + gather-at-time render).
+
+### 9e. The CAMERA transform is evaluated at the ray's time — [INVARIANT] camera motion blur
+
+§9d makes every camera-side ray carry a scene TIME and resolves animated GEOMETRY
+at that time. **[INVARIANT] The CAMERA's own transform (eye position + orientation)
+is ALSO resolved at each camera ray's time**, so when the camera itself moves or
+pans fast across a non-zero shutter the (even static) geometry it images integrates
+over the camera's poses into directional motion blur. Without this a fast-moving
+camera would NOT blur — the geometry would be sampled at many times but always
+imaged from the camera's frame-0 pose, leaving static scenery sharp.
+
+- A camera carries keyframed position/orientation exactly like a scene object: the
+  scene loader registers a camera's `$animation` block in the same
+  `KeyframedAnimationQuery`, keyed by the camera's `name()`
+  (`SceneLoader::parseObjectFromJson` applies `$animation` to ANY object, cameras
+  included). No camera-specific animation type.
+- `Camera::resolveEyeRotationAt(time, animation)` looks the camera's pose up from
+  the `AnimationQuery` by `name()` at the ray's time — the camera-side analogue of
+  `Volume::resolveTransformAt` (`src/Camera.cpp`). `Camera::generatePrimaryRayAt`
+  builds the ray from that resolved pose via the SAME projection body as the static
+  `generatePrimaryRay` (one shared `buildPrimaryRay(eye, rotation)` — perspective /
+  orthographic / reallens math lives in one place).
+- The DEFAULT probe path generates every camera ray at the ray's time: the probe
+  pass (`collectProbeRows`, so the keep-test covers every pose the moving camera
+  sees across the shutter — otherwise a fast move blacks out the swept-in geometry),
+  the per-pixel gather primary ray, and the ray-differential footprint
+  (`pixelFootprintRadius`) all call `generatePrimaryRayAt(coord, time, animation)`
+  (`src/ProbeGather.cpp`). With the per-sample random shutter time of §9d, the
+  poses integrate into blur.
+
+**[INVARIANT] STATIC-camera parity is byte-for-byte.** With a null `animation`, or a
+camera with no animation entry, `resolveEyeRotationAt` returns the scene-load
+(eye, rotation) for ALL times, so `generatePrimaryRayAt` is identical to the static
+`generatePrimaryRay`. A non-animated camera (every pre-existing scene) is unchanged.
+
+**[DETAIL] The LEGACY (`$probeGather false`) path keeps a static camera.** The
+legacy splat (`coordForPoint`) and `MirrorGather`/`EmissiveGather` still image
+through the camera's static pose (consistent with §9b's legacy-splat note and the
+no-DOF-on-diffuse boundary in §6e); camera motion blur is a property of the default
+gather only. Whenever both a deposit-projection and a gather camera ray ARE
+exercised together they must be generated at the SAME time (the matched-pair rule of
+§6e); in the default path only the gather generates camera rays, so the pair is
+trivially consistent.
+
+Verified: a fast-TRANSLATING camera over a static red/green-seam wall smears the
+vertical seam (max red-channel column step `static ~6500 → moving ~2840`, ratio
+~0.44) while the zero-shutter same-pose render stays crisp; a fast-PANNING camera
+likewise smears the sharpest wall edge (`88 → 3.9`). Before the change moving and
+static were the identical sharp image (ratio ~1.0). Pinned by
+`tests/test_CameraMotionBlur.cpp` (the `resolveEyeRotationAt`/`generatePrimaryRayAt`
+pose unit test + the moving-vs-static seam-steepness regression). Proof renders +
+scenes: `CornellBoxCameraMoveTranslate{,Static}.json`, `CornellBoxCameraPan{,Static}.json`.
 
 ---
 
