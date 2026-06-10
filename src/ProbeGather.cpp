@@ -203,7 +203,6 @@ void collectProbeRows(size_t rowBegin,
         for (size_t x = 0; x < width; x += subSample)
         {
             const PixelCoords coord{x, y};
-            const Ray ray = camera.generatePrimaryRay(coord);
 
             // Sample this pixel's probe ray at each discrete time slice spanning the
             // shutter and union the resulting non-delta hit points. With moving
@@ -213,8 +212,16 @@ void collectProbeRows(size_t rowBegin,
             // scene's hit point is identical across slices, so this degenerates to
             // the single-instant probe set (the deposits coincide; the index dedups
             // by spatial cell). One slice => the original single-time behavior.
+            //
+            // CAMERA MOTION BLUR: the primary ray is generated at the slice TIME via
+            // generatePrimaryRayAt, so an animated camera's probe rays originate from
+            // its pose at each slice. The union of hit points then covers the surface
+            // regions the camera sees as it moves across the shutter — without this
+            // the keep-test would only retain deposits for the camera's frame-0 pose
+            // and a fast camera move would cull (black out) the rest of the view.
             for (const float time : times)
             {
+                const Ray ray = camera.generatePrimaryRayAt(coord, time, animation);
                 ++out.cameraRays;
                 bool traversedDelta = false;
                 std::optional<Hit> hit = extendToNonDelta(
@@ -569,13 +576,17 @@ double pixelFootprintRadius(const Context& ctx,
                             const Camera& camera,
                             const PixelCoords& coord,
                             const Hit& hit,
-                            double fallbackDistance)
+                            double fallbackDistance,
+                            float rayTime)
 {
     const Vector n = hit.normal;
     // Adjacent pixel: +1 in x where possible, else -1 (frame's right edge).
     const size_t nx = (coord.x + 1 < camera.width()) ? coord.x + 1 : (coord.x - 1);
     const PixelCoords adj{nx, coord.y};
-    const Ray adjRay = camera.generatePrimaryRay(adj);
+    // Generate the differential ray at the SAME sample time as the primary ray, so
+    // an animated camera's footprint is measured from its pose at `rayTime` (matches
+    // the primary ray's origin/orientation). Static camera => same pose as before.
+    const Ray adjRay = camera.generatePrimaryRayAt(adj, rayTime, ctx.animation);
 
     // Perpendicular (constant-angle) footprint at this depth.
     const double perpRadius = fallbackDistance * std::tan(ctx.pixelHalfAngle);
@@ -749,9 +760,15 @@ void gatherRows(size_t rowBegin,
                               static_cast<float>(generator.value(ctx.shutterSpan))
                         : ctx.frameTime;
 
+                // CAMERA MOTION BLUR: generate the primary ray at this sample's
+                // shutter time so an animated camera's eye/orientation is evaluated
+                // at `sampleTime`. Combined with the per-sample random time, a
+                // fast-moving/panning camera integrates its poses across the shutter
+                // into directional motion blur of the (even static) geometry. A
+                // static camera resolves the same pose for every time (parity).
                 const Ray ray = dofActive
-                    ? camera.generatePrimaryRay(coord, &generator)
-                    : camera.generatePrimaryRay(coord);
+                    ? camera.generatePrimaryRayAt(coord, sampleTime, ctx.animation, &generator)
+                    : camera.generatePrimaryRayAt(coord, sampleTime, ctx.animation);
 
                 std::optional<Hit> hit =
                     firstHit(ctx.objects, ray, castBuffer, sampleTime, ctx.animation,
@@ -778,7 +795,8 @@ void gatherRows(size_t rowBegin,
                     // exact per-pixel surface area via a ray differential against
                     // the adjacent pixel (distortion- and foreshortening-correct).
                     const double footprint =
-                        pixelFootprintRadius(ctx, camera, coord, *hit, hit->distance);
+                        pixelFootprintRadius(ctx, camera, coord, *hit, hit->distance,
+                                             sampleTime);
                     size_t deposits = 0;
                     const Color radiance =
                         gatherRadiance(ctx, *hit, material, ray.origin, footprint,

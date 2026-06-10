@@ -1,5 +1,6 @@
 #include "Camera.h"
 
+#include "AnimationQuery.h"
 #include "Pyramid.h"
 #include "RandomGenerator.h"
 #include "Utility.h"
@@ -365,7 +366,46 @@ Vector Camera::pixelDirection(const PixelCoords& coord) const
 
 Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* generator) const
 {
-    const Quaternion rot = rotation();
+    // Static pose (scene-load eye + orientation). The time-aware overload
+    // generatePrimaryRayAt resolves an animated pose first and calls the same body,
+    // so a NON-animated camera goes through here unchanged (static parity).
+    return buildPrimaryRay(coord, position(), rotation(), generator);
+}
+
+Ray Camera::generatePrimaryRayAt(const PixelCoords& coord,
+                                 float time,
+                                 const AnimationQuery* animation,
+                                 RandomGenerator* generator) const
+{
+    // Camera motion blur: resolve the eye + orientation at this ray's scene time,
+    // then build the ray exactly as the static path does. With no animation entry
+    // this returns the scene-load pose for every time, so the ray is identical to
+    // generatePrimaryRay (byte-for-byte static parity).
+    const EyeRotation pose = resolveEyeRotationAt(time, animation);
+    return buildPrimaryRay(coord, pose.eye, pose.rotation, generator);
+}
+
+Camera::EyeRotation Camera::resolveEyeRotationAt(float time,
+                                                 const AnimationQuery* animation) const
+{
+    if (animation != nullptr)
+    {
+        // Mirrors Volume::resolveTransformAt: an animated camera carries an entry
+        // under its name(); a static one returns nullopt and falls back below.
+        const std::optional<Transform> overridden = animation->transformAt(name(), time);
+        if (overridden)
+        {
+            return EyeRotation{overridden->position, overridden->rotation};
+        }
+    }
+    return EyeRotation{position(), rotation()};
+}
+
+Ray Camera::buildPrimaryRay(const PixelCoords& coord,
+                            const Vector& eye,
+                            const Quaternion& rot,
+                            RandomGenerator* generator) const
+{
     const Vector right = rot * Vector::unitX;
     const Vector up = rot * Vector::unitY;
     const Vector forward = rot * Vector::unitZ;
@@ -392,7 +432,7 @@ Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* genera
             // across the image plane (size set by orthographicHeight). No
             // perspective convergence.
             const double halfH = m_orthographicHeight / 2.0;
-            const Vector origin = position()
+            const Vector origin = eye
                 + (right * (s.sx * aspect * halfH))
                 + (up * (s.sy * halfH));
             return Ray{origin, forward.normalized()};
@@ -417,7 +457,7 @@ Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* genera
             const double t = (cosToAxis > 1e-9)
                 ? (m_focusDistance / cosToAxis)
                 : m_focusDistance;
-            const Vector focusPoint = position() + (pinholeDir * t);
+            const Vector focusPoint = eye + (pinholeDir * t);
 
             // Sample a point on the aperture disk (concentric within the lens
             // plane spanned by right/up). Center when no generator -> degenerates
@@ -433,7 +473,7 @@ Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* genera
                 lensX = r * std::cos(theta);
                 lensY = r * std::sin(theta);
             }
-            const Vector aperturePoint = position() + (right * lensX) + (up * lensY);
+            const Vector aperturePoint = eye + (right * lensX) + (up * lensY);
             const Vector dir = (focusPoint - aperturePoint).normalized();
             return Ray{aperturePoint, dir};
         }
@@ -447,7 +487,7 @@ Ray Camera::generatePrimaryRay(const PixelCoords& coord, RandomGenerator* genera
                 forward
                 + (right * (s.sx * aspect * halfHeight))
                 + (up * (s.sy * halfHeight));
-            return Ray{position(), direction.normalized()};
+            return Ray{eye, direction.normalized()};
         }
     }
 }

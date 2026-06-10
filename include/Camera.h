@@ -2,7 +2,9 @@
 
 #include "Object.h"
 #include "PixelCoords.h"
+#include "Quaternion.h"
 #include "Ray.h"
+#include "Vector.h"
 
 #include <limits>
 #include <optional>
@@ -10,6 +12,7 @@
 #include <utility>
 
 class RandomGenerator;
+class AnimationQuery;
 
 class Camera : public Object
 {
@@ -156,6 +159,37 @@ public:
     // generator per sample is how DOF and AA hook into a samples-per-pixel loop.
     Ray generatePrimaryRay(const PixelCoords& coord, RandomGenerator* generator = nullptr) const;
 
+    // --- §9: camera motion blur — generate the primary ray at a SCENE TIME ---
+    //
+    // The static generatePrimaryRay above builds the ray from the camera's
+    // scene-load eye position + orientation. When the camera itself is animated
+    // (a $animation block registered under the camera's name in the scene's
+    // AnimationQuery), a ray cast for a shutter time `time` must originate from the
+    // camera's pose AT THAT TIME — otherwise a fast-moving/panning camera does NOT
+    // motion-blur (the static geometry would stay sharp while only object motion
+    // smears). This mirrors Volume::resolveTransformAt on the geometry side: the
+    // pose is looked up from `animation` by the camera's name() at `time`, falling
+    // back to the static scene-load pose when the camera is not animated.
+    //
+    // [INVARIANT] STATIC-camera parity: with a null `animation`, or a camera that
+    // has no animation entry, resolveEyeRotationAt returns the exact scene-load
+    // (eye, rotation) for ALL times, so generatePrimaryRayAt is byte-for-byte the
+    // static generatePrimaryRay. Only an animated camera diverges across `time`.
+    Ray generatePrimaryRayAt(const PixelCoords& coord,
+                             float time,
+                             const AnimationQuery* animation,
+                             RandomGenerator* generator = nullptr) const;
+
+    // Resolve the camera eye position + orientation at `time` via `animation` (by
+    // this camera's name()), falling back to the static scene-load pose. Public so
+    // callers (and tests) can verify the pose the time-aware ray-gen uses.
+    struct EyeRotation
+    {
+        Vector eye;
+        Quaternion rotation;
+    };
+    EyeRotation resolveEyeRotationAt(float time, const AnimationQuery* animation) const;
+
     std::optional<PixelCoords> coordForPoint(const Vector& point) const;
     // Continuous (floating-point) pixel-space coordinate of a world point. Pixel centers
     // are at integer values (matching pixelDirection's coord -> direction mapping). The
@@ -187,6 +221,15 @@ public:
     ExposureWindow globalExposureWindow() const;
 
 private:
+    // Shared ray-construction body for a resolved (eye, rotation) pose. Both the
+    // static generatePrimaryRay and the time-aware generatePrimaryRayAt call this,
+    // so the projection math (perspective / orthographic / reallens) lives in one
+    // place and a static camera is identical regardless of which entry point is used.
+    Ray buildPrimaryRay(const PixelCoords& coord,
+                        const Vector& eye,
+                        const Quaternion& rotation,
+                        RandomGenerator* generator) const;
+
     size_t m_width;
     size_t m_height;
     double m_aspectRatio;
