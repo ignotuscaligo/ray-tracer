@@ -2,8 +2,11 @@
 
 #include "Buffer.h"
 #include "Color.h"
+#include "Hit.h"
+#include "ProbeGather.h"
 #include "RenderFixture.h"
 #include "StatAssert.h"
+#include "Vector.h"
 
 #include <algorithm>
 #include <cmath>
@@ -170,4 +173,190 @@ TEST_CASE("T4 MirrorDirectParity: the reflection carries the mirror's tint (mirr
 
     // And decisively distinct from the direct view's chromaticity.
     REQUIRE(rBtoR < 0.6 * dBtoR);
+}
+
+// ============================================================================
+// #63 — reflected gather footprint: ray-differential TIGHTENING (keep 2x cap)
+// ============================================================================
+//
+// THE BUG: the reflected gather disc was sized ONLY by the unfolded-path
+// perpendicular footprint (unfoldedPathLength·tan(halfAngle)) with up to a 2x
+// grazing inflation, with NO ray-differential tightening — unlike the DIRECT path,
+// which takes min(diffRadius, perpRadius). So reflected contact shadows washed out
+// and reflected noise smeared: the reflected disc was often far larger than the
+// adjacent-pixel reflected rays actually spaced on the surface.
+//
+// THE FIX (APPROVED): apply the same ray-differential tightening to the reflected
+// footprint — min against an adjacent-pixel reflected hit unfolded through the same
+// specular chain — and KEEP the existing 2x grazing inflation as an upper-bound
+// CEILING on the perpendicular term only.
+//
+// THE UNIT TEST (exact, deterministic): call the PRODUCTION testing::
+// reflectedFootprintRadius with and without an adjacent reflected hit and assert:
+//   (1) a CLOSE adjacent hit TIGHTENS the radius below the perpendicular footprint
+//       (the differential is the smaller estimate -> it wins the min);
+//   (2) a FAR adjacent hit does NOT enlarge the disc past the perpendicular ceiling
+//       (the min keeps it at the 2x-capped perpendicular -> the cap is still the
+//       upper bound, grazing surfaces never over-blur);
+//   (3) with NO adjacent hit the result is exactly the perpendicular footprint (the
+//       fallback is byte-for-byte the pre-fix behavior).
+// Pre-fix the function had no adjacent-hit parameter, so (1) is the regression the
+// fix introduces: the differential can now pull the reflected disc tighter than the
+// perpendicular estimate, matching the direct path.
+
+TEST_CASE("#63 reflected footprint: a close adjacent reflected hit tightens the gather disc",
+          "[MirrorDirectParity][ReflectedFootprint][T4]")
+{
+    // A reflected surface facing -z (toward the viewer), hit at the origin. The
+    // viewer looks straight on (cosView = 1), so the perpendicular footprint carries
+    // NO grazing inflation — perp == unfoldedPathLength·tan(halfAngle).
+    Hit hit;
+    hit.position = Vector{0.0, 0.0, 0.0};
+    hit.normal = Vector{0.0, 0.0, -1.0};
+    const Vector viewer{0.0, 0.0, -1.0};  // unit, toward the last specular vertex
+
+    const double halfAngle = 0.002;          // ~ a pixel half-angle in radians
+    const double pathLength = 1000.0;        // unfolded camera->reflected-hit distance
+    const double perp = pathLength * std::tan(halfAngle);
+
+    // No adjacent hit -> exactly the perpendicular footprint (fallback == pre-fix).
+    const double rNoAdj = ProbeGather::testing::reflectedFootprintRadius(
+        halfAngle, pathLength, viewer, hit, nullptr);
+    REQUIRE(rNoAdj == Catch::Approx(perp).epsilon(1e-9));
+
+    // (1) A CLOSE adjacent reflected hit (on-surface spacing 0.5·perp) gives a
+    // differential radius of 0.25·perp -> well below perp, so the min TIGHTENS the
+    // disc to the differential. This is the contact-shadow / noise-smear fix.
+    const Vector closeAdj = hit.position + Vector{0.5 * perp, 0.0, 0.0};
+    const double rClose = ProbeGather::testing::reflectedFootprintRadius(
+        halfAngle, pathLength, viewer, hit, &closeAdj);
+    REQUIRE(rClose == Catch::Approx(0.25 * perp).epsilon(1e-9));
+    REQUIRE(rClose < perp);  // the differential decisively tightened the disc
+
+    // (2) A FAR adjacent reflected hit (spacing 10·perp, differential 5·perp) must NOT
+    // enlarge the disc past the perpendicular CEILING — the min caps it at perp. The
+    // 2x grazing cap stays the upper bound; a diverging differential cannot over-blur.
+    const Vector farAdj = hit.position + Vector{10.0 * perp, 0.0, 0.0};
+    const double rFar = ProbeGather::testing::reflectedFootprintRadius(
+        halfAngle, pathLength, viewer, hit, &farAdj);
+    REQUIRE(rFar == Catch::Approx(perp).epsilon(1e-9));
+    REQUIRE(rFar <= rNoAdj);  // never larger than the perpendicular fallback
+
+    // (3) The 2x grazing CEILING is preserved on the perpendicular term: at a grazing
+    // reflected surface (cosView = 0.3 < 0.5) the perpendicular footprint is inflated
+    // by exactly 2x (max(0.5, cosView) = 0.5), and with no adjacent hit that capped
+    // value is returned (the cap is the ceiling, never the old 1/cosView ~ 3.3x).
+    Hit grazing;
+    grazing.position = Vector{0.0, 0.0, 0.0};
+    // Normal tilted so the unit viewer (-z) makes ~72.5deg with it (cosView ~ 0.3).
+    grazing.normal = Vector::normalized(Vector{0.954, 0.0, -0.3});
+    const double cosGraze = Vector::dot(Vector::normalized(viewer), grazing.normal);
+    REQUIRE(cosGraze < 0.5);  // confirm we are past the 2x cap knee
+    const double rGraze = ProbeGather::testing::reflectedFootprintRadius(
+        halfAngle, pathLength, viewer, grazing, nullptr);
+    REQUIRE(rGraze == Catch::Approx(perp / 0.5).epsilon(1e-9));  // exactly 2x, not 1/cos
+}
+
+// ----------------------------------------------------------------------------
+// #63 — rendered confirmation: the reflected feature is SHARPER (tighter blob)
+// ----------------------------------------------------------------------------
+//
+// Renders a Cornell box whose LEFT wall is a flat mirror, with a bright square
+// patch on the dark back wall seen DIRECTLY (center-right of frame) and REFLECTED
+// in the mirror (a grazing blob at the left edge). The reflected blob's
+// luminance-weighted SECOND MOMENT (its spatial spread in pixel^2 — the blob "size"
+// oracle from RenderFixture.h) measures its sharpness: an over-blurred reflected
+// footprint smears the blob, raising its second moment.
+//
+// PRE-FIX (no reflected ray-differential, perpendicular footprint only): the
+// reflected blob's second moment measured ~147. POST-FIX (differential tightening,
+// 2x cap kept as ceiling): ~105 — a ~28% tighter reflection, confirming the disc was
+// pulled in below the perpendicular estimate. The DIRECT blob's second moment is
+// UNCHANGED (~58, the direct path is untouched), which is the control: a global
+// brightness/exposure shift would move both, but only the reflected blob tightens.
+//
+// The assertion sits at 130, decisively between the pre-fix (147) and post-fix (105)
+// values: it FAILS pre-fix and PASSES post-fix. A second assertion pins the direct
+// blob unchanged (it must stay well below the reflected blob's pre-fix spread), so a
+// future regression that re-blurs reflections (or that "fixes" the test by blurring
+// the direct path to match) is caught. Single-thread deterministic for stability.
+
+namespace
+{
+std::string reflectedSharpnessScene()
+{
+    return R"JSON({
+  "$materials": {
+    "Mirror": { "$type": "Mirror", "$color": [0.95, 0.95, 0.95] },
+    "Dark": { "$type": "Diffuse", "$color": [0.02, 0.02, 0.02] },
+    "Bright": { "$type": "Diffuse", "$color": [0.9, 0.9, 0.9] }
+  },
+  "$workerConfiguration": { "$workerCount": 1, "$fetchSize": 50000, "$photonQueueSize": 30000000 },
+  "$renderConfiguration": {
+    "$width": 200, "$height": 160, "$photonsPerLight": 6000000,
+    "$bounceThreshold": 2, "$terminationThreshold": 0.01,
+    "$deterministic": true, "$seed": 9, "$bounceStoreCapacity": 40000000
+  },
+  "$scene": {
+    "Camera": { "$type": "Camera", "$verticalFieldOfView": 65.0,
+      "$position": [110.0, 150.0, -340.0],
+      "$rotation": { "$type": "PitchYawRollDegrees", "$value": [0.0, -16.0, 0.0] } },
+    "Light": { "$type": "AreaLight", "$shape": "Square", "$size": 140,
+      "$position": [-40, 298, 120],
+      "$rotation": { "$type": "PitchYawRollDegrees", "$value": [90, 0, 0] },
+      "$color": [1.0, 1.0, 1.0], "$luminousFlux": 260000000 },
+    "Box": {
+      "$type": "Object",
+      "LeftMirror": { "$type": "Quad", "$material": "Mirror",
+        "$origin": [-150, 0, 300], "$edgeU": [0, 300, 0], "$edgeV": [0, 0, -300] },
+      "Right": { "$type": "Quad", "$material": "Dark",
+        "$origin": [150, 0, -150], "$edgeU": [0, 300, 0], "$edgeV": [0, 0, 300] },
+      "Ceiling": { "$type": "Quad", "$material": "Dark",
+        "$origin": [-150, 300, 300], "$edgeU": [300, 0, 0], "$edgeV": [0, 0, -300] },
+      "Floor": { "$type": "Quad", "$material": "Dark",
+        "$origin": [-150, 0, -150], "$edgeU": [300, 0, 0], "$edgeV": [0, 0, 300] },
+      "BackWall": { "$type": "Quad", "$material": "Dark",
+        "$origin": [-150, 0, 300], "$edgeU": [300, 0, 0], "$edgeV": [0, 300, 0] },
+      "BackPatch": { "$type": "Quad", "$material": "Bright",
+        "$origin": [40, 110, 299], "$edgeU": [70, 0, 0], "$edgeV": [0, 70, 0] }
+    }
+  }
+})JSON";
+}
+}  // namespace
+
+TEST_CASE("#63 reflected footprint: the reflected feature is sharper than the pre-fix blur",
+          "[MirrorDirectParity][ReflectedFootprint][T4]")
+{
+    rt_test::RenderScene scene{reflectedSharpnessScene()};
+    const Buffer& buf = scene.buffer();
+    const size_t h = scene.height();
+    REQUIRE(scene.meanLuminance() > 0.0);
+
+    const size_t yLo = h * 30 / 100;
+    const size_t yHi = h * 70 / 100;
+
+    // Reflected blob: the grazing reflection at the LEFT edge of frame (the patch
+    // reflected in the left mirror). Direct blob: center-right (the patch seen
+    // directly). Column bands chosen from the rendered geometry.
+    const double reflectedSpread = rt_test::secondMoment(buf, 44, yLo, 62, yHi);
+    const double directSpread = rt_test::secondMoment(buf, 118, yLo, 140, yHi);
+
+    INFO("reflected second moment = " << reflectedSpread
+         << " | direct second moment = " << directSpread);
+
+    // Both blobs must actually be present (lit) so the spreads are meaningful.
+    REQUIRE(rt_test::centroid(buf, 44, yLo, 62, yHi).totalWeight > 0.0);
+    REQUIRE(rt_test::centroid(buf, 118, yLo, 140, yHi).totalWeight > 0.0);
+
+    // HEADLINE: the reflected blob is TIGHT — its spread is below 130, the threshold
+    // between the pre-fix perpendicular-only blur (~147) and the post-fix differential
+    // tightening (~105). Pre-fix this assertion fails; post-fix it passes.
+    REQUIRE(reflectedSpread < 130.0);
+
+    // CONTROL: the DIRECT blob's spread is unchanged by this fix (the direct path is
+    // untouched) and stays well below the reflected blob's PRE-FIX spread — so the
+    // tightening above is a real reflected-path change, not a global exposure shift,
+    // and a "fix" that blurred the direct path to match would trip this.
+    REQUIRE(directSpread < 90.0);
 }

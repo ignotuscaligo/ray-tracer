@@ -272,13 +272,25 @@ double pixelFootprintRadius(const Camera& camera,
                             double fallbackDistance,
                             float rayTime);
 
-// World-space footprint radius for a REFLECTED (specularly-extended) hit: the pixel
-// half-angle over the unfolded path length, with the foreshortening enlargement
-// capped at 2x (NOT inflated by 1/cos(view) — DESIGN §6f).
+// World-space footprint radius for a REFLECTED (specularly-extended) hit. Mirrors
+// the DIRECT path's ray-differential tightening (issue #63): the gather radius is the
+// MIN of
+//   (a) the adjacent-pixel ray-differential spacing — half the on-surface distance
+//       between THIS reflected hit and the adjacent pixel's reflected hit (unfolded
+//       through the SAME specular chain), if `adjacentReflectedHit` is non-null, and
+//   (b) the perpendicular constant-angle footprint = unfoldedPathLength·tan(halfAngle)
+//       with the grazing foreshortening enlargement kept as a 2x CEILING only
+//       (`/min(1, max(0.5, cosView))`; NOT inflated by 1/cos(view) — DESIGN §6f).
+// Without the differential a reflected contact shadow washed out and reflected noise
+// smeared, because the reflected disc was only ever the (often large) perpendicular
+// footprint. `adjacentReflectedHit` null (no comparable adjacent reflected hit, e.g.
+// the differential ray escaped the mirror) falls back to (b) alone. `viewer` is the
+// unit direction from the hit toward the last specular vertex (= the record's viewDir).
 double reflectedFootprintRadius(double pixelHalfAngle,
                                 double unfoldedPathLength,
                                 const Vector& viewer,
-                                const Hit& hit);
+                                const Hit& hit,
+                                const Vector* adjacentReflectedHit = nullptr);
 
 // Result of extending a camera ray through the delta chain to its first non-delta
 // (or emitter) hit. The camera-side specular trace (DESIGN §6b), exposed so the

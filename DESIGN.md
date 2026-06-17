@@ -400,6 +400,31 @@ than the direct view. The factor is capped at 2× (`max(0.5, cosView)`); brightn
 parity does NOT depend on it (the density estimate divides by the same area it
 gathers, so r trades sharpness for noise, not energy).
 
+**[INVARIANT] The reflected gather footprint applies the SAME ray-differential
+tightening as the direct path (issue #63).** The reflected disc is the MIN of (a) the
+adjacent-pixel ray-differential spacing — half the on-surface distance between this
+reflected hit and the adjacent pixel's reflected hit, unfolded through the SAME
+specular chain — and (b) the perpendicular footprint above (with its 2× grazing cap
+as the upper-bound CEILING only). Before this, the reflected disc was ONLY the
+perpendicular footprint (capped), with no differential — so reflected contact shadows
+washed out and reflected noise smeared, because the disc was often far larger than the
+adjacent reflected rays actually spaced on the surface (`reflectedFootprintRadius`,
+`src/ProbeGather.cpp`; the differential adjacent hit is computed in the probe pass via
+a second `extendAndRecord` of the adjacent pixel's primary ray, using a fresh local
+RNG so it never perturbs the main sampling sequence). The differential is taken ONLY
+for a DETERMINISTIC mirror chain — a stochastic dielectric (glass) chain would re-walk
+a different random Fresnel path, making the differential noise, so glass falls back to
+the perpendicular footprint. The 2× cap is preserved as the perpendicular term's
+ceiling, so a diverging differential at a grazing reflected surface still cannot
+over-blur. Pinned by `tests/test_MirrorDirectParity.cpp`
+(`[ReflectedFootprint]`): a unit test on the production `reflectedFootprintRadius`
+(a close adjacent hit tightens below perp; a far one stays capped at perp; no adjacent
+hit == the perpendicular fallback; the 2× ceiling is exactly 2×, not 1/cos), and a
+rendered test where the reflected blob's second moment is tighter than the pre-fix
+perpendicular-only blur while the direct blob is unchanged. **Do not "fix" this by**
+removing the reflected differential ("the perpendicular footprint is enough"); it
+re-blurs reflected contact shadows and noise.
+
 **[INVARIANT] No cos(θ_view) term in the gather.** The density estimate divides by
 the on-surface gather AREA only; the deposited photons already carry incoming
 geometry and the BRDF handles the view direction (the retired splat's `cosCamera`

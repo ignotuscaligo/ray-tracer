@@ -362,6 +362,50 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                     // toward the last specular vertex (= -finalDirection): the same
                     // viewer the old shade() evaluated the reflected BRDF toward.
                     const Vector reflectedView = -chain.finalDirection;
+
+                    // issue #63 — reflected ray-differential footprint. Unfold the
+                    // ADJACENT pixel's primary ray through the SAME specular chain and,
+                    // if it reaches the SAME reflected surface (same material, normal
+                    // agrees), use its hit position to tighten the gather disc exactly
+                    // like the direct path's differential. Only for a DETERMINISTIC
+                    // mirror chain: a stochastic dielectric (glass) chain would make the
+                    // adjacent re-walk a different random Fresnel path, so the
+                    // differential would be noise — skip it there and keep the
+                    // perpendicular (2x-capped) footprint. A fresh local RNG keeps the
+                    // adjacent walk from perturbing the main sampling sequence (so the
+                    // direct/glass paths stay bitwise-deterministic).
+                    Vector adjReflectedHit;
+                    bool haveAdjReflected = false;
+                    if (!stochasticDelta)
+                    {
+                        const size_t adjX = (coord.x + 1 < width) ? coord.x + 1
+                                            : (coord.x > 0)       ? coord.x - 1
+                                                                  : coord.x;
+                        if (adjX != coord.x)
+                        {
+                            const PixelCoords adjCoord{adjX, coord.y};
+                            const Ray adjRay = dofActive
+                                ? camera.generatePrimaryRayAt(adjCoord, sampleTime,
+                                                              animation, &generator)
+                                : camera.generatePrimaryRayAt(adjCoord, sampleTime,
+                                                              animation);
+                            RandomGenerator adjGenerator(0xC0FFEEu);
+                            const ExtendResult adjChain = extendAndRecord(
+                                objects, materials, animation, castBuffer,
+                                adjGenerator, adjRay, sampleTime, patches);
+                            // Same reflected surface: valid, same material index, and
+                            // normals agree (>= cos 60°) — so we measure spacing ON the
+                            // surface, not across a silhouette / different facet.
+                            if (adjChain.valid &&
+                                adjChain.hit.material == chain.hit.material &&
+                                Vector::dot(adjChain.hit.normal, chain.hit.normal) >= 0.5)
+                            {
+                                adjReflectedHit = adjChain.hit.position;
+                                haveAdjReflected = true;
+                            }
+                        }
+                    }
+
                     GatherPoint gp;
                     gp.pixel = coord;
                     gp.position = chain.hit.position;
@@ -372,7 +416,7 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                     gp.unfoldedPathLength = chain.unfoldedPathLength;
                     gp.footprintRadius = testing::reflectedFootprintRadius(
                         pixelHalfAngle, chain.unfoldedPathLength, reflectedView,
-                        chain.hit);
+                        chain.hit, haveAdjReflected ? &adjReflectedHit : nullptr);
                     gp.sampleTime = sampleTime;
                     gp.sampleWeight = 1.0f;  // filled below
                     result.points.push_back(gp);
@@ -740,22 +784,53 @@ double testing::pixelFootprintRadius(const Camera& camera,
 // parity does NOT depend on this (the density estimate divides by the same area it
 // gathers, so r trades sharpness for noise, not energy). `viewer` is the unit
 // direction from the hit toward the last specular vertex (= the record's viewDir).
+//
+// issue #63 — ray-differential TIGHTENING (matching the direct path's
+// min(diffRadius, perpRadius)): the perpendicular footprint above (even with the 2x
+// cap) is a constant-angle estimate that ignores how the adjacent pixel's reflected
+// ray actually lands on the surface. At a reflected contact shadow / a finely-varying
+// reflected feature it over-blurs (washes the contact darkening out, smears reflected
+// noise). When the caller supplies the adjacent pixel's reflected hit (the same
+// specular chain unfolded for pixel+1), take half the on-surface distance between the
+// two reflected hits as the differential radius and gather over the MIN of it and the
+// perpendicular footprint — exactly the direct path's rule. The 2x grazing inflation
+// stays as a CEILING on the perpendicular term only; the differential can tighten the
+// disc well below it where the reflected feature is sharp.
 double testing::reflectedFootprintRadius(double pixelHalfAngle,
                                          double unfoldedPathLength,
                                          const Vector& viewer,
-                                         const Hit& hit)
+                                         const Hit& hit,
+                                         const Vector* adjacentReflectedHit)
 {
     const double viewerMag = viewer.magnitude();
-    double footprint = unfoldedPathLength * std::tan(pixelHalfAngle);
+    // Perpendicular constant-angle footprint, with the grazing enlargement kept as a
+    // 2x CEILING (max(0.5, cosView)) — never the old 1/cos(view) blow-up.
+    double perpFootprint = unfoldedPathLength * std::tan(pixelHalfAngle);
     if (viewerMag > kSelfHitThreshold)
     {
         const double cosView = Vector::dot(viewer / viewerMag, hit.normal);
         if (cosView > 0.0)
         {
-            footprint /= std::min(1.0, std::max(0.5, cosView));
+            perpFootprint /= std::min(1.0, std::max(0.5, cosView));
         }
     }
-    return footprint;
+
+    // Ray-differential tightening: half the on-surface spacing between this reflected
+    // hit and the adjacent pixel's reflected hit (unfolded through the same chain).
+    if (adjacentReflectedHit != nullptr)
+    {
+        const double diffRadius =
+            0.5 * (*adjacentReflectedHit - hit.position).magnitude();
+        if (diffRadius > 0.0)
+        {
+            // Gather no larger than EITHER estimate — keeps reflected contact shadows
+            // and reflected detail sharp where the differential is small, while the 2x-
+            // capped perpendicular footprint remains the upper bound at a grazing
+            // reflected surface (where a diverging differential must NOT over-blur).
+            return std::min(diffRadius, perpFootprint);
+        }
+    }
+    return perpFootprint;
 }
 
 namespace
