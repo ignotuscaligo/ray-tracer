@@ -5,6 +5,7 @@
 #include "Color.h"
 #include "LambertianMaterial.h"
 #include "MaterialLibrary.h"
+#include "MirrorMaterial.h"
 #include "Object.h"
 #include "Photon.h"
 #include "PixelCoords.h"
@@ -205,17 +206,30 @@ TEST_CASE("splatToCamera: an occluded hit contributes nothing", "[SplatToCamera]
     REQUIRE(written.blue == 0.0f);
 }
 
-TEST_CASE("splatToCamera: a delta material deposits nothing", "[SplatToCamera]")
+TEST_CASE("splatToCamera: a real DELTA material deposits nothing (isDelta guard)",
+          "[SplatToCamera][T10][DeltaExclusion]")
 {
-    // Sanity: the splat early-returns for delta materials (mirror/glass own the
-    // gather path). Reuse the rig but pass a null material to exercise the guard;
-    // a Lambertian facing hit with photonsPerLight disabled also deposits nothing.
+    // The splat early-returns for delta materials (mirror/glass own the EXTENSION path
+    // at gather time, DESIGN §5/§6b). This pins the isDelta() GUARD specifically: a
+    // genuine MirrorMaterial with the splat fully ENABLED (photonsPerLight > 0) and a
+    // facing, unoccluded hit must still deposit zero. (Review gap: this case used to
+    // pass a Lambertian with photonsPerLight 0, which only exercised the on/off gate —
+    // reverting the isDelta() guard would NOT have been caught.)
     SplatRig rig = makeRig({}, Color{0.9f, 0.9f, 0.9f});
-    rig.worker->setPhotonsPerLight(0.0);  // splat disabled
+    rig.worker->setPhotonsPerLight(1.0);  // splat ENABLED — the guard is the only reason for 0
+    auto mirror = std::make_shared<MirrorMaterial>("mirror", Color{0.9f, 0.9f, 0.9f});
+    REQUIRE(mirror->isDelta());
 
     const PhotonHit ph = makeHit(Vector{0, 0, 10.0}, Vector{0, 0, -1}, Color{4.0f, 4.0f, 4.0f});
-    rig.worker->splatToCamera(ph, rig.material);
+    rig.worker->splatToCamera(ph, mirror);
 
     const Color written = rig.buffer->fetchColor(kCenter);
     REQUIRE(written.red == 0.0f);
+    REQUIRE(written.green == 0.0f);
+    REQUIRE(written.blue == 0.0f);
+
+    // Control: the SAME rig with a non-delta Lambertian DOES deposit (so the zero
+    // above is the isDelta guard, not a dead rig).
+    rig.worker->splatToCamera(ph, rig.material);
+    REQUIRE(rig.buffer->fetchColor(kCenter).red > 0.0f);
 }

@@ -55,6 +55,7 @@ std::atomic<size_t> g_bounceCulled{0};
 
 namespace WorkerDebug
 {
+double selfHitThreshold() { return ::selfHitThreshold; }
 size_t splatTotal() { return g_splatTotal.load(); }
 size_t splatRadiusClamped() { return g_splatRadiusClamped.load(); }
 size_t splatLuminanceClamped() { return g_splatLuminanceClamped.load(); }

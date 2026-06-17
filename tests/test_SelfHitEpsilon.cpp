@@ -3,6 +3,7 @@
 #include "Ray.h"
 #include "Sphere.h"
 #include "Vector.h"
+#include "Worker.h"
 
 #include <limits>
 
@@ -30,10 +31,11 @@
 
 namespace
 {
-// Mirror of Worker.cpp's selfHitThreshold. Kept in sync by intent: if the worker
-// constant changes, this expectation should change with it (and a self-hit at a
-// distance below it must be rejected).
-constexpr double kSelfHitThreshold = 1e-4;
+// The PRODUCTION self-hit threshold, read from the worker via WorkerDebug rather than
+// re-declared here. (Review gap: this file used to hard-code 1e-4, so reverting the
+// worker constant to DBL_EPSILON still passed. Reading the live value closes that —
+// the band-membership assertions below now reference the real constant.)
+const double kSelfHitThreshold = WorkerDebug::selfHitThreshold();
 } // namespace
 
 TEST_CASE("Grazing continuation off a sphere self-re-hits inside the acne band",

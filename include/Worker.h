@@ -219,6 +219,14 @@ private:
 // render completes.
 namespace WorkerDebug
 {
+// The worker's ABSOLUTE world-space self-hit threshold (DESIGN §2b): a spawned
+// continuation ray must not re-intersect the surface it was spawned on at a distance
+// below this floor. Exposed so a test asserts against the PRODUCTION constant rather
+// than a duplicated literal (test_SelfHitEpsilon's gap: it re-declared 1e-4, so
+// reverting the worker to DBL_EPSILON still passed). A reversion changes this value
+// and the live self-hit test fails.
+double selfHitThreshold();
+
 // Firefly-fix splat counters: total splat contributions vs those whose
 // footprint radius was floored to the minimum-radius (the would-be fireflies).
 size_t splatTotal();

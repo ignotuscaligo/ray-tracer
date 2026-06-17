@@ -44,6 +44,9 @@ target_sources(tests
         test_BSDFConsistency.cpp
         test_MirrorDirectParity.cpp
         test_Determinism.cpp
+        test_GatherRadianceUnit.cpp
+        test_SelfHitLive.cpp
+        test_ProbeDefaults.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
         test_Quad.cpp
