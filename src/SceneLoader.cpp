@@ -851,6 +851,12 @@ LoadedScene loadFromFile(const std::filesystem::path& scenePath, bool logToStdou
         setFromJsonIfPresent(settings.probeTimeSlices, renderConfiguration, "$probeTimeSlices", logToStdout);
         setFromJsonIfPresent(settings.cameraTimeSamples, renderConfiguration, "$cameraTimeSamples", logToStdout);
 
+        // Deterministic test mode: $seed plumbs a fixed RNG seed (replacing the
+        // random_device default); $deterministic forces the single-thread,
+        // single-gather-thread, bitwise-reproducible path (see RenderSettings).
+        setFromJsonIfPresent(settings.seed, renderConfiguration, "$seed", logToStdout);
+        setFromJsonIfPresent(settings.deterministic, renderConfiguration, "$deterministic", logToStdout);
+
         if (renderConfiguration.contains("$renderPath"))
         {
             scene.renderPath = resolvePath(renderConfiguration["$renderPath"].get<std::string>(), absoluteScenePath.parent_path());

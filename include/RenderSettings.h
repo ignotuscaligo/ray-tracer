@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 // Tunables for a render pass. These mirror the fields that main.cpp historically
 // read out of a scene JSON's $workerConfiguration / $renderConfiguration blocks.
@@ -161,4 +162,33 @@ struct RenderSettings
     // motion blur. Ignored when shutterTime == 0 (one fixed-time sample — the exact
     // static baseline). Higher = smoother blur at linear cost. Default 16.
     int cameraTimeSamples = 16;
+
+    // ===== Deterministic test mode (objective-test infrastructure) =====
+    //
+    // Production renders seed every RNG from std::random_device, so two runs of the
+    // same scene differ at the bit level and every integration test must use loose,
+    // statistically-justified tolerances. A test that needs BITWISE reproducibility
+    // (a reference-image backstop, a "same seed => same pixels" guarantee) cannot
+    // get it from the multi-threaded path: even with seeded per-worker RNGs the
+    // atomic-float buffer adds are non-associative, so thread interleaving perturbs
+    // the low bits.
+    //
+    // SINGLE-THREAD DETERMINISTIC MODE (owner's decision): when `deterministic` is
+    // true the renderer runs the photon pass on ONE worker with a SEEDED RNG
+    // (`seed`), runs the probe pass with a seeded RNG, and runs the gather
+    // single-threaded — so the whole frame is a single, fixed sequence of RNG draws
+    // and buffer adds, bitwise-reproducible across runs. This is NOT per-worker
+    // seeding (that was deliberately not chosen): bitwise determinism is achieved by
+    // the single worker, not by coordinating many seeded workers. Multi-thread runs
+    // (`deterministic` false) are unchanged — they still seed from random_device
+    // unless `seed` is set, in which case the workers seed from `seed + workerIndex`
+    // for a reproducible-but-still-threaded run (no bitwise guarantee).
+    //
+    // `seed` is the base RNG seed. When `deterministic` is false AND `seed` is left
+    // at the unset sentinel (kUnseeded) the RNG falls back to random_device (the
+    // production default). Any explicit `$seed` value (including 0) plumbs a fixed
+    // seed.
+    static constexpr std::uint32_t kUnseeded = 0xFFFFFFFFu;
+    std::uint32_t seed = kUnseeded;
+    bool deterministic = false;
 };

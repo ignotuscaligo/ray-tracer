@@ -80,6 +80,25 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
 {
     const RenderSettings& settings = scene.settings;
 
+    // ===== Deterministic test mode (see RenderSettings) =====
+    //
+    // When `deterministic` is set, the photon pass runs on ONE worker and the gather
+    // runs single-threaded, so the whole frame is a single fixed RNG-draw + buffer-add
+    // sequence -> bitwise-reproducible run to run (the owner's single-thread decision;
+    // NOT per-worker seeding). `effectiveWorkerCount` collapses to 1 in that mode and
+    // is the configured count otherwise. `seedActive`/`baseSeed` carry the fixed seed;
+    // in deterministic mode a seed is always fixed (defaulting to 0 if none was given),
+    // so the mode is reproducible even without an explicit $seed.
+    const bool deterministic = settings.deterministic;
+    const size_t effectiveWorkerCount = deterministic ? 1 : settings.workerCount;
+    const bool seedActive = deterministic || (settings.seed != RenderSettings::kUnseeded);
+    const std::uint32_t baseSeed =
+        (settings.seed != RenderSettings::kUnseeded) ? settings.seed : 0u;
+    // Probe-pass RNG seed: a fixed value in deterministic/seeded mode (offset from the
+    // base so it doesn't share the photon worker's exact sequence), else -1 (random).
+    const long long probeSeed =
+        seedActive ? static_cast<long long>(baseSeed) + 0x9E3779B9LL : -1;
+
     // Wave 6: the shared photon pass starts here. Time it so the per-camera gather
     // cost (Milestone 2) can be reported separately from the one-time lighting solve.
     const std::chrono::time_point photonPassStart = std::chrono::system_clock::now();
@@ -332,7 +351,8 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                 static_cast<float>(settings.frameTime),
                 static_cast<float>(settings.shutterTime),
                 settings.cameraTimeSamples,
-                settings.probeSubSample);
+                settings.probeSubSample,
+                probeSeed);
             // Union the probe POSITIONS for the shared keep-test index; aggregate the
             // diagnostic counters; keep the full records per-camera for its gather.
             probePositions.reserve(probePositions.size() + camProbes.points.size());
@@ -372,7 +392,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         WorkerDebug::resetBounceCounters();
     }
 
-    std::vector<std::shared_ptr<Worker>> workers{settings.workerCount};
+    std::vector<std::shared_ptr<Worker>> workers{effectiveWorkerCount};
 
     size_t workerIndex = 0;
     for (auto& worker : workers)
@@ -384,6 +404,15 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         worker->materialLibrary = scene.materialLibrary;
         worker->lightQueue = lightQueue;
         worker->animationQuery = animationQuery;
+        // Deterministic / seeded mode: give each worker a fixed seed. In the
+        // single-thread deterministic mode there is exactly one worker, so this is a
+        // single reproducible draw sequence (bitwise determinism). In a seeded-but-
+        // threaded run each worker gets baseSeed + index (reproducible per-worker, no
+        // bitwise guarantee across the non-associative atomic buffer adds).
+        if (seedActive)
+        {
+            worker->setSeed(baseSeed + static_cast<std::uint32_t>(workerIndex));
+        }
         worker->setBounceThreshold(settings.bounceThreshold);
         worker->setTerminationThreshold(settings.terminationThreshold);
         worker->setPhotonsPerLight(static_cast<double>(settings.photonsPerLight));
@@ -403,7 +432,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         ++workerIndex;
     }
 
-    for (size_t i = 0; i < settings.workerCount; ++i)
+    for (size_t i = 0; i < effectiveWorkerCount; ++i)
     {
         workers[i]->start();
     }
@@ -521,7 +550,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         }
     }
 
-    for (size_t i = 0; i < settings.workerCount; ++i)
+    for (size_t i = 0; i < effectiveWorkerCount; ++i)
     {
         workers[i]->stop();
     }
@@ -673,7 +702,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                     camRecords,
                     *bounceStore,
                     *scene.materialLibrary,
-                    settings.workerCount,
+                    effectiveWorkerCount,
                     probeGatherMinRadius,
                     *imageBuffer,
                     static_cast<float>(settings.shutterTime));
@@ -695,7 +724,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                     *scene.materialLibrary,
                     animationQuery.get(),
                     static_cast<double>(settings.photonsPerLight),
-                    settings.workerCount,
+                    effectiveWorkerCount,
                     *imageBuffer);
             }
             // Emissive gather: make light fixtures camera-visible at their true
@@ -710,7 +739,7 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
                     scene.objects,
                     cam,
                     animationQuery.get(),
-                    settings.workerCount,
+                    effectiveWorkerCount,
                     *imageBuffer);
             }
         }

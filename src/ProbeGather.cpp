@@ -211,23 +211,11 @@ ExtendResult extendAndRecord(const std::vector<std::shared_ptr<Object>>& objects
 
 }  // namespace
 
-// Forward declarations of the gather-geometry helpers defined with the gather (they
-// size the footprint a record carries; reused unchanged from the direct/reflected
-// footprint logic).
-namespace
-{
-double pixelFootprintRadius(const Camera& camera,
-                            const AnimationQuery* animation,
-                            double pixelHalfAngle,
-                            const PixelCoords& coord,
-                            const Hit& hit,
-                            double fallbackDistance,
-                            float rayTime);
-double reflectedFootprintRadius(double pixelHalfAngle,
-                                double unfoldedPathLength,
-                                const Vector& viewer,
-                                const Hit& hit);
-}  // namespace
+// The gather-geometry helpers (pixelFootprintRadius / reflectedFootprintRadius) and
+// the density estimate (gatherRadiance) are declared in ProbeGather.h's `testing`
+// namespace and DEFINED below (hoisted out of the anonymous namespace so unit tests
+// call the production code directly). The probe pass + gather call sites use those
+// same definitions — no behavior change.
 
 ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& objects,
                                 const Camera& camera,
@@ -236,7 +224,8 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                                 float frameTime,
                                 float shutterTime,
                                 int cameraSamples,
-                                size_t subSample)
+                                size_t subSample,
+                                long long seed)
 {
     ProbeResult result;
     const size_t width = camera.width();
@@ -269,7 +258,11 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
     // cross-thread merging. For very large frames this could be parallelized like
     // the gather; not needed at current resolutions.
     std::vector<Hit> castBuffer;
-    RandomGenerator generator;
+    // Deterministic test mode seeds the camera-side sampling RNG; production passes
+    // seed < 0 -> the random_device-seeded default ctor.
+    RandomGenerator generator = (seed >= 0)
+        ? RandomGenerator(static_cast<std::uint32_t>(seed))
+        : RandomGenerator();
 
     for (size_t y = 0; y < height; y += stride)
     {
@@ -334,7 +327,7 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                     gp.materialIndex = firstSurface->material;
                     gp.specularThroughput = Color{1.0f, 1.0f, 1.0f};
                     gp.unfoldedPathLength = firstSurface->distance;
-                    gp.footprintRadius = pixelFootprintRadius(
+                    gp.footprintRadius = testing::pixelFootprintRadius(
                         camera, animation, pixelHalfAngle, coord, *firstSurface,
                         firstSurface->distance, sampleTime);
                     gp.sampleTime = sampleTime;
@@ -377,7 +370,7 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                     gp.materialIndex = chain.hit.material;
                     gp.specularThroughput = chain.throughput;
                     gp.unfoldedPathLength = chain.unfoldedPathLength;
-                    gp.footprintRadius = reflectedFootprintRadius(
+                    gp.footprintRadius = testing::reflectedFootprintRadius(
                         pixelHalfAngle, chain.unfoldedPathLength, reflectedView,
                         chain.hit);
                     gp.sampleTime = sampleTime;
@@ -509,6 +502,8 @@ struct Context
     float timeHalfWindow;  // gather temporal window half-width (shutter-sized)
 };
 
+}  // namespace
+
 // Density estimate of the radiance leaving a non-delta surface point toward the
 // viewer: sum BRDF(incoming, wo) * power over the raw bounces within the gather
 // footprint, divided by the gather AREA. The photon-mapping density estimate
@@ -535,13 +530,16 @@ struct Context
 // automatically. The disc is gathered with a radius covering the pixel footprint (so
 // adjacent discs tile the surface, losing no energy) and the normalization divides
 // by that SAME area, so the estimate stays unbiased.
-Color gatherRadiance(const Context& ctx,
-                     const Hit& hit,
-                     const std::shared_ptr<Material>& material,
-                     const Vector& wo,
-                     double footprintRadius,
-                     float rayTime,
-                     size_t& outDeposits)
+Color testing::gatherRadiance(const BounceStore& store,
+                              const MaterialLibrary& materials,
+                              const Hit& hit,
+                              const std::shared_ptr<Material>& material,
+                              const Vector& wo,
+                              double footprintRadius,
+                              double minGatherRadius,
+                              float rayTime,
+                              float timeHalfWindow,
+                              std::size_t& outDeposits)
 {
     outDeposits = 0;
 
@@ -549,19 +547,20 @@ Color gatherRadiance(const Context& ctx,
     // BRDF (f = 1) over its own radiance deposits, reproducing its view-independent
     // surface radiance L = M/pi. Any other hit uses its material's BRDF.
     const bool isEmitter = (hit.material == kEmitterMaterial);
+    (void)materials;  // BRDF arrives via `material`; kept in the signature for symmetry.
 
     if (Vector::dot(wo, hit.normal) <= 0.0)
     {
         return Color{0.0f, 0.0f, 0.0f};  // surface faces away from the viewer
     }
 
-    const double r = Utility::flooredSplatRadius(footprintRadius, ctx.minGatherRadius);
+    const double r = Utility::flooredSplatRadius(footprintRadius, minGatherRadius);
     if (r <= 0.0)
     {
         return Color{0.0f, 0.0f, 0.0f};
     }
 
-    const std::vector<std::size_t> neighbors = ctx.store.radiusSearch(hit.position, r);
+    const std::vector<std::size_t> neighbors = store.radiusSearch(hit.position, r);
     if (neighbors.empty())
     {
         return Color{0.0f, 0.0f, 0.0f};
@@ -592,7 +591,7 @@ Color gatherRadiance(const Context& ctx,
     size_t kept = 0;
     for (const std::size_t index : neighbors)
     {
-        const RawBounce& record = ctx.store[index];
+        const RawBounce& record = store[index];
 
         // TEMPORAL WINDOW. Keep a deposit only if its photon time is within the
         // gather's half-window of this camera ray's time. A timeless deposit (an
@@ -603,7 +602,7 @@ Color gatherRadiance(const Context& ctx,
         // outside the spatial radius — this is the backstop for two poses that
         // overlap spatially within the gather radius.
         if (record.time != kEmitterTimeless &&
-            std::abs(record.time - rayTime) > ctx.timeHalfWindow)
+            std::abs(record.time - rayTime) > timeHalfWindow)
         {
             continue;
         }
@@ -675,13 +674,13 @@ Color gatherRadiance(const Context& ctx,
 // needs is a camera ray, available there), then stored on the record so the gather
 // does no geometry. The only ray here is the adjacent-pixel CAMERA ray; it is
 // intersected analytically against the hit's tangent PLANE, not cast into the scene.
-double pixelFootprintRadius(const Camera& camera,
-                            const AnimationQuery* animation,
-                            double pixelHalfAngle,
-                            const PixelCoords& coord,
-                            const Hit& hit,
-                            double fallbackDistance,
-                            float rayTime)
+double testing::pixelFootprintRadius(const Camera& camera,
+                                     const AnimationQuery* animation,
+                                     double pixelHalfAngle,
+                                     const PixelCoords& coord,
+                                     const Hit& hit,
+                                     double fallbackDistance,
+                                     float rayTime)
 {
     const Vector n = hit.normal;
     // Adjacent pixel: +1 in x where possible, else -1 (frame's right edge). When the
@@ -741,10 +740,10 @@ double pixelFootprintRadius(const Camera& camera,
 // parity does NOT depend on this (the density estimate divides by the same area it
 // gathers, so r trades sharpness for noise, not energy). `viewer` is the unit
 // direction from the hit toward the last specular vertex (= the record's viewDir).
-double reflectedFootprintRadius(double pixelHalfAngle,
-                                double unfoldedPathLength,
-                                const Vector& viewer,
-                                const Hit& hit)
+double testing::reflectedFootprintRadius(double pixelHalfAngle,
+                                         double unfoldedPathLength,
+                                         const Vector& viewer,
+                                         const Hit& hit)
 {
     const double viewerMag = viewer.magnitude();
     double footprint = unfoldedPathLength * std::tan(pixelHalfAngle);
@@ -758,6 +757,9 @@ double reflectedFootprintRadius(double pixelHalfAngle,
     }
     return footprint;
 }
+
+namespace
+{
 
 // PURE COLLECTION over a contiguous slice of this camera's GatherPoint records. For
 // each record: rebuild its Hit, fetch its material, density-estimate the retained
@@ -791,9 +793,10 @@ void gatherRecords(const std::vector<GatherPoint>& points,
             continue;
         }
 
-        size_t deposits = 0;
-        const Color radiance = gatherRadiance(ctx, hit, material, gp.viewDir,
-                                              gp.footprintRadius, gp.sampleTime, deposits);
+        std::size_t deposits = 0;
+        const Color radiance = testing::gatherRadiance(
+            ctx.store, ctx.materials, hit, material, gp.viewDir, gp.footprintRadius,
+            ctx.minGatherRadius, gp.sampleTime, ctx.timeHalfWindow, deposits);
         const Color contribution =
             gp.specularThroughput * radiance * gp.sampleWeight;
 
@@ -894,6 +897,31 @@ Result run(const std::shared_ptr<Camera>& camera,
         result.depositsAccum += s.depositsAccum;
     }
     return result;
+}
+
+testing::ExtendResult testing::extendToNonDelta(
+    const std::vector<std::shared_ptr<Object>>& objects,
+    const MaterialLibrary& materials,
+    const AnimationQuery* animation,
+    RandomGenerator& generator,
+    const Ray& ray,
+    float time)
+{
+    const std::vector<EmitterPatch> patches = collectEmitterPatches(objects);
+    std::vector<Hit> castBuffer;
+    // The anon-namespace ExtendResult lives at ProbeGather scope; qualify it so it is
+    // not shadowed by testing::ExtendResult inside this testing-namespace function.
+    const ProbeGather::ExtendResult chain = extendAndRecord(
+        objects, materials, animation, castBuffer, generator, ray, time, patches);
+
+    testing::ExtendResult out;
+    out.hit = chain.hit;
+    out.throughput = chain.throughput;
+    out.unfoldedPathLength = chain.unfoldedPathLength;
+    out.finalDirection = chain.finalDirection;
+    out.traversedDelta = chain.traversedDelta;
+    out.valid = chain.valid;
+    return out;
 }
 
 }  // namespace ProbeGather

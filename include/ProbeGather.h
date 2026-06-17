@@ -5,13 +5,18 @@
 #include "Buffer.h"
 #include "Camera.h"
 #include "Color.h"
+#include "Hit.h"
+#include "Material.h"
 #include "MaterialLibrary.h"
 #include "Object.h"
 #include "PixelCoords.h"
 #include "ProbeIndex.h"
+#include "RandomGenerator.h"
+#include "Ray.h"
 #include "Vector.h"
 
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -135,6 +140,10 @@ struct ProbeResult
 // CAMERA MOTION BLUR (§9e): every ray is generated at its sample time, so an animated
 // camera's probe rays (and thus the keep-test coverage and the gather) originate from
 // its pose at each sample time.
+// `seed`: when non-negative, the probe pass's RNG (DOF/shutter/Fresnel sampling) is
+// SEEDED to this value for reproducibility; -1 (default) seeds from random_device
+// (the production path). Used by the single-thread deterministic test mode so the
+// camera-side sampling is a fixed draw sequence.
 ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& objects,
                                 const Camera& camera,
                                 const MaterialLibrary& materials,
@@ -142,7 +151,8 @@ ProbeResult collectGatherPoints(const std::vector<std::shared_ptr<Object>>& obje
                                 float frameTime = 0.0f,
                                 float shutterTime = 0.0f,
                                 int cameraSamples = 1,
-                                size_t subSample = 1);
+                                size_t subSample = 1,
+                                long long seed = -1);
 
 // ===== Emitter deposits (fixture visibility, unified) =====
 
@@ -214,5 +224,84 @@ Result run(const std::shared_ptr<Camera>& camera,
            double minGatherRadius,
            Buffer& buffer,
            float shutterTime = 0.0f);
+
+// ===== Test-visible gather internals =====
+//
+// These are the gather's load-bearing geometric / radiometric primitives, hoisted
+// out of the .cpp's anonymous namespace into a declared API so unit tests can call
+// the PRODUCTION code directly instead of re-implementing the math in the test body
+// (the self-consistent-but-wrong trap DESIGN warns about). Precedent:
+// Worker::splatToCamera was made public "purely for this test." No behavior change —
+// the renderer's own call sites use these same definitions.
+namespace testing
+{
+
+// Sentinel material index for an emitter (AreaLight) hit: gathered with an identity
+// BRDF (f = 1). Mirrors the .cpp's internal constant so tests can build emitter Hits.
+constexpr std::size_t kEmitterMaterial = std::numeric_limits<std::size_t>::max();
+
+// THE density estimate the unified gather performs per record:
+//   L_o = (4/pi) * (1 / (pi r^2)) * Σ_p f(wi_p, wo) Φ_p
+// over the raw bounces within `footprintRadius` of `hit.position`, with NO
+// cos(theta_view) term, NORMAL-AGREEMENT leak suppression, a loose tangent-band
+// backstop, and the temporal window (|deposit.time - rayTime| <= timeHalfWindow; a
+// timeless emitter deposit always passes). `r` is floored at `minGatherRadius`.
+// `wo` is the unit direction from the hit toward the viewer. Returns the radiance
+// leaving the surface toward `wo`; `outDeposits` reports how many deposits were kept.
+// `store` must have had buildIndex() called. This is the exact function the
+// per-record gather loop invokes.
+Color gatherRadiance(const BounceStore& store,
+                     const MaterialLibrary& materials,
+                     const Hit& hit,
+                     const std::shared_ptr<Material>& material,
+                     const Vector& wo,
+                     double footprintRadius,
+                     double minGatherRadius,
+                     float rayTime,
+                     float timeHalfWindow,
+                     std::size_t& outDeposits);
+
+// World-space surface footprint radius of a DIRECT (depth-0) pixel hit, via a ray
+// differential (the min of the adjacent-pixel on-surface spacing and the
+// perpendicular constant-angle footprint). Distortion- and foreshortening-correct.
+double pixelFootprintRadius(const Camera& camera,
+                            const AnimationQuery* animation,
+                            double pixelHalfAngle,
+                            const PixelCoords& coord,
+                            const Hit& hit,
+                            double fallbackDistance,
+                            float rayTime);
+
+// World-space footprint radius for a REFLECTED (specularly-extended) hit: the pixel
+// half-angle over the unfolded path length, with the foreshortening enlargement
+// capped at 2x (NOT inflated by 1/cos(view) — DESIGN §6f).
+double reflectedFootprintRadius(double pixelHalfAngle,
+                                double unfoldedPathLength,
+                                const Vector& viewer,
+                                const Hit& hit);
+
+// Result of extending a camera ray through the delta chain to its first non-delta
+// (or emitter) hit. The camera-side specular trace (DESIGN §6b), exposed so the
+// mirror-parity test can verify the unfolded path length + accumulated throughput.
+struct ExtendResult
+{
+    Hit hit;                              // first non-delta / emitter surface reached
+    Color throughput{1.0f, 1.0f, 1.0f};  // product of delta BSDF weights to reach it
+    double unfoldedPathLength = 0.0;      // total camera-to-hit distance along the chain
+    Vector finalDirection{};             // last segment direction; wo = -finalDirection
+    bool traversedDelta = false;         // passed through at least one delta surface
+    bool valid = false;                  // false => escaped or exceeded the depth cap
+};
+
+// Extend `ray` through delta surfaces to the first non-delta hit, accumulating the
+// specular throughput and unfolded path length. The same trace the probe pass runs.
+ExtendResult extendToNonDelta(const std::vector<std::shared_ptr<Object>>& objects,
+                              const MaterialLibrary& materials,
+                              const AnimationQuery* animation,
+                              RandomGenerator& generator,
+                              const Ray& ray,
+                              float time);
+
+}  // namespace testing
 
 }  // namespace ProbeGather

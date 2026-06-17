@@ -91,9 +91,21 @@ BSDFSample LambertianMaterial::sampleMode(const Vector& /*incident*/, const Unit
     return s;
 }
 
-Color LambertianMaterial::evaluate(const Vector& /*wi*/, const Vector& wo, const UnitVector& normal) const
+Color LambertianMaterial::evaluate(const Vector& wi, const Vector& wo, const UnitVector& normal) const
 {
-    if (Vector::dot(wo, normal) <= 0.0)
+    // A reflective Lambertian BRDF is non-zero only when BOTH directions lie in the
+    // upper (outward-normal) hemisphere — light arriving from above is reflected
+    // back above. Earlier this checked only `wo`, ignoring `wi`, so
+    //   f(wi_below, wo_above) = albedo/pi  while  f(wo_above, wi_below) = 0
+    // — a Helmholtz-RECIPROCITY violation at the hemisphere boundary (a physical
+    // BRDF must satisfy f(wi,wo) == f(wo,wi)). Requiring both wi·n > 0 and wo·n > 0
+    // makes evaluate symmetric in wi/wo and zero whenever either direction is below
+    // the surface. This only changes the degenerate boundary case: in a correct
+    // render the gather's wi (= -incoming photon dir) and wo (toward the viewer) are
+    // both in the upper hemisphere on a directly-lit diffuse surface, so well-formed
+    // deposits are unaffected; it just stops a below-surface deposit/view direction
+    // from leaking albedo/pi. (DESIGN §5: the BSDF contract is the place this lives.)
+    if (Vector::dot(wi, normal) <= 0.0 || Vector::dot(wo, normal) <= 0.0)
     {
         return Color{0.0f, 0.0f, 0.0f};
     }

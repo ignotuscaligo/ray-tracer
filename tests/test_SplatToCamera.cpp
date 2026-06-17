@@ -44,12 +44,20 @@ std::shared_ptr<Camera> makeAxisCamera()
 }
 
 // A non-delta photon hit at `position` with surface `normal`, carrying `power`. The
-// photon's incoming travel direction is set to -normal (a head-on arrival) so the
-// BRDF query is well-conditioned; for a Lambertian the BRDF is direction-independent.
+// photon's incoming travel direction is -normal (a head-on arrival travelling INTO
+// the surface), so wi = -rayDir = +normal sits in the upper hemisphere — the
+// physically-correct arrival for a front-lit surface. (Previously this set the ray
+// direction to +normal, i.e. a photon travelling OUT of the surface, which left wi
+// BELOW the surface; the splat only worked because LambertianMaterial::evaluate
+// ignored wi. With evaluate now enforcing Helmholtz reciprocity at the hemisphere
+// boundary — f = 0 when wi or wo is below the surface — the arrival direction must
+// be physical for the splat to deposit. For a Lambertian the BRDF is otherwise
+// direction-independent within the hemisphere, so this does not change the expected
+// magnitude.)
 PhotonHit makeHit(const Vector& position, const Vector& normal, const Color& power)
 {
     PhotonHit ph;
-    ph.photon.ray = Ray{position - normal, normal};  // arrives travelling +normal-ish
+    ph.photon.ray = Ray{position + normal, -normal};  // arrives travelling INTO surface
     ph.photon.color = power;
     ph.photon.bounces = 0;
     ph.photon.time = 0.0f;

@@ -61,6 +61,14 @@ public:
 
     void setBounceThreshold(size_t bounceThreshold);
 
+    // Deterministic test mode: reseed this worker's RNG to a FIXED value, replacing
+    // the random_device-seeded default. Must be called before start() (the RNG is
+    // consumed on the worker thread). With workerCount == 1 (the single-thread
+    // deterministic mode) this makes the entire photon pass a fixed draw sequence,
+    // so a render is bitwise-reproducible run to run. Production renders never call
+    // this (the default ctor seeds from random_device).
+    void setSeed(std::uint32_t seed);
+
     // Single-photon DECAY termination cutoff, as an ABSOLUTE magnitude floor in
     // photon-magnitude (flux / light-count) units. A photon is terminated (the
     // random walk stops) once its current magnitude (max colour channel) falls

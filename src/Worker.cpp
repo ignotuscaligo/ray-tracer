@@ -182,6 +182,14 @@ void Worker::setBounceThreshold(size_t bounceThreshold)
     m_bounceThreshold = bounceThreshold;
 }
 
+void Worker::setSeed(std::uint32_t seed)
+{
+    // Replace the random_device-seeded generator with a fixed-seed one. Done here
+    // (not via the worker index alone) so the single-thread deterministic mode is a
+    // single, reproducible RNG sequence for the whole photon pass.
+    m_generator = RandomGenerator(seed);
+}
+
 void Worker::setTerminationThreshold(double terminationThreshold)
 {
     // Wrap into Flux at the config boundary (the scene file carries a bare
