@@ -47,6 +47,9 @@ target_sources(tests
         test_GatherRadianceUnit.cpp
         test_SelfHitLive.cpp
         test_ProbeDefaults.cpp
+        test_CountEquivalence.cpp
+        test_VarianceConvergence.cpp
+        test_InverseSquareFalloff.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
         test_Quad.cpp
