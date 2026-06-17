@@ -40,6 +40,8 @@ target_sources(tests
         test_Bounds.cpp
         test_Property.cpp
         test_FurnaceLedger.cpp
+        test_CameraRoundTrip.cpp
+        test_BSDFConsistency.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
         test_Quad.cpp

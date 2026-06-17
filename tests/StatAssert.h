@@ -109,24 +109,28 @@ inline double chiSquareStatistic(const std::vector<double>& observed,
 // Catch2 assert macros wrapping the CI helpers, with an INFO trail that prints the
 // measured value, the expected value, and the interval half-width on failure.
 
-#define REQUIRE_MEAN_CI(measured, expected, standardError, z)                      \
-    do                                                                             \
-    {                                                                              \
-        const ::rt_test::CIResult _ci =                                            \
-            ::rt_test::meanWithinCI((measured), (expected), (standardError), (z)); \
-        INFO("REQUIRE_MEAN_CI: measured=" << _ci.measured                          \
-             << " expected=" << _ci.expected << " +/- " << _ci.halfWidth           \
-             << " (z=" << _ci.z << ", SE=" << (standardError) << ")");             \
-        REQUIRE(_ci.pass);                                                         \
+// NOTE: the macro parameters are given distinctive names (suffixed) so they do not
+// collide with the CIResult member names (`measured`, `expected`, ...) that the
+// INFO trail accesses via `_ci.member` — a macro parameter literally named
+// `measured` would also rewrite `_ci.measured`.
+#define REQUIRE_MEAN_CI(measured_, expected_, standardError_, z_)                     \
+    do                                                                               \
+    {                                                                                \
+        const ::rt_test::CIResult _ci = ::rt_test::meanWithinCI(                     \
+            (measured_), (expected_), (standardError_), (z_));                       \
+        INFO("REQUIRE_MEAN_CI: measured=" << _ci.measured                            \
+             << " expected=" << _ci.expected << " +/- " << _ci.halfWidth             \
+             << " (z=" << _ci.z << ", SE=" << (standardError_) << ")");              \
+        REQUIRE(_ci.pass);                                                           \
     } while (false)
 
-#define REQUIRE_PROPORTION_CI(successes, trials, expectedP, z)                      \
-    do                                                                             \
-    {                                                                              \
-        const ::rt_test::CIResult _ci =                                            \
-            ::rt_test::proportionWithinCI((successes), (trials), (expectedP), (z));\
-        INFO("REQUIRE_PROPORTION_CI: measured=" << _ci.measured                    \
-             << " expected=" << _ci.expected << " +/- " << _ci.halfWidth           \
-             << " (z=" << _ci.z << ", n=" << (trials) << ")");                     \
-        REQUIRE(_ci.pass);                                                         \
+#define REQUIRE_PROPORTION_CI(successes_, trials_, expectedP_, z_)                    \
+    do                                                                               \
+    {                                                                                \
+        const ::rt_test::CIResult _ci = ::rt_test::proportionWithinCI(               \
+            (successes_), (trials_), (expectedP_), (z_));                            \
+        INFO("REQUIRE_PROPORTION_CI: measured=" << _ci.measured                      \
+             << " expected=" << _ci.expected << " +/- " << _ci.halfWidth             \
+             << " (z=" << _ci.z << ", n=" << (trials_) << ")");                      \
+        REQUIRE(_ci.pass);                                                           \
     } while (false)
