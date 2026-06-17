@@ -42,6 +42,8 @@ target_sources(tests
         test_FurnaceLedger.cpp
         test_CameraRoundTrip.cpp
         test_BSDFConsistency.cpp
+        test_MirrorDirectParity.cpp
+        test_Determinism.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
         test_Quad.cpp
