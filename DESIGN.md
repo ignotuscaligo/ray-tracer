@@ -475,12 +475,25 @@ the gather's `firstHit` (intersected as an `EmitterPatch`; an emitter Hit carrie
 `kEmitterMaterial` sentinel and is gathered with an IDENTITY BRDF, f = 1).
 
 - `surfaceRadiance = luminousFlux / area / π` for a Lambertian emitter (`src/AreaLight.cpp`).
-- `ProbeGather::depositEmitters` (called once after the photon pass, before `buildIndex`)
-  tiles each patch with deposits and gives each `power = radiance · π · area / (4·N)`. With
-  the identity BRDF and the `4/π` splat-parity factor, the density estimate over the patch
-  reproduces `L = M/π` regardless of `N` or footprint `r` (uniform areal density ρ gathers to
-  `L = (4/π)ρ`, so total patch power = `radiance·π·area/4`). The panel reads at the SAME
-  brightness as the legacy `EmissiveGather` wrote (verified: identical saturated panel).
+- `ProbeGather::depositEmitters` tiles each patch with deposits and gives each
+  `power = radiance · π · area / (4·N)`. With the identity BRDF and the `4/π`
+  splat-parity factor, the density estimate over the patch reproduces `L = M/π`
+  regardless of `N` or footprint `r` (uniform areal density ρ gathers to `L = (4/π)ρ`,
+  so total patch power = `radiance·π·area/4`). The panel reads at the SAME brightness as
+  the legacy `EmissiveGather` wrote (verified: identical saturated panel).
+- **[INVARIANT] Emitter deposits are appended to the `BounceStore` BEFORE the photon
+  pass — they RESERVE their slots first (issue #62).** The store drops every append
+  past its capacity ceiling (`BounceStore::append` fetch_add; `slot >= capacity` ⇒
+  dropped). When `depositEmitters` ran AFTER the photon pass (the old order), a scene
+  whose photons filled the store to capacity dropped EVERY emitter deposit, blacking out
+  the fixture at high photon counts. Depositing emitters first guarantees the fixture's
+  own radiance is always stored; the photon pass then competes only for the REMAINING
+  slots. `bounceStore->buildIndex` still runs once after the photon pass drains, indexing
+  the full populated prefix (emitter + photon deposits). Pinned by
+  `tests/test_BounceStoreEmitterOverflow.cpp` (a tiny `$bounceStoreCapacity` forces a
+  deterministic photon-pass overflow; the emitter panel stays lit and matches the
+  no-overflow baseline). **Do not "fix" this by** moving the emitter deposit back after
+  the photon pass.
 - Deposits pass the same probe keep-test as every other bounce, so an off-camera fixture
   costs nothing.
 

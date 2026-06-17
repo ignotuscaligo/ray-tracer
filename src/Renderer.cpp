@@ -390,6 +390,32 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         bounceStore = std::make_shared<BounceStore>(capacity);
 
         WorkerDebug::resetBounceCounters();
+
+        // Issue #62 — deposit emitter contributions FIRST, BEFORE the photon pass.
+        // The BounceStore drops every append past its capacity ceiling (lock-free
+        // fetch_add; slot >= capacity => dropped, BounceStore.cpp). Emitter deposits
+        // used to be appended AFTER the photon pass, so on a scene whose photons fill
+        // the store to capacity, EVERY emitter deposit was dropped and the fixture
+        // rendered BLACK at high photon counts. Reserving the emitter slots up front
+        // (before any photon can claim a slot) guarantees the fixture's own surface
+        // radiance is always stored; the photon pass then competes only for the
+        // REMAINING slots. The deposits are keyed off the same probe keep-test and the
+        // same per-deposit power as before — only the ORDER (and thus which records
+        // survive an overflow) changes. buildIndex still runs once after the photon
+        // pass drains, indexing the full populated prefix (emitter + photon deposits).
+        if (probeIndex && bounceStore)
+        {
+            double emitterGatherCell = cellSize;
+            if (sceneDepthFootprint > 0.0)
+            {
+                emitterGatherCell = sceneDepthFootprint;
+            }
+            const double depositSpacing = std::max(emitterGatherCell * 0.5, 1e-6);
+            const ProbeGather::EmitterDepositResult emit =
+                ProbeGather::depositEmitters(scene.objects, *probeIndex,
+                                             depositSpacing, *bounceStore);
+            result.emitterDepositsKept = emit.kept;
+        }
     }
 
     std::vector<std::shared_ptr<Worker>> workers{effectiveWorkerCount};
@@ -608,22 +634,10 @@ RenderResult renderFrame(const LoadedScene& scene, ProgressCallback progress,
         }
         (void)primaryCam;
 
-        // Unified fixture visibility: deposit each area light's own surface
-        // radiance as raw bounces on its surface (kept-near-probe like every other
-        // bounce), so the probe gather renders the lit fixture exactly like any
-        // other surface — visible directly AND in mirrors — with no special-case
-        // pass. Done BEFORE buildIndex so the deposits enter the spatial index.
-        // Spacing is tied to the gather footprint so several deposits land in each
-        // gather disc.
-        if (probeIndex)
-        {
-            const double depositSpacing = std::max(gatherCell * 0.5, 1e-6);
-            const ProbeGather::EmitterDepositResult emit =
-                ProbeGather::depositEmitters(scene.objects, *probeIndex,
-                                             depositSpacing, *bounceStore);
-            result.emitterDepositsKept = emit.kept;
-        }
-
+        // Emitter fixture deposits were appended to the store BEFORE the photon pass
+        // (see the depositEmitters call at store allocation, issue #62) so an overflow
+        // can never drop them. buildIndex here indexes the full populated prefix
+        // (emitter deposits + photon-pass deposits) once the photon pass drains.
         bounceStore->buildIndex(gatherCell);
         result.bounceStore = bounceStore;
 
