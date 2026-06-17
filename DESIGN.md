@@ -307,6 +307,15 @@ as a new renderer special case. This is the PBRT structure and the deliberate de
 unify under BSDF *before* adding glass (architecture-vision "the material-special-case
 concern → commit to a BSDF interface").
 
+**[INVARIANT] `evaluate` is HELMHOLTZ-RECIPROCAL: `f(wi, wo) == f(wo, wi)`, and zero
+when EITHER direction is below the surface.** `LambertianMaterial::evaluate` returns
+`albedo/pi` only when both `wi·n > 0` and `wo·n > 0`, else 0. It previously checked only
+`wo`, so `f(wi_below, wo_above) = albedo/pi` while `f(wo_above, wi_below) = 0` — a
+reciprocity violation at the hemisphere boundary. This only affects the degenerate
+boundary case: a correctly-formed deposit/view has both directions above the surface
+(the gather's `wi = -incoming` points out of the surface for any real photon arrival),
+so correct renders are unchanged. Pinned by `tests/test_BSDFConsistency.cpp` (`[T2]`).
+
 **[DETAIL]** `Material::sampleMode`, `daughterPhotonCount`, and the eager `bounce` wrapper
 are inert in the live path (test-only / interface-requirement). They are dead-code-removal
 candidates; their presence is not a behavioral statement.
@@ -640,6 +649,52 @@ ASan/UBSan and TSan clean, warnings-as-errors (`-Werror`, gated by `RAYTRACER_WE
 `-fsanitize=` in `CMakeLists.txt:29,52,62`), and clang-tidy (`.clang-tidy`). A behavior
 change that is only "green on the default build" has not cleared the bar — the sanitizers and
 the invariants in this doc are part of the gate.
+
+### 8a. Deterministic test mode — SINGLE-THREAD seeded render — [INVARIANT]
+
+**[INVARIANT] `$deterministic true` makes a render BITWISE-reproducible by running the
+photon pass on ONE worker with a seeded RNG and the gather single-threaded.** Two
+`Renderer::renderFrame` calls on the same `$deterministic` scene produce byte-for-byte
+identical float buffers (and identical deposit ledgers). This is the deliberate design:
+bitwise determinism is achieved by the SINGLE worker, **not** by per-worker seeding.
+Multi-threaded runs cannot be bitwise-reproducible because the atomic-`float` buffer
+adds (`Buffer::addColor`) are non-associative — thread interleaving perturbs the low
+bits — so the deterministic mode collapses `workerCount` to 1 and runs the probe pass +
+gather serially (`RenderSettings::deterministic`, `Renderer::renderFrame`'s
+`effectiveWorkerCount`).
+
+- `$seed` (`RenderSettings::seed`, sentinel `kUnseeded`) plumbs a FIXED base RNG seed.
+  In deterministic mode the worker, the probe pass, and the gather are all seeded from
+  it. In a NON-deterministic but seeded run, workers seed from `seed + workerIndex`
+  (reproducible per-worker, **no** bitwise guarantee — the non-associative adds remain).
+  An absent `$seed` leaves the production `std::random_device` seeding.
+- `Worker::setSeed` replaces the `random_device`-seeded `m_generator`;
+  `ProbeGather::collectGatherPoints` takes an optional `seed` for the camera-side
+  sampling RNG.
+- **Do not "fix" this by** seeding per worker and expecting bitwise reproducibility in a
+  multi-thread run — the float-add order is not fixed there. The single-worker mode is
+  the only bitwise-deterministic configuration.
+
+Pinned by `tests/test_Determinism.cpp` (bitwise equality across two renders;
+1-vs-8-worker mean-luminance equivalence with NO bitwise claim).
+
+### 8b. Test-visibility hooks — declared APIs, not re-implemented math
+
+Several internals are exposed to the objective test suite (`docs/test-plan-fable-2026-06.md`)
+so tests assert against PRODUCTION code rather than a re-derivation (the
+self-consistent-but-wrong trap §intro warns about). Widening their visibility is **not** a
+behavior statement; the renderer's own call sites use the same definitions.
+
+- **`ProbeGather::testing`** (`include/ProbeGather.h`): `gatherRadiance` (the per-record
+  density estimate), `pixelFootprintRadius` / `reflectedFootprintRadius`, and
+  `extendToNonDelta` (the camera-side specular trace), hoisted out of the `.cpp`
+  anonymous namespace. Precedent: `Worker::splatToCamera` was made public for tests.
+- **`WorkerDebug::selfHitThreshold()`** (`include/Worker.h`): the production `1e-4`
+  self-hit floor (§2b), so a test pins the real constant instead of a duplicated literal
+  (a reversion toward `DBL_EPSILON` then fails `tests/test_SelfHitLive.cpp`).
+- **`RenderResult::buffer` / `CameraRender::buffer`** are the PRE-tonemap float radiance
+  buffers; tests assert on radiance, not the 16-bit tonemapped pixels (which quantize
+  away small regressions). `tests/RenderFixture.h` wraps the load→render→stat path.
 
 ---
 
