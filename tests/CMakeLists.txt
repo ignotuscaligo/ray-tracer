@@ -39,6 +39,7 @@ target_sources(tests
     PRIVATE
         test_Bounds.cpp
         test_Property.cpp
+        test_FurnaceLedger.cpp
         test_ShutterBrightness.cpp
         test_Sphere.cpp
         test_Quad.cpp
