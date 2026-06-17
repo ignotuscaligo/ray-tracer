@@ -466,6 +466,26 @@ walk. The legacy `MirrorGather` keeps its own walk on the deprecated `$probeGath
 path.) Recursion depth is capped at `kMaxSpecularDepth = 8` — a hall of mirrors returns black
 at the cap, it does not infinite-loop.
 
+**[INVARIANT] The spawned continuation ray's ORIGIN is offset along the surface
+NORMAL, not along the outgoing direction (issue #64).** `extendAndRecord` spawns each
+reflected/refracted continuation at `hit.position + offsetNormal · kReflectionEpsilon`,
+where `offsetNormal` is the surface normal oriented to the side the ray TRAVELS toward
+(`sign(dot(nextDir, normal))` — `+normal` for a mirror reflection, `−normal` for a glass
+refraction that transmits to the far side). It was previously offset along the OUTGOING
+DIRECTION (`hit.position + nextDir · eps`); at a corner-grazing angle the outgoing
+direction is nearly parallel to the surface, so that offset barely cleared the plane and,
+on the far side of a corner, stepped the origin BELOW the surface — the next cast escaped
+into hidden space and the pixel rendered pure black (RGB(0,0,0) dots along mirror
+corner/triangulation-diagonal lines; exposed in MirrorDirectTest where camera height ==
+corner offset). The normal is perpendicular to the plane, so an eps step along it ALWAYS
+clears the surface regardless of how grazing the outgoing direction is, preserving
+self-hit robustness without new acne (`eps` is the same `kReflectionEpsilon = 1e-3`, the
+photon side's self-hit floor order — §2b). Pinned by
+`tests/test_MirrorCornerBlackDots.cpp` (a closed mirror Cornell box; a diffuse-wall
+control proves the black is reflection-caused, and the corner pure-black count drops
+below the pre-fix level). **Do not "fix" this by** offsetting along the outgoing
+direction again ("the ray should start along where it's going").
+
 ### 6c. Glass camera path — STOCHASTIC Fresnel, single ray — looks like a bug, it is not
 
 **[INVARIANT] At a dielectric camera hit, take ONE stochastic Fresnel pick via

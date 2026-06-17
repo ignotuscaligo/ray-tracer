@@ -204,7 +204,26 @@ ExtendResult extendAndRecord(const std::vector<std::shared_ptr<Object>>& objects
         }
         out.throughput = out.throughput * s.weight;
         const Vector nextDir = Vector::normalized(s.direction);
-        ray = Ray{hit->position + nextDir * kReflectionEpsilon, nextDir};
+        // issue #64 — offset the spawned ray's origin along the surface NORMAL, not
+        // along the outgoing DIRECTION. Offsetting by nextDir*eps fails at a
+        // corner-grazing angle: when the reflected/refracted direction is nearly
+        // parallel to the surface (a corner diagonal where camera height == corner
+        // offset), nextDir*eps barely separates the origin from the plane and, on the
+        // far side of a corner, can step it BELOW the surface — the next cast then
+        // escapes into hidden space and the pixel renders pure black (RGB(0,0,0) dots
+        // on mirror floor/ceiling corner lines). The surface normal is perpendicular
+        // to the plane, so an eps step along it ALWAYS clears the surface regardless of
+        // how grazing nextDir is. Orient the normal to the side the ray TRAVELS toward
+        // (sign(dot(nextDir,normal))): a mirror reflection leaves on the +normal side
+        // (MirrorMaterial guarantees dot(dir,normal) > 0), while a glass refraction
+        // TRANSMITS to the -normal side — orienting by the travel direction keeps the
+        // origin above the surface it is leaving in BOTH cases, preserving self-hit
+        // robustness without adding acne (eps is the same kReflectionEpsilon as before,
+        // = the photon side's selfHitThreshold order — DESIGN §2b).
+        const double nDotDir = Vector::dot(nextDir, hit->normal);
+        const Vector offsetNormal =
+            (nDotDir >= 0.0) ? hit->normal : (hit->normal * -1.0);
+        ray = Ray{hit->position + offsetNormal * kReflectionEpsilon, nextDir};
     }
     return out;  // exceeded specular depth: invalid (hall of mirrors -> black)
 }

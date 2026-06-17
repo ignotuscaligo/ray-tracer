@@ -64,6 +64,7 @@ target_sources(tests
         test_DensityGrid.cpp
         test_BounceStore.cpp
         test_BounceStoreEmitterOverflow.cpp
+        test_MirrorCornerBlackDots.cpp
         test_SplatRadiusFloor.cpp
         test_AreaLight.cpp
         test_EmissiveGather.cpp
