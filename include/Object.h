@@ -27,6 +27,11 @@ public:
 
 private:
     std::string m_name;
-    std::shared_ptr<Object> m_parent;
+    // Back-pointer to the parent is a weak_ptr to break the parent<->child
+    // ownership cycle: the parent owns its children via m_children (shared_ptr),
+    // so if the child also held a shared_ptr to the parent the refcounts would
+    // never reach zero and the whole subtree would leak (caught by LSan on the
+    // Linux CI; Apple ASan ships no LeakSanitizer so it stayed hidden locally).
+    std::weak_ptr<Object> m_parent;
     std::vector<std::shared_ptr<Object>> m_children;
 };

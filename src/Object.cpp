@@ -20,9 +20,9 @@ std::string Object::name() const
 
 Vector Object::position() const
 {
-    if (m_parent)
+    if (auto parent = m_parent.lock())
     {
-        return m_parent->position() + (m_parent->rotation() * transform.position);
+        return parent->position() + (parent->rotation() * transform.position);
     }
     else
     {
@@ -32,9 +32,9 @@ Vector Object::position() const
 
 Quaternion Object::rotation() const
 {
-    if (m_parent)
+    if (auto parent = m_parent.lock())
     {
-        return m_parent->rotation() * transform.rotation;
+        return parent->rotation() * transform.rotation;
     }
     else
     {
@@ -62,12 +62,12 @@ std::shared_ptr<Object> Object::getChild(const std::string& name) const
 
 void Object::setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> parent)
 {
-    if (child->m_parent == parent)
+    if (child->m_parent.lock() == parent)
     {
         return;
     }
 
-    if (child->m_parent)
+    if (child->m_parent.lock())
     {
         auto it = std::find(std::begin(parent->m_children), std::end(parent->m_children), child);
 
@@ -76,7 +76,7 @@ void Object::setParent(std::shared_ptr<Object> child, std::shared_ptr<Object> pa
             parent->m_children.erase(it);
         }
 
-        child->m_parent = nullptr;
+        child->m_parent.reset();
     }
 
     if (parent)
